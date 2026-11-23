@@ -33,3 +33,13 @@ DSG-02의 `bfbd69b`를 PR #3으로 `develop`, PR #4로 `main`에 반영했다. �
 - 모델 및 고정 Docker 명령 어댑터를 서로 다른 서브에이전트에 위임했다. 지휘자가 CLI, 실측, Git을 담당했다. 보조 워크트리 생성·회수·잔여는 모두 0개다.
 - `DSG_TEST_DOCKER_CONTEXT=dockerguard-test sh scripts/test-rust.sh`에서 Rust 테스트 34개, Python/Rust 보호 회귀 대조, 이미 기동된 격리 Docker 엔진 읽기 전용 조회를 통과했다. 컨테이너 7개, 이미지 ID 5개, 볼륨 0개, 중복 후보 0묶음. Docker 이미지 목록 6행은 같은 ID의 태그를 포함했고 고유 ID는 5개였다. Docker 데몬 시작과 자원 변경은 0회다.
 - 다음은 DSG-04다. [실행 계획](draft/IMPLEMENTATION-PLAN.md#단계별-산출물과-통과-기준)의 관리형 실행·lease·Compose 재사용을 구현한다. 격리 엔진에서 전후 개수와 자원 건강 상태를 확인하고 실제 정리 활성화는 DSG-05에 둔다.
+
+DSG-03의 `4bc8890`을 PR #5로 `develop`, PR #6으로 `main`에 반영했다. 로컬·원격 여섯 참조와 15개의 파일 diff가 모두 일치했다.
+
+## 2026-11-23 · DSG-04 관리형 실행과 재사용
+
+- 브랜치 `feature/20261123-managed-execution`, 기준 `cee771c`. Phase 3·WBS 2.2/3.1/3.2 중 `exec`, Cargo 시험 경로, SQLite v2 lease, Compose 재사용 재확인을 구현했다. OS·Provider 확대는 각 후속 범위에서 검증한다.
+- `cargo fmt --manifest-path rust-scaffold/Cargo.toml --all -- --check`와 `DSG_TEST_DOCKER_CONTEXT=dockerguard-test DSG_TEST_COMPOSE_FIXTURE=1 sh scripts/test-rust.sh` 통과. macOS Rust 테스트 46개, Python/Rust parity, 실제 Cargo fixture 검사, 타임아웃 뒤 동일 프로젝트의 실행 재획득 확인.
+- 격리 엔진에서 fixture 1개를 임시 실행했다. 동일한 건강한 컨테이너를 두 번 반환했고, 설정 해시가 바뀐 요청은 거절했다. 재사용으로 늘어난 컨테이너 0개. 라벨로 만든 fixture 1개만 회수해 잔여 0개를 확인했다. Docker 데몬은 새로 시작하지 않았다.
+- 슬롯·실행기·재사용 검증은 소유 경로를 분리해 위임했다. 보조 워크트리 생성·회수·잔여 모두 0개다. Linux·Windows 런타임과 그룹 이탈 프로세스는 미검증이다.
+- 다음은 DSG-05다. 계획 승인과 경로 재검증을 등록부에 연결하고 승인된 재생성 산출물만 대상으로 종료·Git 완료 정리 경로를 검증한다.

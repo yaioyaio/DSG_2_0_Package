@@ -37,6 +37,9 @@ with tempfile.TemporaryDirectory(prefix='dsg-rust-test-') as fixture:
     executable = target / 'debug' / ('dsg.exe' if os.name == 'nt' else 'dsg')
     subprocess.run(['python3', '../scripts/check-foundation-parity.py', str(executable)], timeout=25, check=True)
     docker_context = os.environ.get('DSG_TEST_DOCKER_CONTEXT')
+    compose_fixture = os.environ.get('DSG_TEST_COMPOSE_FIXTURE') == '1'
+    if compose_fixture and docker_context not in {'dsg-test', 'dockerguard-test'}:
+        raise SystemExit('Compose fixture requires a registered isolated test context.')
     if docker_context:
         if docker_context not in {'dsg-test', 'dockerguard-test'}:
             raise SystemExit('Real inventory smoke requires a registered isolated test context.')
@@ -55,4 +58,8 @@ with tempfile.TemporaryDirectory(prefix='dsg-rust-test-') as fixture:
         assert inventory['context'] == docker_context and inventory['engine_id']
         print('Isolated Docker inventory:', ', '.join(f'{key}={len(inventory[key])}'
               for key in ('containers', 'images', 'volumes', 'duplicates')))
+    invocation = ['python3', '../scripts/check-managed-execution.py', str(executable)]
+    if compose_fixture:
+        invocation.append(docker_context)
+    subprocess.run(invocation, timeout=70, check=True)
 PY

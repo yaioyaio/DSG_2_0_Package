@@ -3,8 +3,8 @@
   "created": "2026-11-19",
   "validation": {
     "python_tests": "14 passed",
-    "docker_runtime": "macOS: isolated engine read-only inventory passed",
-    "rust_compiler": "macOS: 34 tests and Python/Rust GC parity passed",
+    "docker_runtime": "macOS: isolated inventory and two managed reuse requests passed",
+    "rust_compiler": "macOS: 46 tests, Python parity, managed Cargo, timeout and Compose isolation passed",
     "html_parse": "passed"
   },
   "files": [
@@ -45,8 +45,8 @@
     },
     {
       "path": "docs/API_SPEC.md",
-      "sha256": "00891f69f2179384ec214d738e002fe5133b9dad292fd0ee1b649a481a02ae2a",
-      "bytes": 3491
+      "sha256": "a9871a365dd38e0434e7d657cde2f9cbcb9092607a88ac7eed92f620e5dee12c",
+      "bytes": 4709
     },
     {
       "path": "docs/ARCHITECTURE.md",
@@ -60,8 +60,8 @@
     },
     {
       "path": "docs/OPERATIONS.md",
-      "sha256": "171e2a586048d0e15287d2ae1ea0b74b0541351023222ce184314e87e4c1352e",
-      "bytes": 1389
+      "sha256": "61d196976f96d4ad65965786e4a59cef26c35b5099b3847a06e5e0e27f0a79e0",
+      "bytes": 2254
     },
     {
       "path": "docs/PLAN.md",
@@ -70,8 +70,8 @@
     },
     {
       "path": "docs/POC_SCOPE.md",
-      "sha256": "a16521bc28f8b67064f57fec4fbb3d49df98647aa261ea7aafcc5fd5298116ea",
-      "bytes": 1185
+      "sha256": "7024e0cd044c08adf0f93a186642e65f83e26d4108a1303f72b3bc77a5f394c7",
+      "bytes": 1201
     },
     {
       "path": "docs/PRD.md",
@@ -105,8 +105,8 @@
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "8c300ed1b6211b8b3b306668faa2e253d5042e7c7256f955c8122799f4f48a0d",
-      "bytes": 2246
+      "sha256": "88580725160481f19695f301d11834e212f9a825a56349f51ca513d5a85f4249",
+      "bytes": 2834
     },
     {
       "path": "docs/WBS.md",
@@ -165,23 +165,28 @@
     },
     {
       "path": "rust-scaffold/Cargo.lock",
-      "sha256": "ab06fc439a06c2565f1bad8584ac32618fd2dd1a0efe8eed40c55d7374c0cc43",
-      "bytes": 17387
+      "sha256": "970cb3459329d33fd6795774152861924a0e0256cb59a558a09ea750a0cf5cb0",
+      "bytes": 18989
     },
     {
       "path": "rust-scaffold/Cargo.toml",
-      "sha256": "84e66e4439da32dfe1f2fe620066be8544283f00dde82559cc14c58a4a6daa4e",
-      "bytes": 410
+      "sha256": "c08996b712be92e1a69af608ec8c16d085d5bc6abde4d70bf639804630b438c8",
+      "bytes": 466
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/Cargo.toml",
-      "sha256": "0f8fab7461160ef58574ca24adb9dd2cf9e9e9072f277dfb4b5ed1f4420aac83",
-      "bytes": 298
+      "sha256": "ecd2ae7c55cdc069f235eb81cea0f121c304804a9e082c9a6b9ffabc10873d3a",
+      "bytes": 321
+    },
+    {
+      "path": "rust-scaffold/crates/dsg-cli/src/execution.rs",
+      "sha256": "80e491bb82f9012dd8446102fe07a3b8250c7cd9fdcb955763cec6b9c5c0a4e1",
+      "bytes": 8626
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/src/main.rs",
-      "sha256": "b74b62ca9b82a0fd3a5d6500c177f6b8292f9ee7653780147fdddbff5bb48772",
-      "bytes": 13775
+      "sha256": "3a127eb1449adfb51e19af77ae2b779d5f093128cbd9bd0004bf3960cf43238a",
+      "bytes": 14669
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/tests/cli.rs",
@@ -210,8 +215,8 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/lib.rs",
-      "sha256": "ea633e84670a2098105bfbcc6b26f11616fb1b26faf1840cefadd89fb86bdb62",
-      "bytes": 5428
+      "sha256": "fe055ef440ebd0af1634fd7cbce076b520ded6f522c57696351f4c0a0de21ce3",
+      "bytes": 5459
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/policy.rs",
@@ -220,8 +225,18 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/registry.rs",
-      "sha256": "0e8640a6d74d6f97c5f39f5b63fda1ff62a06c275d1603cb0ee411f26ce50fbc",
-      "bytes": 24887
+      "sha256": "cd7692bbd718d769d92aa563c2f6d46b8ce1626f559f755e96435c1a41f61df4",
+      "bytes": 44711
+    },
+    {
+      "path": "rust-scaffold/crates/dsg-core/src/reuse.rs",
+      "sha256": "3adb99dd0470535255e895c0f411c7ea0ce92191767b4a8dbe2af1ebc1057c6e",
+      "bytes": 7626
+    },
+    {
+      "path": "rust-scaffold/crates/dsg-core/src/runner.rs",
+      "sha256": "9166d03879d1835d67822c968fbe9dd51954f90ccefcababa597ce8d2b69f687",
+      "bytes": 16095
     },
     {
       "path": "scripts/check-foundation-parity.py",
@@ -229,9 +244,14 @@
       "bytes": 2283
     },
     {
+      "path": "scripts/check-managed-execution.py",
+      "sha256": "cb84188031ade8cf7934a3b947a52897354dc5559d68fc3bb4583d59007ef037",
+      "bytes": 6757
+    },
+    {
       "path": "scripts/test-rust.sh",
-      "sha256": "ab93267bad930a9a66d4e3d72a744ffe5ac4b9fd4301121f28c67998aa3d68c0",
-      "bytes": 2705
+      "sha256": "618889e0e340e91cb2606c8fca50c7dd7ca3c69be63f947822712a579ae2d22d",
+      "bytes": 3157
     },
     {
       "path": "scripts/test.sh",

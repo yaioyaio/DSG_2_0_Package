@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
 
+mod execution;
+
 #[derive(Parser)]
 #[command(
     name = "dsg",
@@ -56,6 +58,20 @@ enum Command {
         context: String,
         #[arg(long, default_value_t = 32, value_parser = clap::value_parser!(u16).range(1..=64))]
         max_resources: u16,
+    },
+    /// 디스크 정책으로 확인한 명령을 시간 제한과 lease 안에서 실행합니다.
+    Exec {
+        #[arg(long, default_value_t = 60, value_parser = clap::value_parser!(u16).range(1..=120))]
+        timeout: u16,
+        #[arg(required = true, num_args = 1.., trailing_var_arg = true, allow_hyphen_values = true)]
+        command: Vec<String>,
+    },
+    /// 기대 구성과 일치하는 실행 중 Compose 컨테이너를 확인합니다.
+    DockerReuse {
+        #[arg(long)]
+        context: String,
+        #[arg(long)]
+        expectation_json: String,
     },
 }
 
@@ -285,6 +301,13 @@ fn run(cli: &Cli) -> Result<Output, CliError> {
                 exit,
             })
         }
+        Command::Exec { timeout, command } => {
+            execution::exec(cli, &root, &settings, *timeout, command)
+        }
+        Command::DockerReuse {
+            context,
+            expectation_json,
+        } => execution::reuse(cli, &root, &settings, context, expectation_json),
     }
 }
 
