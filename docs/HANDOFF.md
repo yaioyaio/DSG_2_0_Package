@@ -108,6 +108,8 @@ DSG-08의 `f6397b2`를 PR #15로 `develop`, PR #16으로 `main`에 반영했다.
 
 ### Parallels Windows ARM64 실측과 서명 검증
 
+이번 검증 범위는 macOS 호스트와 기존 Parallels Windows ARM64 게스트에서 실행 가능한 작업이다. 개발 브랜치 병합의 근거는 이 범위에서 통과한 검증이다. 플랫폼별 공식 배포 자격과 검증 현황은 릴리스 문서에서 관리한다. [플랫폼별 검증 현황](RELEASE.md)
+
 - 기존 Parallels Windows 11 ARM64 게스트를 재개했다. 공식 ARM64 임베디드 Python과 릴리스 후보를 해시 확인 후 임시 폴더로 옮겼다. 동일 입력 재생성, 설치·진단·실행·업그레이드·제거, 동시 설치 충돌, 파일 변조·링크·대체 스트림 거절 및 잠긴 파일의 제거 재시도를 통과했다. 설치한 ARM64 CLI의 대시보드 HTTP 테스트도 통과했다. 패키지 검증용 임시 파일을 회수했다.
 - Windows SDK 경로에 SignTool이 있다. 이 게스트의 Docker 명령과 표준 로컬 엔진 파이프는 확인되지 않았다. ARM Windows용 Docker Desktop은 WSL 2가 필요하며, Parallels는 Apple Silicon의 Windows ARM 게스트에서 해당 중첩 가상화를 지원하지 않는다고 명시한다. [Parallels 제한](https://kb.parallels.com/en/129497) · [Docker 요구사항](https://docs.docker.com/desktop/setup/install/windows-install/)
 - 실제 SCM 실측에서 허용 계정의 파이프 연결이 속성 읽기 권한 누락으로 실패했다. 허용 SID에 `FILE_READ_ATTRIBUTES`만 추가한 `0.1.0-rc.2`에서 LocalService의 제한 조회, NetworkService의 연결 거부, 원본 파이프 직접 연결 거부, 정상 종료·강제 종료 뒤 재시작 및 임시 서비스·작업 회수를 확인했다. 상류는 합성 파이프를 사용했다. ARM64·x64 후보 아카이브와 SHA-256 파일을 `dist/`에 보존했다. [Windows 파이프 권한](OPERATIONS.md#docker-조회-브로커) · [Windows 접근 권한 기준](https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipe-security-and-access-rights)
