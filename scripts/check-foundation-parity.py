@@ -1,4 +1,4 @@
-"""Check both CLIs on the same small, synthetic project tree."""
+"""Check CLI parity, policy validation and logical sizes on synthetic projects."""
 
 import json
 import os
@@ -47,6 +47,28 @@ def main(executable):
         for relative, contents in inputs.items():
             assert (project / relative).read_text(encoding='utf8') == contents
         print('Python/Rust GC parity: protected trees preserved, expected candidate and byte count match.')
+
+        for invalid in (
+            {'project_budget_gb': 'not-a-number'},
+            {'unknown_fixture_field': True},
+        ):
+            (project / '.dsg.json').write_text(json.dumps(invalid), encoding='utf8')
+            failed = subprocess.run(rust_cli + ['doctor'], cwd=base, capture_output=True, text=True, timeout=8)
+            assert failed.returncode == 2 and failed.stdout == ''
+            assert json.loads(failed.stderr)['error']['code'] == 'CONFIG_INVALID'
+
+        sparse_project = base / 'sparse-project'
+        build = sparse_project / 'build'
+        build.mkdir(parents=True)
+        sparse = build / 'fixture.bin'
+        logical_bytes = 5 * (1 << 30)
+        with sparse.open('xb') as output:
+            output.truncate(logical_bytes)
+        assert sparse.stat().st_blocks * 512 < (1 << 20)
+        report = observe([str(executable), '--root', str(sparse_project), '--json', 'scan'], base)
+        scan = report['result']['scan']
+        assert scan['complete'] and scan['total_bytes'] == logical_bytes
+        print('Rust Foundation: invalid policies rejected and sparse logical size measured.')
 
 
 if __name__ == '__main__':

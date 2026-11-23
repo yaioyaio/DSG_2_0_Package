@@ -204,7 +204,7 @@ dependencies = [
 
 [[package]]
 name = "dsg-cli"
-version = "0.1.0"
+version = "0.1.1-rc.1"
 dependencies = [
  "clap",
  "ctrlc",
@@ -221,7 +221,7 @@ dependencies = [
 
 [[package]]
 name = "dsg-core"
-version = "0.1.0"
+version = "0.1.1-rc.1"
 dependencies = [
  "fs2",
  "libc",

@@ -45,6 +45,51 @@ pub fn run_with_target(
     cargo_target: Option<&Path>,
     notify: impl FnMut(RunEvent) -> io::Result<()>,
 ) -> io::Result<RunResult> {
+    run_configured(
+        root,
+        argv,
+        timeout,
+        quiet,
+        cancelled,
+        RunSettings {
+            cargo_target,
+            ..RunSettings::default()
+        },
+        notify,
+    )
+}
+
+#[derive(Default)]
+pub struct RunSettings<'a> {
+    pub cargo_target: Option<&'a Path>,
+    pub env: &'a [(&'a str, &'a str)],
+    pub file_limit: FileDescriptorLimit,
+}
+
+#[derive(Clone, Copy, Default)]
+pub enum FileDescriptorLimit {
+    #[default]
+    Standard,
+    Gradle,
+}
+
+impl FileDescriptorLimit {
+    fn maximum(self) -> u64 {
+        match self {
+            Self::Standard => 256,
+            Self::Gradle => 1024,
+        }
+    }
+}
+pub fn run_configured(
+    root: &Path,
+    argv: &[String],
+    timeout: Duration,
+    quiet: bool,
+    cancelled: &AtomicBool,
+    settings: RunSettings<'_>,
+    notify: impl FnMut(RunEvent) -> io::Result<()>,
+) -> io::Result<RunResult> {
     if timeout.is_zero() || timeout > Duration::from_secs(120) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -65,11 +110,11 @@ pub fn run_with_target(
     }
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
-        posix::run(root, argv, timeout, quiet, cancelled, cargo_target, notify)
+        posix::run(root, argv, timeout, quiet, cancelled, settings, notify)
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
-        let _ = (root, quiet, cancelled, cargo_target, notify);
+        let _ = (root, quiet, cancelled, settings, notify);
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
             "managed process groups unavailable",
@@ -130,7 +175,7 @@ mod posix {
         Ok(())
     }
 
-    fn isolate(cpu_seconds: u64) -> io::Result<()> {
+    fn isolate(cpu_seconds: u64, file_limit: u64) -> io::Result<()> {
         // This runs between fork and exec. Keep it limited to direct OS calls.
         if unsafe { libc::setsid() } == -1 {
             return Err(io::Error::last_os_error());
@@ -154,7 +199,7 @@ mod posix {
         }
         cap!(libc::RLIMIT_CPU, cpu_seconds as libc::rlim_t);
         cap!(libc::RLIMIT_FSIZE, 256 * 1024 * 1024);
-        cap!(libc::RLIMIT_NOFILE, 256);
+        cap!(libc::RLIMIT_NOFILE, file_limit as libc::rlim_t);
         cap!(libc::RLIMIT_CORE, 0);
         Ok(())
     }
@@ -264,7 +309,7 @@ mod posix {
         timeout: Duration,
         quiet: bool,
         cancelled: &AtomicBool,
-        cargo_target: Option<&Path>,
+        settings: RunSettings<'_>,
         notify: impl FnMut(RunEvent) -> io::Result<()>,
     ) -> io::Result<RunResult> {
         if cancelled.load(Ordering::Acquire) {
@@ -280,14 +325,16 @@ mod posix {
             .args(&argv[1..])
             .current_dir(root)
             .stdin(Stdio::null());
-        if let Some(target) = cargo_target {
+        command.envs(settings.env.iter().copied());
+        if let Some(target) = settings.cargo_target {
             command.env("CARGO_TARGET_DIR", target);
         }
         if quiet {
             command.stdout(Stdio::null()).stderr(Stdio::null());
         }
         let cpu_seconds = timeout.as_secs() + u64::from(timeout.subsec_nanos() != 0);
-        unsafe { command.pre_exec(move || isolate(cpu_seconds)) };
+        let file_limit = settings.file_limit.maximum();
+        unsafe { command.pre_exec(move || isolate(cpu_seconds, file_limit)) };
         let deadline = Instant::now() + timeout;
         let child = command.spawn()?;
         let monitored = catch_unwind(AssertUnwindSafe(|| {

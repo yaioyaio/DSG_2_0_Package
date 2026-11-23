@@ -1,4 +1,8 @@
-use crate::docker::{DockerOperation, DockerRead, QueryFailure};
+use crate::docker::{
+    context_inventory, valid_context_name, ContextInventory, DockerOperation, DockerRead,
+    QueryFailure,
+};
+use crate::docker_image_gc::{valid_full_image_id, valid_owner_fingerprint};
 use std::io;
 #[cfg(any(unix, windows))]
 use std::io::Read;
@@ -12,6 +16,9 @@ const MAX_STDOUT_BYTES: usize = 64 * 1024;
 const QUERY_TIMEOUT: Duration = Duration::from_secs(3);
 const INVENTORY_TIMEOUT: Duration = Duration::from_secs(20);
 const POLL_INTERVAL: Duration = Duration::from_millis(5);
+const BUILD_CACHE_FORMAT: &str = r#"{{if eq .Type "Build Cache"}}{"total":{{json .TotalCount}},"active":{{json .Active}}}{{end}}"#;
+// Docker may return a stub for an unreadable or missing context on success.
+const CONTEXT_NAME_FORMAT: &str = "{{if .Error}}null{{else}}{{json .Name}}{{end}}";
 
 // Docker's Go types spell the ID field ID and expose it in API JSON as Id.
 const CONTAINER_FORMAT: &str = concat!(
@@ -37,6 +44,12 @@ const IMAGE_FORMAT: &str = concat!(
     r#""os":{{json .Os}},"architecture":{{json .Architecture}}}"#,
 );
 
+const IMAGE_GC_FORMAT: &str = concat!(
+    r#"{"id":{{json .ID}},"owner_matches":{{with .Config}}"#,
+    r#"{{eq (index .Labels "io.dsg.gc.owner") "OWNER_FINGERPRINT"}}{{else}}null{{end}},"#,
+    r#""tag_count":{{len .RepoTags}},"digest_count":{{len .RepoDigests}}}"#,
+);
+
 /// A bounded set of read-only queries against one explicitly named Docker context.
 /// Create a new instance per inventory so its deadline covers the entire scan.
 pub struct DockerCli {
@@ -55,15 +68,7 @@ struct LocalClient {
 
 impl DockerCli {
     pub fn new(context: &str) -> Result<Self, QueryFailure> {
-        if context.len() > 128
-            || !context
-                .as_bytes()
-                .first()
-                .is_some_and(u8::is_ascii_alphanumeric)
-            || !context
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
-        {
+        if !valid_context_name(context) {
             return Err(QueryFailure::InvalidSelector);
         }
         Ok(Self {
@@ -113,13 +118,8 @@ impl DockerCli {
                 .arg(&local.host);
             return command;
         }
-        let mut command = Command::new("docker");
-        command
-            .arg("--context")
-            .arg(&self.context)
-            .env_remove("DOCKER_HOST")
-            .env_remove("DOCKER_CONTEXT")
-            .env_remove("DOCKER_API_VERSION");
+        let mut command = docker_command();
+        command.arg("--context").arg(&self.context);
         command
     }
 
@@ -157,10 +157,46 @@ impl DockerCli {
                 }
                 command.args(["image", "inspect", "--format", IMAGE_FORMAT, "--", id])
             }
+            DockerOperation::ImageGcEvidence {
+                id,
+                owner_fingerprint,
+            } => {
+                if !valid_full_image_id(id) || !valid_owner_fingerprint(owner_fingerprint) {
+                    return Err(QueryFailure::InvalidSelector);
+                }
+                let format = IMAGE_GC_FORMAT.replace("OWNER_FINGERPRINT", owner_fingerprint);
+                command.args(["image", "inspect", "--format", &format, "--", id])
+            }
             DockerOperation::Volumes => command.args(["volume", "ls", "--format", "{{.Name}}"]),
+            DockerOperation::BuildCache => {
+                command.args(["system", "df", "--format", BUILD_CACHE_FORMAT])
+            }
         };
         Ok(command)
     }
+}
+
+/// List locally configured names without selecting a context or querying an engine.
+pub fn discover_contexts(max_contexts: u16) -> ContextInventory {
+    let mut command = docker_command();
+    command
+        .env_remove("DOCKER_TLS")
+        .env_remove("DOCKER_TLS_VERIFY")
+        .env_remove("DOCKER_CERT_PATH")
+        .args(["context", "ls", "--format", CONTEXT_NAME_FORMAT]);
+    context_inventory(
+        capture_output(command, Instant::now() + QUERY_TIMEOUT),
+        max_contexts,
+    )
+}
+
+fn docker_command() -> Command {
+    let mut command = Command::new("docker");
+    command
+        .env_remove("DOCKER_HOST")
+        .env_remove("DOCKER_CONTEXT")
+        .env_remove("DOCKER_API_VERSION");
+    command
 }
 
 impl DockerRead for DockerCli {
@@ -317,6 +353,7 @@ mod tests {
         let docker = DockerCli::new("desktop-linux").unwrap();
         let id = "01abcdef".repeat(8);
         let image_id = format!("sha256:{id}");
+        let image_gc_format = IMAGE_GC_FORMAT.replace("OWNER_FINGERPRINT", &id);
         let cases = [
             (DockerOperation::Engine, vec!["info", "--format", "{{.ID}}"]),
             (
@@ -357,8 +394,26 @@ mod tests {
                 ],
             ),
             (
+                DockerOperation::ImageGcEvidence {
+                    id: &image_id,
+                    owner_fingerprint: &id,
+                },
+                vec![
+                    "image",
+                    "inspect",
+                    "--format",
+                    &image_gc_format,
+                    "--",
+                    &image_id,
+                ],
+            ),
+            (
                 DockerOperation::Volumes,
                 vec!["volume", "ls", "--format", "{{.Name}}"],
+            ),
+            (
+                DockerOperation::BuildCache,
+                vec!["system", "df", "--format", BUILD_CACHE_FORMAT],
             ),
         ];
         for (operation, args) in cases {
@@ -413,18 +468,30 @@ mod tests {
 
     #[test]
     fn templates_keep_sensitive_inspect_fields_out_of_stdout() {
-        for template in [CONTAINER_FORMAT, IMAGE_FORMAT] {
+        for template in [CONTAINER_FORMAT, IMAGE_FORMAT, IMAGE_GC_FORMAT] {
             for forbidden in [
                 ".Env",
                 "json .Config",
                 "json .Labels",
                 ".Source",
                 "json .RepoDigests",
+                "json .RepoTags",
             ] {
                 assert!(!template.contains(forbidden));
             }
         }
         assert_eq!(CONTAINER_FORMAT.matches("index .Labels").count(), 5);
+        assert_eq!(IMAGE_GC_FORMAT.matches("index .Labels").count(), 1);
+        let docker = DockerCli::new("default").unwrap();
+        let id = "a".repeat(64);
+        let image_id = format!("sha256:{id}");
+        assert!(matches!(
+            docker.command(DockerOperation::ImageGcEvidence {
+                id: &image_id,
+                owner_fingerprint: "\"}}\n{{json .Config}}",
+            }),
+            Err(QueryFailure::InvalidSelector)
+        ));
     }
 
     #[test]

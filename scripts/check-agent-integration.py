@@ -1,6 +1,6 @@
 """Verify protocol wiring and, when selected, run native CLIs against local fixtures."""
 
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import os
@@ -8,9 +8,11 @@ from pathlib import Path
 import shlex
 import shutil
 import signal
+import sqlite3
 import subprocess
 import sys
 import tempfile
+import time
 from threading import Thread
 from urllib.parse import urlsplit
 
@@ -87,6 +89,7 @@ def verify_contracts(dsg, fixture):
         message('tools/call', {'name': 'dsg_check_command',
                                'arguments': {'argv': ['docker', 'volume', 'prune']}}, 4),
         message('tools/call', {'name': 'dsg_gc_apply', 'arguments': {}}, 5),
+        message('tools/call', {'name': 'dsg_get_execution_status', 'arguments': {}}, 6),
     ]
     output, stderr = execute([dsg, '--root', str(root), '--state-dir', str(state), 'mcp'],
                              stdin='\n'.join(requests) + '\n')
@@ -94,11 +97,73 @@ def verify_contracts(dsg, fixture):
     assert not stderr and not state.exists() and not list(root.iterdir())
     assert replies[1]['result']['protocolVersion'] == '2025-06-18'
     listed = replies[2]['result']['tools']
-    assert len(listed) == 6 and all(tool['annotations']['readOnlyHint'] for tool in listed)
+    assert len(listed) == 8 and all(tool['annotations']['readOnlyHint'] for tool in listed)
     assert not replies[3]['result'].get('isError', False)
     assert 'PROTECTED_VOLUME' in json.dumps(replies[4])
     assert replies[5].get('error') or replies[5]['result'].get('isError')
     print('Agent contracts: install, preserve config, allow/deny, invalid input, uninstall and write-free MCP passed.')
+    if sys.platform == 'darwin':
+        verify_state_tools(dsg, fixture, message, requests[:2])
+
+
+def verify_state_tools(dsg, fixture, message, handshake):
+    root = fixture / 'state-project'
+    output = root / 'dist'
+    output.mkdir(parents=True)
+    (output / 'fixture.txt').write_text('synthetic')
+    aged = time.time() - 9 * 86400
+    os.utime(output, (aged, aged))
+    state = fixture / 'state-observation'
+    other = fixture / 'other-project'
+    other.mkdir()
+
+    def command(project):
+        return [dsg, '--root', str(project), '--state-dir', str(state), '--json']
+
+    def invoke(project, *args):
+        output, _ = execute(command(project) + list(args))
+        return json.loads(output)['result']
+
+    def snapshot():
+        entries = {}
+        for path in state.iterdir():
+            info = path.lstat()
+            entries[path.name] = (info.st_ino, info.st_size, info.st_mtime_ns)
+        return entries
+
+    def observe(project, name, arguments=None):
+        requests = handshake + [message('tools/call', {
+            'name': name, 'arguments': arguments or {},
+        }, 10)]
+        before = snapshot()
+        responses, stderr = execute(command(project) + ['mcp'], stdin='\n'.join(requests) + '\n')
+        assert not stderr and snapshot() == before
+        reply = json.loads(responses.splitlines()[-1])
+        result = reply.get('result', {})
+        if result.get('isError') or 'error' in reply:
+            return 'unavailable'
+        return json.loads(result['content'][0]['text'])['status']
+
+    invoke(root, 'init')
+    invoke(other, 'init')
+    invoke(root, 'gc-own', '--candidate', 'dist', '--confirm-generated')
+    plan = invoke(root, 'gc-plan')['record']['plan_id']
+    approval = {'plan_id': plan}
+    assert observe(root, 'dsg_get_execution_status') == 'none'
+    assert observe(root, 'dsg_get_gc_approval_status', approval) == 'awaiting_approval'
+    with closing(sqlite3.connect(state / 'registry.sqlite3')) as anchor:
+        anchor.execute('BEGIN')
+        anchor.execute('SELECT COUNT(*) FROM project').fetchone()
+        assert observe(root, 'dsg_get_execution_status') == 'none'
+        assert observe(root, 'dsg_get_gc_approval_status', approval) == 'awaiting_approval'
+        subprocess.run(command(root) + ['gc-approve', '--plan', str(plan), '--candidate', 'dist', '--confirm'],
+                       stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       timeout=10, check=True)
+        assert observe(root, 'dsg_get_gc_approval_status', approval) == 'approved_recorded'
+        assert observe(other, 'dsg_get_gc_approval_status', approval) == 'unavailable'
+    assert observe(root, 'dsg_get_execution_status') == 'none'
+    assert observe(root, 'dsg_get_gc_approval_status', approval) == 'approved_recorded'
+    print('MCP state: project isolation, approval records, and state files unchanged by reads.', flush=True)
 
 
 def sse(payloads, *, named=False):
