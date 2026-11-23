@@ -69,4 +69,9 @@ with tempfile.TemporaryDirectory(prefix='dsg-rust-test-') as fixture:
     if os.environ.get('DSG_TEST_LIVE_ENFORCEMENT') == '1':
         subprocess.run(['python3', '-B', '../scripts/check-live-enforcement.py', str(daemon)],
                        timeout=55, check=True)
+    subprocess.run(['python3', '-B', '../scripts/check-dashboard.py', str(executable)],
+                   timeout=35, check=True)
+    if os.name == 'posix':
+        subprocess.run(['python3', '-B', '../scripts/check-release-package.py', str(executable), str(daemon)],
+                       timeout=70, check=True)
 PY

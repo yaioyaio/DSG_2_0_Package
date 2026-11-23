@@ -47,6 +47,10 @@ macOS LaunchDaemon 예시는 비정상 종료 상태를 보존하고 관리자�
 
 Windows SCM 어댑터의 시험 구성은 `LocalSystem` 서비스와 전용 로컬 named pipe를 사용한다. 제한 클라이언트는 개별 읽기·쓰기와 동기화 권한 `0x00100003`으로 브로커 파이프를 연다. upstream 서버 계정 SID와 파이프 소유자 SID가 일치하고 제한 계정이 upstream ACL에서 제외돼야 한다. 운영 배포 전에 해당 호스트에서 실제 계정과 SCM 수명 주기를 검증한다. [Windows 플랫폼 검증](TEST_PLAN.md#브로커와-서비스-검증)
 
+## 로컬 대시보드
+
+`dsg --root <프로젝트> dashboard`가 출력한 주소를 브라우저에서 연다. 정리 후보 화면은 파일 변경 없이 즉시 조회한 집계를 제공한다. Docker 요약을 사용하려면 명시한 격리·운영 컨텍스트에 대한 자신의 기존 권한을 적용한다. 재조회는 화면의 새로고침 버튼을 사용한다. 터미널에서 `Ctrl+C`로 종료하거나 실행 시간 상한을 사용한다. 같은 호스트에서 연결 가능한 프로세스에 집계가 제공되므로 로컬 사용자 경계를 확인한다. [API와 수명 주기](API_SPEC.md#로컬-대시보드)
+
 ## 응급 정리 안내
 대규모 prune 대신 Docker의 `docker system df -v`, `docker buildx du`, `docker ps -a`, `docker volume ls`로 먼저 조사. 영속 데이터 보호 확인 후 대상 범위에 국한해 수동 정리.
 

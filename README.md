@@ -27,6 +27,8 @@ Windows에서는 `python3` 대신 `py -3` 또는 `python`을 사용합니다.
 
 Rust CLI의 테스트와 Python 대조 검증은 의존성을 받은 뒤 `sh scripts/test-rust.sh`로 실행합니다. CLI 명령과 JSON 출력 규약은 [API 명세](docs/API_SPEC.md#rust-cli-foundation)에 있습니다.
 
+`dsg --root <프로젝트> dashboard`를 실행한 뒤 표시된 로컬 주소를 브라우저에서 열면 사용량, 정리 후보, 적용 정책을 조회할 수 있습니다. 설치 패키지와 플랫폼별 검증 범위는 [릴리스 안내](docs/RELEASE.md)에 있습니다.
+
 **이 패키지는 기존 개인 작업 파일, DB 볼륨, Docker 이미지 등을 자동 삭제하지 않습니다.** 실제 프로젝트 적용 전 docs/OPERATIONS.md 및 SECURITY.md를 읽으십시오.
 
 ## 개발 구현 순서
