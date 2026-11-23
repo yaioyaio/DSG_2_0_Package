@@ -11,19 +11,19 @@
     "dashboard": "Independent real Docker counts matched the API and WebKit at 1060px and 390px, plus read-only and origin checks.",
     "release_packages": "macOS ARM64 0.1.1-rc.1: two clean builds matched archive SHA-256; upgrade from 0.1.0, runtime, removal, and ad-hoc signature verification passed.",
     "windows_qualification": "Windows ARM64 0.1.1-rc.1 passed Parallels native package, dashboard and SCM with assigned fixture pipe. Guest restored suspended. Windows x64 native and live Windows Docker remain separate.",
-    "release_signature": "Temporary Ed25519 keys verified both signed artifacts and manifest; invalid verification and rejected upgrade covered. Official signer qualification is separate.",
+    "release_signature": "macOS ARM64 offline signer handoff, exact archive and manifest verification, rejected responses, publisher-gated local package rejection, and package lifecycle passed. Official signer qualification remains separate.",
     "build_providers": "Cargo, Node, pnpm, Gradle, uv, Go and Playwright ran on macOS. Playwright retained success and failure traces, opt-in TTL reclaimed one expired success and preserved expected failure."
   },
   "files": [
     {
       "path": ".dockerignore",
-      "sha256": "560efb57f8dafc2018c6ae28836b5699395d01a330f218a6107b577324be460f",
-      "bytes": 1056
+      "sha256": "6051c6df74e466bba50d6b72bb0d2271599901f417aba7bc13156dd0c357fd0e",
+      "bytes": 1116
     },
     {
       "path": ".gitignore",
-      "sha256": "e976f2070a88c25cf0c03145043c889d922a2bb9db33b9da9100e497bc129735",
-      "bytes": 997
+      "sha256": "c42b2bbfb441b7f777d65f5e62939d436f5a4a27029835141f5b2d40cb728a92",
+      "bytes": 1042
     },
     {
       "path": "AGENTS.md",
@@ -102,8 +102,8 @@
     },
     {
       "path": "docs/RELEASE.md",
-      "sha256": "de814514694e1ff85baec186a05768f1343d9d3aef60951e6b86e6857bfd2424",
-      "bytes": 7118
+      "sha256": "b0ae0bc970a86ad35f785517d33555bd734d095746fd7ac199bc5f1d85859a30",
+      "bytes": 9436
     },
     {
       "path": "docs/REQUIREMENTS.md",
@@ -127,8 +127,8 @@
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "8648283618f03452615ed1b1d1808746f751dbd8eaabf3ca8356dce99c92057f",
-      "bytes": 9010
+      "sha256": "4a9c8a3e1756a492ee56474cf46fd599024ebee8b1081694a10203cd352831f4",
+      "bytes": 9617
     },
     {
       "path": "docs/WBS.md",
@@ -447,8 +447,8 @@
     },
     {
       "path": "scripts/check-release-signature.py",
-      "sha256": "4ed29740b0b88f6218a93dd071b5f02e28377a75732c8ee692361b08a08d1c09",
-      "bytes": 8553
+      "sha256": "4963db34bdcd7bc178be3bd1bc1955a6ad2a68ab8754434ff2e9acd29e50db78",
+      "bytes": 13113
     },
     {
       "path": "scripts/check-windows-fixture.ps1",
@@ -466,9 +466,14 @@
       "bytes": 778
     },
     {
+      "path": "scripts/prepare-release-signature.py",
+      "sha256": "cfabed6daa7f0d7477fe692f2053fe060a5e480bde59e9d69638784d5217ec7f",
+      "bytes": 4127
+    },
+    {
       "path": "scripts/release-package.py",
-      "sha256": "ee380f921795e3aa0c32a11cc19b58726f9b40810cf9d92b166b64c18f1cac26",
-      "bytes": 31923
+      "sha256": "9ea0e66b725bb09bdde88abe62541c94eba1935675783f5f302c607a74b3dc0b",
+      "bytes": 32071
     },
     {
       "path": "scripts/test-rust.sh",
@@ -482,8 +487,8 @@
     },
     {
       "path": "scripts/verify-release-signature.py",
-      "sha256": "109816f09127eed8ced79c9f5eba76ba5b40247b430d5ef6d0489118f3431426",
-      "bytes": 7304
+      "sha256": "8ee7fc0bbef5a3926be4b47bff077f8afdc3a203b2bf6e45136c7cc834cefc2c",
+      "bytes": 8741
     },
     {
       "path": "skills/build-guard/SKILL.md",

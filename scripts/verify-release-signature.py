@@ -101,8 +101,23 @@ def read_manifest(package, archive, archive_sha256, folder):
     return raw, manifest
 
 
+def verify_macos_team(package, folder, target, team_id):
+    require(sys.platform == "darwin" and target.endswith("-apple-darwin"),
+            "Apple Developer ID verification requires macOS and a macOS archive")
+    require(re.fullmatch(r"[A-Z0-9]{10}", team_id), "expected a 10-character Apple Team ID")
+    requirement = ("anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists "
+                   "and certificate leaf[field.1.2.840.113635.100.6.1.13] exists "
+                   f'and certificate leaf[subject.OU] = "{team_id}"')
+    for name in package["binary_names"](target):
+        result = subprocess.run(["/usr/bin/codesign", "--verify", "--strict", "--all-architectures",
+                                 "--test-requirement", "=" + requirement, str(folder / name)],
+                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL, timeout=15)
+        require(result.returncode == 0, "Apple Developer ID signature or Team ID rejected")
+
+
 def verify(args):
-    """Return verification evidence without invoking target code or reporting publisher identity."""
+    """Verify detached signatures and any requested macOS team pin without executing payloads."""
     package = runpy.run_path(str(Path(__file__).with_name("release-package.py")))
     try:
         archive_sha256 = pin(args.sha256)
@@ -122,16 +137,22 @@ def verify(args):
             (work / "public.der").write_bytes(public_key)
             environment = verifier_environment(work)
             verify_message(openssl, work, environment, archive, sidecar["archive_signature_hex"])
-            raw, manifest = read_manifest(package, archive, archive_sha256, work / "package")
+            folder = work / "package"
+            raw, manifest = read_manifest(package, archive, archive_sha256, folder)
             manifest_sha256 = package["digest"](raw)
             require(manifest_sha256 == sidecar["manifest_sha256"], "manifest SHA-256 mismatch")
-            verify_message(openssl, work, environment, work / "package" / package["MANIFEST"],
+            verify_message(openssl, work, environment, folder / package["MANIFEST"],
                            sidecar["manifest_signature_hex"])
+            if args.macos_team_id is not None:
+                verify_macos_team(package, folder, manifest["target"], args.macos_team_id)
     except (OSError, UnicodeError, EOFError, RecursionError, tarfile.TarError, subprocess.SubprocessError) as error:
         raise ValueError("could not read or verify bounded release evidence") from error
-    return {"signature_verified": True, "authority": "caller-pinned-key", "archive_sha256": archive_sha256,
-            "manifest_sha256": manifest_sha256, "key_id": key_id, "target": manifest["target"],
-            "version": manifest["version"], "platform_signature_declared": manifest["signature"]}
+    evidence = {"signature_verified": True, "authority": "caller-pinned-key", "archive_sha256": archive_sha256,
+                "manifest_sha256": manifest_sha256, "key_id": key_id, "target": manifest["target"],
+                "version": manifest["version"], "platform_signature_declared": manifest["signature"]}
+    if args.macos_team_id is not None:
+        evidence["macos_developer_id_verified"] = True
+    return evidence
 
 
 def main():
@@ -142,6 +163,7 @@ def main():
     cli.add_argument("--public-key", required=True, help="Ed25519 public key in SPKI DER encoding")
     cli.add_argument("--public-key-sha256", required=True, help="independently approved SPKI DER SHA-256")
     cli.add_argument("--openssl", required=True, help="absolute path to caller-trusted OpenSSL 3 executable")
+    cli.add_argument("--macos-team-id", help="require the pinned Apple Developer ID Application team")
     args = cli.parse_args()
     try:
         result = verify(args)
