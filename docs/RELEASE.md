@@ -6,7 +6,8 @@
 |---|---|
 | macOS ARM64 | 로컬 배포 아카이브 설치·실행·제거 및 ad-hoc 서명 확인 |
 | Linux ARM64 musl | Ubuntu 게스트 안에서 설치·업그레이드·실행·제거 및 SHA-256 확인 |
-| Windows ARM64·x64 | 교차 링크 확인. SCM 및 설치 수명 주기는 실제 Windows 검증 대기 |
+| Windows ARM64 | Parallels Windows 11에서 `0.1.0-rc.3`의 설치·실행·업그레이드·제거, 아카이브 재현성 및 대시보드 HTTP 확인 |
+| Windows x64 | `0.1.0-rc.3` 교차 링크 및 PE 아키텍처·아카이브 재현성 검사. x64 호스트에서 설치 수명 주기 확인 대기 |
 
 ## 패키지 만들기
 
@@ -31,3 +32,28 @@ python3 -B scripts/release-package.py doctor --prefix "$DSG_PREFIX"
 ```
 
 `dsg-current` 경로나 설치 폴더에 생성된 사용자 파일이 있거나 매니페스트와 실물이 다르면 실패를 반환한다. 진단 후 사용자 자료를 보호한 상태에서 원인을 해결한다. 서비스의 계정과 엔진 연결은 [운영 매뉴얼](OPERATIONS.md#docker-조회-브로커)을 따른다.
+
+Windows 패키지는 `aarch64-pc-windows-msvc` 또는 `x86_64-pc-windows-msvc`의 `dsg.exe`와 `dsgd.exe`를 사용한다. `dsg-current`는 설치 상태 파일이다. `doctor`의 `path`가 바이너리 디렉터리다. 실행 중인 파일이 잠겨 정리를 완료하지 못하면 상태를 보존하고 `pending_cleanup`을 보고한다. 프로세스 종료 뒤 같은 명령으로 회수를 재시도한다. 외부 Authenticode 서명이 적용된 PE 입력은 바이트 그대로 보관하며 공식 배포 신뢰 검증은 승인된 환경에서 수행한다.
+
+## 배포 파일의 분리 서명 검증
+
+`scripts/verify-release-signature.py`는 동일한 Ed25519 공개 키로 아카이브와 내부 `MANIFEST.json`의 정확한 바이트를 각각 검증한다. 아카이브 SHA-256과 SPKI DER 공개 키 SHA-256은 신뢰하는 경로에서 미리 확인한다. `--openssl`에는 신뢰하는 OpenSSL 3 실행 파일의 절대 경로를 지정한다. 검증 결과에 `authority: caller-pinned-key`가 표시된다. 공식 게시자 신원과 OS 배포 서명은 아래 플랫폼 절차로 검증한다.
+
+```sh
+python3 -B scripts/verify-release-signature.py \
+  --archive "$DSG_ARCHIVE" --sha256 "$DSG_SHA256" \
+  --signatures "$DSG_SIGNATURES" --public-key "$DSG_PUBLIC_KEY" \
+  --public-key-sha256 "$DSG_PUBLIC_KEY_SHA256" --openssl "$DSG_OPENSSL"
+```
+
+`--signatures`, `--public-key`, `--public-key-sha256`, `--openssl` 네 옵션을 `install`과 `upgrade`에 함께 전달하면 설치 경로 변경 전에 서명을 확인한다. 옵션을 모두 생략하면 로컬 후보는 기존 SHA-256 검증으로 설치할 수 있다. 서명 파일은 정렬된 키와 끝 줄바꿈이 있는 JSON이며 필드는 `format`(1), `algorithm`(`Ed25519`), `key_id`(SPKI DER SHA-256), `archive_sha256`, `manifest_sha256`, `archive_signature_hex`, `manifest_signature_hex`다. 서명은 각각 64바이트를 소문자 16진수로 인코딩한다.
+
+## 플랫폼별 공인 서명
+
+| 대상 | 공인 배포물 검증 | 참조 |
+|---|---|---|
+| macOS | 실행 파일에 Developer ID Application 서명, PKG 채택 시 Developer ID Installer 서명. 공증 `Accepted` 뒤 staple과 Gatekeeper 평가 | `ddd-tools` `3e30ff9`의 `docs/references/DPG-P5-061-MACOS-PRODUCTION-SIGNED-INSTALLER-GUIDE.md` |
+| Windows | PE Authenticode 서명과 RFC 3161 타임스탬프, MSI 채택 시 패키지 서명까지 검증. 각 배포물에 `signtool verify /pa /all` 실행 후 최종 SHA-256 산출 | `ddd-tools` `3e30ff9`의 `docs/references/DPG-P5-061-WINDOWS-PRODUCTION-SIGNED-INSTALLER-GUIDE.md` |
+| Linux | DEB/APT 채택 시 `InRelease` 또는 `Release.gpg` 검증과 저장소별 `signed-by` 지정 | `ddd-tools` `3e30ff9`의 `docs/references/DPG-P5-061-LINUX-PRODUCTION-SIGNED-INSTALLER-GUIDE.md` |
+
+DSG의 기존 배포 형식은 `tar.gz`다. 플랫폼 절차는 공식 게시자와 배포 형식이 승인된 뒤 적용한다. 분리 서명은 `ddd-studio-rsie` `718ca48`의 `docs/RELEASE-TRUST.md`와 `contracts/release-signatures.schema.json`에서 아카이브·매니페스트 서명 및 독립적인 공개 키 지정 원칙을 참조했다. DSG의 서명 파일 형식과 키 정책은 위 절차를 따른다.

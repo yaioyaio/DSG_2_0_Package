@@ -1,6 +1,6 @@
+use super::daemon_engine_info::{content_length, header_end, project_info, RESPONSE_LIMIT};
 use super::daemon_http::{Reply, Route};
 use super::daemon_windows_config::{WindowsBrokerConfig, WindowsSid};
-use serde::Deserialize;
 use std::io;
 use std::ptr::{null, null_mut};
 use std::sync::OnceLock;
@@ -27,7 +27,6 @@ use windows_sys::Win32::System::Threading::{
     GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
 };
 
-const RESPONSE_LIMIT: usize = 512 * 1024;
 static EXPECTED: OnceLock<(WindowsSid, String)> = OnceLock::new();
 
 pub(super) fn configure(sid: WindowsSid, engine: &str) -> io::Result<()> {
@@ -40,23 +39,12 @@ pub(super) fn configure(sid: WindowsSid, engine: &str) -> io::Result<()> {
 }
 
 pub(super) fn observe(config: &WindowsBrokerConfig, route: Route) -> Reply {
-    // Expose selected fields only. Windows inventory requires its own projection path.
-    if route == Route::Inventory {
-        return Reply::unavailable();
-    }
     let Some((sid, engine)) = EXPECTED.get() else {
         return Reply::unavailable();
     };
-    if !engine_matches(config.upstream(), sid, engine).unwrap_or(false) {
-        return Reply::unavailable();
-    }
-    match route {
-        Route::Ping => Reply::ping(),
-        Route::DockerInfo => {
-            Reply::json(serde_json::json!({"ID": engine}).to_string().into_bytes())
-        }
-        Route::Inventory => Reply::unavailable(),
-    }
+    read_info(config.upstream(), sid)
+        .and_then(|response| project_info(&response, engine, route))
+        .unwrap_or_else(|_| Reply::unavailable())
 }
 
 struct OwnedHandle(HANDLE);
@@ -181,7 +169,7 @@ fn verify_pipe(pipe: HANDLE, expected: PSID) -> io::Result<()> {
     Ok(())
 }
 
-fn engine_matches(path: &str, sid: &WindowsSid, expected: &str) -> io::Result<bool> {
+fn read_info(path: &str, sid: &WindowsSid) -> io::Result<Vec<u8>> {
     let deadline = Instant::now() + Duration::from_secs(2);
     let path: Vec<_> = path.encode_utf16().chain([0]).collect();
     let handle = unsafe {
@@ -277,52 +265,5 @@ fn engine_matches(path: &str, sid: &WindowsSid, expected: &str) -> io::Result<bo
     if framed_end.is_some_and(|end| end != response.len()) {
         return Err(io::ErrorKind::UnexpectedEof.into());
     }
-    extract_engine(&response).map(|observed| observed == expected)
-}
-
-fn header_end(bytes: &[u8]) -> Option<usize> {
-    bytes
-        .windows(4)
-        .take(8192)
-        .position(|window| window == b"\r\n\r\n")
-}
-
-fn content_length(head: &[u8]) -> io::Result<Option<usize>> {
-    let text = std::str::from_utf8(head).map_err(|_| io::ErrorKind::InvalidData)?;
-    let mut result = None;
-    for line in text.split("\r\n").skip(1) {
-        let (name, value) = line.split_once(':').ok_or(io::ErrorKind::InvalidData)?;
-        if name.eq_ignore_ascii_case("transfer-encoding") {
-            return Err(io::ErrorKind::InvalidData.into());
-        }
-        if name.eq_ignore_ascii_case("content-length") {
-            let length = value
-                .trim()
-                .parse::<usize>()
-                .map_err(|_| io::ErrorKind::InvalidData)?;
-            if result.is_some() || length > RESPONSE_LIMIT {
-                return Err(io::ErrorKind::InvalidData.into());
-            }
-            result = Some(length);
-        }
-    }
-    Ok(result)
-}
-
-fn extract_engine(bytes: &[u8]) -> io::Result<String> {
-    let end = header_end(bytes).ok_or(io::ErrorKind::InvalidData)?;
-    let head = &bytes[..end];
-    if !(head.starts_with(b"HTTP/1.0 200 ") || head.starts_with(b"HTTP/1.1 200 ")) {
-        return Err(io::ErrorKind::InvalidData.into());
-    }
-    #[derive(Deserialize)]
-    struct Identity {
-        #[serde(rename = "ID")]
-        id: String,
-    }
-    let limited = serde_json::from_slice::<Identity>(&bytes[end + 4..])?;
-    if limited.id.is_empty() || limited.id.len() > 128 || !limited.id.is_ascii() {
-        return Err(io::ErrorKind::InvalidData.into());
-    }
-    Ok(limited.id)
+    Ok(response)
 }

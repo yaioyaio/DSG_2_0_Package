@@ -1,11 +1,12 @@
 """Verify the local read-only dashboard on a disposable project."""
 
-from http.client import HTTPConnection
+from http.client import HTTPConnection, HTTPResponse
 import json
 import os
 from pathlib import Path
 from queue import Queue
 import re
+import socket
 import subprocess
 import sys
 import tempfile
@@ -45,6 +46,13 @@ def verify(dsg, fixture):
             assert status == 200 and b'/styles.css' in html and b'/app.js' in html
             assert "frame-ancestors 'none'" in headers['Content-Security-Policy']
             assert headers['Cache-Control'] == 'no-store'
+            with socket.create_connection(('127.0.0.1', port), timeout=8) as client:
+                # A connection can arrive before its first request bytes.
+                time.sleep(0.15)
+                client.sendall(f'GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n'.encode('ascii'))
+                with HTTPResponse(client) as response:
+                    response.begin()
+                    assert response.status == 200 and b'/styles.css' in response.read(1 << 20)
             for asset, content in [('/styles.css', 'text/css'), ('/app.js', 'text/javascript')]:
                 info = request(port, asset)
                 assert info[0] == 200 and info[1]['Content-Type'].startswith(content) and info[2]
@@ -60,6 +68,11 @@ def verify(dsg, fixture):
             assert request(port, '/api/overview', **{'Sec-Fetch-Site': 'cross-site'})[0] == 403
             assert request(port, '/api/overview', 'POST')[0] == 405
             assert request(port, '/api/cleanup/apply')[0] == 404
+            renderer = os.environ.get('DSG_TEST_RENDERER')
+            if renderer:
+                if sys.platform != 'darwin':
+                    raise AssertionError('The WebKit rendering fixture requires macOS')
+                subprocess.run([renderer, url + '/'], timeout=20, check=True)
             assert not state.exists() and output.read_bytes() == b'local dashboard fixture\n'
         finally:
             if server.poll() is None:
