@@ -4,13 +4,13 @@
   "validation": {
     "python_tests": "14 passed; POC CLI baseline and bytecode prevention passed",
     "docker_runtime": "macOS isolated real inventory and repeated Compose up passed; embedded builder cache observed (208 total, 0 active), existing image preserved by dry-run.",
-    "rust_compiler": "macOS ARM64: 98 Rust tests passed. Windows ARM64 0.1.1-rc.1 cross-linked.",
+    "rust_compiler": "macOS ARM64: 98 Rust tests and local integration passed. Windows ARM64 0.1.1-rc.1 cross-linked and ran on the existing guest.",
     "html_parse": "passed",
     "agent_integration": "macOS historical native hook checks plus current read-only MCP execution and approval status projection; fixture state files unchanged.",
-    "dockerd_broker": "macOS sandbox and launchd verified with live isolated Docker; prior Linux ARM64 systemd/UID and Windows ARM64 SCM fixture evidence retained.",
+    "dockerd_broker": "macOS sandbox and launchd passed with isolated live Docker; Parallels Windows ARM64 0.1.1-rc.1 native SCM lifecycle and two account boundaries passed with a fixture pipe.",
     "dashboard": "Independent real Docker counts matched the API and WebKit at 1060px and 390px, plus read-only and origin checks.",
     "release_packages": "macOS ARM64 0.1.1-rc.1: two clean builds matched archive SHA-256; upgrade from 0.1.0, runtime, removal, and ad-hoc signature verification passed.",
-    "windows_qualification": "Windows ARM64 rc.3 passed native package and dashboard lifecycle on Parallels. Its daemon matches the SCM-tested rc.2 digest. Windows x64 rc.3 passed cross-link, archive reproducibility and PE/hash validation. Windows live Docker, x64 native lifecycle and trusted signing gates outstanding.",
+    "windows_qualification": "Windows ARM64 0.1.1-rc.1 passed Parallels native package, dashboard and SCM with assigned fixture pipe. Guest restored suspended. Windows x64 native and live Windows Docker remain separate.",
     "release_signature": "Temporary Ed25519 keys verified both signed artifacts and manifest; invalid verification and rejected upgrade covered. Official signer qualification is separate.",
     "build_providers": "Cargo, Node, pnpm, Gradle, uv, Go and Playwright ran on macOS. Playwright retained success and failure traces, opt-in TTL reclaimed one expired success and preserved expected failure."
   },
@@ -102,8 +102,8 @@
     },
     {
       "path": "docs/RELEASE.md",
-      "sha256": "1192d8a776c7cac4326c724f1b7ee7c04d4c6b5d65cf2784d4ba8ef2e80ee190",
-      "bytes": 7084
+      "sha256": "de814514694e1ff85baec186a05768f1343d9d3aef60951e6b86e6857bfd2424",
+      "bytes": 7118
     },
     {
       "path": "docs/REQUIREMENTS.md",

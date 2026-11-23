@@ -128,3 +128,5 @@ DSG-08의 `f6397b2`를 PR #15로 `develop`, PR #16으로 `main`에 반영했다.
 - DSG-07의 macOS 실제 Docker Unix·TCP 직접 접근 차단, 브로커 조회, 임시 launchd의 비정상 종료·재시작·해제를 재검증했다. 훅 오류와 무관하게 Docker 접근을 통제하는 기준은 OS가 적용한 경계다. 호스트의 비대화형 관리자 접근을 사용할 수 없어 별도 macOS 배포 계정 설정과 LaunchDaemon 검증은 미실측이다.
 - DSG-08에서 macOS ARM64의 `0.1.1-rc.1`을 각각 새 빌드 대상에서 두 번 생성해 아카이브 SHA-256이 일치했다. 보존 중인 `0.1.0` 실물에서 새 후보로 업그레이드하고 CLI 버전, 로컬 서명, 제거 후 기존 파일 보존을 확인했다. Azure나 Apple 등 공식 게시자 서명은 별도 승인 환경이 필요하다.
 - 최종 macOS 통합에서 독립적으로 수집한 실제 Docker 건수가 API, WebKit 1060px·390px 화면에 모두 동일했다. 임시 관리형 감독자를 강제 종료한 시험에서 만료 전 lease를 보존하고 만료·자식 종료 확인 뒤 같은 프로젝트가 다시 실행됐다.
+- 전체 로컬 러너에서 Python 14개와 Rust 98개, Docker·Compose·Provider·TTL·MCP·launchd·WebKit 및 로컬 Ed25519 검증을 통과했다. 소스 트리 `35a30aa`로 만든 `0.1.1-rc.1` ARM64 후보와 SHA-256 파일을 `dist/`에 보존했다. macOS와 Windows용 아카이브는 각각 이름에 대상이 들어 있다.
+- 기존 Parallels Windows ARM64에서 같은 버전의 실제 설치·업그레이드·제거, 대시보드 HTTP 및 SCM 시작·정상/강제 종료 후 재시작을 통과했다. SCM 검증은 합성 파이프와 별도 SID 두 개를 사용했다. Windows 검증용 임시 자료와 등록 자원을 회수하고 게스트를 원래 일시정지 상태로 되돌렸다. 분리된 운영 계정, 실제 Windows Docker, 공인 게시자 서명은 각 전제 조건에서 확인한다.
