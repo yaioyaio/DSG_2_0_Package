@@ -7,14 +7,17 @@ import io
 import json
 from pathlib import Path
 import platform
+import runpy
 import subprocess
 import sys
 import tarfile
 import tempfile
+from unittest.mock import patch
 
 
 VERIFY = Path(__file__).resolve().with_name("verify-release-signature.py")
 RELEASE_PACKAGE = VERIFY.with_name("release-package.py")
+HANDOFF = VERIFY.with_name("prepare-release-signature.py")
 TARGET = "aarch64-unknown-linux-musl"
 PAYLOAD = {"Cargo.lock": b"lock fixture\n", "SOURCES.md": b"source fixture\n",
            "dsg": b"cli fixture\n", "dsgd": b"daemon fixture\n"}
@@ -58,10 +61,10 @@ def sign(root, openssl, signing_key, path):
     return signature.read_bytes().hex()
 
 
-def run(openssl, archive, sidecar, key, *, archive_pin, key_pin, succeeds):
+def run(openssl, archive, sidecar, key, *options, archive_pin, key_pin, succeeds):
     result = subprocess.run([sys.executable, "-B", str(VERIFY), "--archive", str(archive),
                              "--sha256", archive_pin, "--signatures", str(sidecar), "--public-key", str(key),
-                             "--public-key-sha256", key_pin, "--openssl", str(openssl)],
+                             "--public-key-sha256", key_pin, "--openssl", str(openssl), *options],
                             capture_output=True, timeout=40)
     if succeeds:
         if result.returncode != 0:
@@ -70,6 +73,70 @@ def run(openssl, archive, sidecar, key, *, archive_pin, key_pin, succeeds):
     if result.returncode != 1 or result.stdout or not result.stderr.startswith(b"release signature: "):
         raise RuntimeError("invalid signature fixture did not fail closed")
     return None
+
+
+def check_handoff(root, openssl, archive, original, manifest, signing_key, public_key, evidence):
+    request = root / "handoff-manifest.json"
+    archive_signature = root / "archive.sig"
+    manifest_signature = root / "manifest.sig"
+    output = root / "handoff-signatures.json"
+    archive_options = ["--archive", str(archive), "--sha256", original["archive_sha256"]]
+
+    def handoff(action, *options, succeeds=True):
+        result = subprocess.run([sys.executable, "-B", str(HANDOFF), action, *archive_options, *options],
+                                capture_output=True, timeout=40)
+        if succeeds and result.returncode == 0:
+            return json.loads(result.stdout)
+        if succeeds or result.returncode != 1 or result.stdout or not result.stderr.startswith(b"release signing handoff: "):
+            raise RuntimeError(f"signing handoff {action} returned unexpected status {result.returncode}")
+        return None
+
+    handoff("prepare", "--manifest-output", str(request), "--sha256", "0" * 64, succeeds=False)
+    if request.exists():
+        raise RuntimeError("prepare published a manifest for a mismatched archive")
+    prepared = handoff("prepare", "--manifest-output", str(request))
+    if request.read_bytes() != manifest or prepared != {field: evidence[field] for field in
+                                                        ("archive_sha256", "manifest_sha256", "target", "version")}:
+        raise RuntimeError("prepare did not export the exact approved signing inputs")
+    archive_signature.write_bytes(bytes.fromhex(sign(root, openssl, signing_key, archive)))
+    manifest_signature.write_bytes(bytes.fromhex(sign(root, openssl, signing_key, request)))
+    signature_options = ["--archive-signature", str(archive_signature), "--manifest-signature", str(manifest_signature),
+                         "--manifest-sha256", original["manifest_sha256"], "--public-key", str(public_key),
+                         "--public-key-sha256", original["key_id"], "--openssl", str(openssl), "--output", str(output)]
+    for invalid_options in (["--manifest-sha256", "0" * 64], ["--public-key-sha256", "0" * 64],
+                            ["--manifest-signature", str(archive_signature)]):
+        handoff("assemble", *signature_options, *invalid_options, succeeds=False)
+    raw = manifest_signature.read_bytes()
+    manifest_signature.write_bytes(raw[:-1])
+    handoff("assemble", *signature_options, succeeds=False)
+    if output.exists():
+        raise RuntimeError("assemble published invalid signatures")
+    manifest_signature.write_bytes(raw)
+    output.write_bytes(b"existing data\n")
+    handoff("assemble", *signature_options, succeeds=False)
+    if output.read_bytes() != b"existing data\n":
+        raise RuntimeError("assemble overwrote a conflicting output")
+    output.unlink()
+    if handoff("assemble", *signature_options) != evidence or output.read_bytes() != canonical(original):
+        raise RuntimeError("assembled sidecar does not match the verified release")
+
+
+def check_macos_team_gate(root):
+    if sys.platform != "darwin":
+        return
+    package = runpy.run_path(str(RELEASE_PACKAGE))
+    verify_team = runpy.run_path(str(VERIFY))["verify_macos_team"]
+    codesign_results = [subprocess.CompletedProcess([], code) for code in (0, 1)]
+    with patch.object(subprocess, "run", side_effect=codesign_results) as codesign:
+        try:
+            verify_team(package, root, "aarch64-apple-darwin", "TEST000001")
+        except ValueError as error:
+            if str(error) != "Apple Developer ID signature or Team ID rejected":
+                raise
+        else:
+            raise RuntimeError("the team gate accepted a rejected daemon signature")
+        if [call.args[0][-1] for call in codesign.call_args_list] != [str(root / name) for name in ("dsg", "dsgd")]:
+            raise RuntimeError("the team gate did not check both binaries")
 
 
 def check(root, openssl):
@@ -104,6 +171,9 @@ def check(root, openssl):
                   "archive_sha256": archive_pin, "manifest_sha256": original["manifest_sha256"],
                   "version": "1.0.0", "target": TARGET, "platform_signature_declared": "none"}:
         raise RuntimeError("valid fixture returned incorrect evidence")
+    check_handoff(root, openssl, archive, original, canonical(manifest), signing_key, public_key, result)
+    run(openssl, archive, signatures, public_key, "--macos-team-id", "TEST000001",
+        archive_pin=archive_pin, key_pin=key_pin, succeeds=False)
 
     verify(archive_sha256="0" * 64)
     verify(key=other_key)
@@ -151,6 +221,9 @@ def check(root, openssl):
         local_manifest = {**manifest, "target": f"{architecture}-{suffix}"}
         signatures.write_bytes(canonical(create_fixture(canonical(local_manifest))))
         manage("install", *install_options()[:-2], status=1)
+        manage("install", "--archive", str(archive), "--sha256", archive_pin,
+               "--macos-team-id", "TEST000001", status=1)
+        manage("install", *install_options(), "--macos-team-id", "TEST000001", status=1)
         if list(prefix.iterdir()):
             raise RuntimeError("incomplete signature options touched the installation")
         manage("install", *install_options())
@@ -175,7 +248,9 @@ def main():
     if not args.openssl.is_absolute() or not args.openssl.is_file():
         parser.error("an explicit absolute OpenSSL executable path is required")
     with tempfile.TemporaryDirectory(prefix="dsg-signature-check-") as path:
-        check(Path(path).resolve(), args.openssl)
+        root = Path(path).resolve()
+        check(root, args.openssl)
+        check_macos_team_gate(root)
     print("release signature fixtures passed")
 
 

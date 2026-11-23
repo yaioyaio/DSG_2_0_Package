@@ -55,15 +55,35 @@ python3 -B scripts/verify-release-signature.py \
 
 `--signatures`, `--public-key`, `--public-key-sha256`, `--openssl` 네 옵션을 `install`과 `upgrade`에 함께 전달하면 설치 경로 변경 전에 서명을 확인한다. 옵션을 모두 생략하면 로컬 후보는 기존 SHA-256 검증으로 설치할 수 있다. 서명 파일은 정렬된 키와 끝 줄바꿈이 있는 JSON이며 필드는 `format`(1), `algorithm`(`Ed25519`), `key_id`(SPKI DER SHA-256), `archive_sha256`, `manifest_sha256`, `archive_signature_hex`, `manifest_signature_hex`다. 서명은 각각 64바이트를 소문자 16진수로 인코딩한다.
 
+### 오프라인 서명 요청과 조립
+
+플랫폼 서명이 끝난 실행 파일로 최종 아카이브를 만든 뒤 `prepare`로 내부 `MANIFEST.json` 원문을 내보낸다. 아래 명령의 출력 디렉터리는 운영자가 만든 기존 `dist/dsg-signing/`을 사용한다. 아카이브와 매니페스트 원문을 승인된 서명자에게 전달하고, 서명자가 같은 키로 각각 Pure Ed25519 서명한 64바이트 결과 두 개를 받는다. 승인 기록에서 확인한 대상·버전과 아카이브·매니페스트·공개 키의 SHA-256을 사용한다. `assemble`은 반환된 서명 두 개를 검사한 뒤에만 JSON을 생성하고, 내용이 다른 기존 출력은 보존한다. 키 보관과 실제 서명은 서명자가 담당한다.
+
+```sh
+python3 -B scripts/prepare-release-signature.py prepare \
+  --archive "$DSG_ARCHIVE" --sha256 "$DSG_SHA256" \
+  --manifest-output dist/dsg-signing/MANIFEST.json
+
+python3 -B scripts/prepare-release-signature.py assemble \
+  --archive "$DSG_ARCHIVE" --sha256 "$DSG_SHA256" \
+  --manifest-sha256 "$DSG_MANIFEST_SHA256" \
+  --archive-signature dist/dsg-signing/archive.sig \
+  --manifest-signature dist/dsg-signing/manifest.sig \
+  --public-key "$DSG_PUBLIC_KEY" --public-key-sha256 "$DSG_PUBLIC_KEY_SHA256" \
+  --openssl "$DSG_OPENSSL" --output dist/dsg-signing/signatures.json
+```
+
 ## 플랫폼별 공인 서명
 
 | 대상 | 공인 배포물 검증 | 참조 |
 |---|---|---|
-| macOS | 실행 파일에 Developer ID Application 서명, PKG 채택 시 Developer ID Installer 서명. 공증 `Accepted` 뒤 staple과 Gatekeeper 평가 | `ddd-tools` `3e30ff9`의 `docs/references/DPG-P5-061-MACOS-PRODUCTION-SIGNED-INSTALLER-GUIDE.md` |
-| Windows | PE Authenticode 서명과 RFC 3161 타임스탬프, MSI 채택 시 패키지 서명까지 검증. 각 배포물에 `signtool verify /pa /all` 실행 후 최종 SHA-256 산출 | `ddd-tools` `3e30ff9`의 `docs/references/DPG-P5-061-WINDOWS-PRODUCTION-SIGNED-INSTALLER-GUIDE.md` |
+| macOS | 두 실행 파일에 Developer ID Application 서명, Hardened Runtime·보안 타임스탬프 적용. 승인된 Team ID와 공증 결과를 각각 검증 | `ddd-tools` `3e30ff9`의 `docs/references/DPG-P5-061-MACOS-PRODUCTION-SIGNED-INSTALLER-GUIDE.md` |
+| Windows | `dsg.exe`와 `dsgd.exe` 각각에 SHA-256 Authenticode 서명과 RFC 3161 타임스탬프 적용. `signtool verify /pa /all`로 검증하고 승인 게시자·신뢰 체인·타임스탬프 확인 후 패키징 | `ddd-tools` `3e30ff9`의 `docs/references/DPG-P5-061-WINDOWS-PRODUCTION-SIGNED-INSTALLER-GUIDE.md` |
 | Linux | DEB/APT 채택 시 `InRelease` 또는 `Release.gpg` 검증과 저장소별 `signed-by` 지정 | `ddd-tools` `3e30ff9`의 `docs/references/DPG-P5-061-LINUX-PRODUCTION-SIGNED-INSTALLER-GUIDE.md` |
 
-DSG의 기존 배포 형식은 `tar.gz`다. 플랫폼 절차는 공식 게시자와 배포 형식이 승인된 뒤 적용한다. 분리 서명은 `ddd-studio-rsie` `718ca48`의 `docs/RELEASE-TRUST.md`와 `contracts/release-signatures.schema.json`에서 아카이브·매니페스트 서명 및 독립적인 공개 키 지정 원칙을 참조했다. DSG의 서명 파일 형식과 키 정책은 위 절차를 따른다.
+macOS에서는 승인된 환경에서 서명한 두 실행 파일을 `release-package.py build`에 전달한다. 로컬 `--adhoc` 옵션을 생략하면 외부에서 서명된 바이트가 보존된다. macOS 호스트에서 `assemble`, `verify-release-signature.py`, `install`, `upgrade`에 분리 서명 검증 옵션과 `--macos-team-id "$DSG_MACOS_TEAM_ID"`를 함께 제공할 수 있다. 이 옵션은 최종 아카이브에서 꺼낸 두 실행 파일에 Apple Developer ID Application 체인과 승인된 Team ID를 요구한다. 검증기가 출력하는 `macos_developer_id_verified`는 이 검사 결과다. 공급자가 공증을 요구하면 같은 바이트의 두 실행 파일을 ZIP에 넣어 승인된 환경에서 Apple 공증 `Accepted`와 대상 호스트의 실행을 별도로 확인한다. DSG의 `tar.gz`에는 staple을 적용할 수 없다. [Apple 코드 서명 요구사항](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements/)
+
+분리 서명은 `ddd-studio-rsie` `718ca48`의 `docs/RELEASE-TRUST.md`, `scripts/release_signature.py`, `contracts/release-signatures.schema.json`에서 아카이브와 매니페스트의 원문 서명 및 독립적인 공개 키 지정 원칙을 참조했다. DSG는 위 서명 파일 형식과 자체 승인 경로를 사용한다.
 
 ## 정책 변경 이력
 
