@@ -1,4 +1,6 @@
 use clap::{Parser, Subcommand};
+use dsg_core::docker;
+use dsg_core::docker_command::DockerCli;
 use dsg_core::filesystem::{self, ScanReport};
 use dsg_core::policy::{self, Policy, PolicyError, POLICY_VERSION, PROJECT_CONFIG};
 use dsg_core::registry::{AuditAction, AuditOutcome, Registry};
@@ -48,6 +50,13 @@ enum Command {
     },
     /// 파일을 변경하지 않고 정리 후보의 계획을 기록합니다.
     GcPlan,
+    /// 지정된 Docker 컨텍스트의 리소스와 중복 후보를 조회합니다.
+    DockerScan {
+        #[arg(long)]
+        context: String,
+        #[arg(long, default_value_t = 32, value_parser = clap::value_parser!(u16).range(1..=64))]
+        max_resources: u16,
+    },
 }
 
 struct CliError {
@@ -247,6 +256,34 @@ fn run(cli: &Cli) -> Result<Output, CliError> {
                 json!({"record": record, "plan": payload}),
                 text,
             ))
+        }
+        Command::DockerScan {
+            context,
+            max_resources,
+        } => {
+            let backend = DockerCli::new(context).map_err(|_| {
+                CliError::new("CONFIG_INVALID", "Docker 컨텍스트 이름을 확인하세요")
+            })?;
+            let inventory = docker::inventory(&backend, usize::from(*max_resources));
+            let state = if inventory.complete {
+                "측정 완료"
+            } else {
+                "일부 또는 전체 미확인"
+            };
+            let text = format!(
+                "Docker {context} · {state}\n컨테이너 {}개 · 이미지 {}개 · 볼륨 {}개 · 중복 후보 {}묶음",
+                inventory.containers.len(),
+                inventory.images.len(),
+                inventory.volumes.len(),
+                inventory.duplicates.len(),
+            );
+            let exit = if inventory.engine_id.is_some() { 0 } else { 5 };
+            Ok(Output {
+                command: "docker-scan",
+                data: json!(inventory),
+                text,
+                exit,
+            })
         }
     }
 }
