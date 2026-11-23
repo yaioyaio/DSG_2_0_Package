@@ -41,12 +41,17 @@ python3 -m dsg hook --agent codex
 
 `exec --auto-clean-cargo -- cargo check …`는 자동 회수 대상인 전용 Cargo 산출물 디렉터리를 만든다. 실행 결과의 `cleanup`에서 회수·보존 건수와 확인된 바이트를 읽는다. Git 완료는 `scripts/git-completion.sh`로 전달한다. 이 경로는 여섯 참조의 파일 일치 후 사용자 원본과 브랜치를 보존하면서 등록된 보조 워크트리만 검사한다.
 
+### 에이전트 훅
+
+`dsg --root <프로젝트> agents install --agent <claude|codex|gemini>`는 macOS와 Linux에서 프로젝트 설정에 DSG 훅을 등록한다. `agents uninstall --agent …`는 실행 파일과 등록 내용이 일치하는 DSG 훅을 제거한다. `--json` 응답의 `result.changed`는 설정 변경 여부, `result.installed`는 요청한 설치 상태를 표시한다. 잘못된 경로나 안전하게 수정할 수 없는 설정은 `AGENT_CONFIG_UNAVAILABLE`로 보고한다.
+
+`dsg hook --agent <claude|codex|gemini>`는 해당 CLI의 셸 훅 JSON을 표준 입력으로 읽고 그 CLI에 맞는 JSON을 반환한다. 최대 입력은 64 KiB다. 보호 명령, 별도 승인이 필요한 명령, 셸 해석 결과를 확정하기 어려운 입력은 안정적인 사유 코드와 함께 거부한다. 허용 시 빈 객체를 반환해 CLI의 자체 권한 확인을 유지한다. [설치 및 운영 범위](../integrations/README.md)
+
 ## 계획 API (미구현)
 - `dsg inspect <resource-id>`
 - `dsg docker reuse --project <id>`
 - `dsg lease acquire --project <id> --ttl 30`
 - `dsg gc apply --plan <id> --approval <token>`
-- `dsg agents install --agent claude|codex|gemini`
 - `dsgd` local IPC methods: `health`, `policy.evaluate`, `resource.inventory`, `gc.plan`, `gc.apply`
 
 ## 공통 판단 응답(목표)
@@ -54,8 +59,19 @@ python3 -m dsg hook --agent codex
 {"decision":"deny","reason_code":"PROTECTED_VOLUME","message":"Persistent volume cannot be deleted","evidence_ids":["evt_001"],"suggested_action":"inspect"}
 ```
 
-## MCP 설계 (미구현)
-`dsg_get_health`, `dsg_scan_project`, `dsg_inspect_docker`, `dsg_check_command`, `dsg_get_gc_plan`, `dsg_get_execution_status`, `dsg_get_policy`.
+## 읽기 전용 MCP
+
+`dsg --root <프로젝트> mcp`는 MCP `2025-06-18`의 stdio JSON-RPC 서버다. 클라이언트는 `initialize` 이후 `tools/list`와 `tools/call`을 호출한다. 요청은 줄 단위 JSON으로 최대 64 KiB이며, 조회는 시작 시 지정한 프로젝트와 정책으로 제한한다.
+
+| 도구 | 입력과 반환 값 |
+|---|---|
+| `dsg_get_health`, `dsg_scan_project` | 인자 없이 프로젝트 예산 및 사용량 집계를 반환한다. |
+| `dsg_inspect_docker` | 인자 없이 기본 컨텍스트의 인벤토리 건수와 조회 완전성을 반환한다. 리소스별 환경 변수와 설정값은 조회 범위에서 제외한다. |
+| `dsg_check_command` | `{ "argv": ["docker", "volume", "ls"] }` 형태의 배열을 평가해 정책 결과를 반환한다. |
+| `dsg_get_gc_plan` | 인자 없이 현재 정리 후보의 건수와 바이트 집계를 반환한다. 승인용 계획을 저장하는 명령은 `gc-plan`이다. |
+| `dsg_get_policy` | 인자 없이 현재 적용되는 정책의 수치 한도와 보호 규칙 건수를 반환한다. |
+
+실행 상태 조회 `dsg_get_execution_status`는 읽기 전용 상태 저장소 접근이 지원된 뒤 제공한다. 적용·실행·승인은 별도 관리형 CLI 기능이다.
 
 ### 오류 코드
 `CONFIG_INVALID`, `PROJECT_UNKNOWN`, `RESOURCE_ACTIVE`, `RESOURCE_SHARED`, `RESOURCE_CHANGED`, `POLICY_DENY`, `INSUFFICIENT_SPACE`, `PLAN_EXPIRED`, `NEEDS_APPROVAL`, `ENGINE_UNAVAILABLE`.

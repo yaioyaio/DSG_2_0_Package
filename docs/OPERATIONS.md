@@ -33,6 +33,10 @@ python3 -m dsg docker-scan
 - 보조 워크트리는 동시 쓰기 충돌을 피해야 할 때만 `dsg worktree-create`로 등록해 만든다. 등록된 Git 완료 경로는 `DSG_CLI=<검증된 dsg 경로> sh scripts/git-completion.sh <feature> <상태 디렉터리>`다. 여섯 참조 파일 일치, 사용·잠금·미반영 자료 검사를 통과하면 정상 Git 회수 후 주 작업 폴더가 `develop`으로 돌아간다.
 - 위 진입점을 호출한 실행과 Git 완료 이벤트에 자동화가 적용된다. 회수 바이트는 검사한 논리 크기다. 회수할 수 없는 경로는 보존 결과를 확인한다.
 
+## 에이전트 연동 운영
+
+CLI 훅 설치 후 신뢰 설정과 실행 파일 위치를 확인한다. CLI가 훅을 로드하지 못하면 해당 에이전트에서 보호 명령을 실행하지 않고 설치 상태부터 점검한다. Claude Code의 등록은 훅 실행 실패를 차단하도록 설정한다. Codex와 Gemini는 훅 실행 오류가 발생하면 자체 권한 처리로 진행할 수 있다. 통제된 Docker 접근이 필요한 운영 환경의 수용 기준은 별도의 OS 권한 경계다. [에이전트별 설정 및 검증](../integrations/README.md)
+
 ## 응급 정리 안내
 대규모 prune 대신 Docker의 `docker system df -v`, `docker buildx du`, `docker ps -a`, `docker volume ls`로 먼저 조사. 영속 데이터 보호 확인 후 대상 범위에 국한해 수동 정리.
 

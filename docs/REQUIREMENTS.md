@@ -11,8 +11,8 @@
 | REQ-007 | GC Plan | P0 | 만료/용량/보호 상태 판단 | 일부 구현 |
 | REQ-008 | GC Apply | P0 | 재검증 및 명시적 승인 필수 | 제한 구현 |
 | REQ-009 | 세션 Lease | P1 | 동시 실행 소유권 관리 | 미구현 |
-| REQ-010 | AI Hook | P1 | CLI별 정확한 JSON 입출력 | 샘플만 |
-| REQ-011 | MCP | P2 | 읽기 전용 도구+승인 도구 | 미구현 |
+| REQ-010 | AI Hook | P1 | CLI별 정확한 JSON 입출력 | 3개 CLI의 셸 훅과 프로젝트 설치·제거 |
+| REQ-011 | MCP | P2 | 읽기 전용 도구+승인 도구 | 읽기 전용 stdio 도구 6개. 실행 상태 조회와 승인 도구는 예정 |
 | REQ-012 | Docker Proxy | P2 | 직접 소켓 우회 제한 | 미구현 |
 | REQ-013 | 확장 Provider | P2 | SDK/서명/격리 | 미구현 |
 

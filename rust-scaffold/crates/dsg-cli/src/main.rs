@@ -13,6 +13,9 @@ use std::time::Duration;
 
 mod cleanup_cli;
 mod execution;
+mod hook_install;
+mod hooks;
+mod mcp;
 
 #[derive(Parser)]
 #[command(
@@ -116,6 +119,30 @@ enum Command {
         #[arg(long)]
         expectation_json: String,
     },
+    /// AI CLI에서 전달한 도구 사용 이벤트를 평가합니다.
+    Hook {
+        #[arg(long, value_enum)]
+        agent: hooks::Agent,
+    },
+    /// 프로젝트 범위의 DSG 훅을 관리합니다.
+    Agents {
+        #[command(subcommand)]
+        action: AgentAction,
+    },
+    /// 표준 입출력에서 읽기 전용 MCP 서버를 실행합니다.
+    Mcp,
+}
+
+#[derive(Subcommand)]
+enum AgentAction {
+    Install {
+        #[arg(long, value_enum)]
+        agent: hooks::Agent,
+    },
+    Uninstall {
+        #[arg(long, value_enum)]
+        agent: hooks::Agent,
+    },
 }
 
 struct CliError {
@@ -162,6 +189,11 @@ impl Output {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    match &cli.command {
+        Command::Hook { agent } => return hooks::run(*agent),
+        Command::Mcp => return mcp::run(&cli),
+        _ => {}
+    }
     match run(&cli) {
         Ok(output) => {
             if cli.json {
@@ -191,6 +223,9 @@ fn main() -> ExitCode {
 fn run(cli: &Cli) -> Result<Output, CliError> {
     let root = filesystem::canonical_root(&cli.root)
         .map_err(|_| CliError::new("PROJECT_UNKNOWN", "프로젝트 디렉터리에 접근할 수 없습니다"))?;
+    if let Command::Agents { action } = &cli.command {
+        return configure_agent(&root, action);
+    }
     let settings = Policy::load(
         &root,
         cli.global_policy.as_deref(),
@@ -210,6 +245,7 @@ fn run(cli: &Cli) -> Result<Output, CliError> {
                 ),
             ))
         }
+        Command::Hook { .. } | Command::Agents { .. } | Command::Mcp => unreachable!(),
         Command::Scan => {
             let report = read_scan(&root, &settings)?;
             let (status, label, percentage) = budget_status(&settings, &report);
@@ -370,6 +406,38 @@ fn run(cli: &Cli) -> Result<Output, CliError> {
             CliError::new("NEEDS_APPROVAL", "지정한 정리 요청을 명시적으로 승인하세요"),
         ),
     }
+}
+
+fn configure_agent(root: &Path, action: &AgentAction) -> Result<Output, CliError> {
+    let (agent, install) = match action {
+        AgentAction::Install { agent } => (*agent, true),
+        AgentAction::Uninstall { agent } => (*agent, false),
+    };
+    let config_error = || {
+        CliError::new(
+            "AGENT_CONFIG_UNAVAILABLE",
+            "프로젝트 훅 설정 파일과 실행 경로를 확인하세요",
+        )
+    };
+    if std::env::var_os("HOME")
+        .and_then(|home| std::fs::canonicalize(home).ok())
+        .is_some_and(|home| home == root)
+    {
+        return Err(config_error());
+    }
+    let executable = std::env::current_exe().map_err(|_| config_error())?;
+    let changed =
+        hook_install::configure(agent, root, &executable, install).map_err(|_| config_error())?;
+    let text = if changed {
+        "프로젝트 훅 설정을 갱신했습니다"
+    } else {
+        "프로젝트 훅 설정 변경이 없습니다"
+    };
+    Ok(Output::success(
+        "agents",
+        json!({"changed": changed, "installed": install}),
+        text.to_owned(),
+    ))
 }
 
 fn open_registry(cli: &Cli) -> Result<Registry, CliError> {
