@@ -4,10 +4,12 @@
   "validation": {
     "python_tests": "14 passed",
     "docker_runtime": "macOS: isolated inventory and two managed reuse requests passed",
-    "rust_compiler": "macOS arm64: 82 Rust tests and existing regression fixtures. Windows arm64/x64 binaries were cross-linked; native runtime gates remain.",
+    "rust_compiler": "82 macOS Rust tests and integrated fixtures; 14 Python tests; independent macOS and Linux ARM64 release builds matched.",
     "html_parse": "passed",
     "agent_integration": "macOS arm64: Claude Code 2.1.330, Codex CLI 0.170.0 and Gemini CLI 0.70.0; 9 isolated native allow, deny and hook-error checks passed.",
-    "dockerd_broker": "macOS live fixture passed. Linux systemd guest and Windows native runtime qualifications tracked separately."
+    "dockerd_broker": "macOS arm64 live Docker via Seatbelt and launchd; Linux ARM64 Ubuntu systemd and separate UID against live isolated Docker; Windows ARM64/x64 cross-linked only.",
+    "dashboard": "Local API, read-only boundary, and JS rendering state fixture passed; connected browser was unavailable.",
+    "release_packages": "macOS and Linux ARM64 local 0.1.0 exact release archives were installed and run on each OS. Independent builds and archive hashes matched. macOS ad-hoc signature and Linux SHA256 verified."
   },
   "files": [
     {
@@ -37,8 +39,8 @@
     },
     {
       "path": "README.md",
-      "sha256": "b224ec5560be5de12bdc71ae12b6ed2f71d065df02bdc2706de7557a1b17b5e9",
-      "bytes": 2728
+      "sha256": "6c64c362bb9ba4247171b90e490ed3677173b1ba2737e2288882abf8d2f30212",
+      "bytes": 3011
     },
     {
       "path": "artifact/DSG_2_0_Interactive_Artifact.html",
@@ -57,8 +59,8 @@
     },
     {
       "path": "docs/API_SPEC.md",
-      "sha256": "60a539b9c16640e161f304f2e90493fff76e8d2d12785fc4a38b1c3994893dcd",
-      "bytes": 9622
+      "sha256": "dc641b06ad5f8cc15c07f4b008a8f0e5924c806a829cf52196ae43530e0fda57",
+      "bytes": 10509
     },
     {
       "path": "docs/ARCHITECTURE.md",
@@ -72,8 +74,8 @@
     },
     {
       "path": "docs/OPERATIONS.md",
-      "sha256": "463337d9bbaa50ea65b99955a514934880df6298b513113056f352f64a634ec1",
-      "bytes": 6201
+      "sha256": "aa926879d8947a759e2a1b9a4f9bb5ac3b1072679d3961e9b3c64ab7983df9af",
+      "bytes": 6843
     },
     {
       "path": "docs/PLAN.md",
@@ -96,9 +98,14 @@
       "bytes": 1361
     },
     {
+      "path": "docs/RELEASE.md",
+      "sha256": "ba83ce5a7cc0d0b379deffa55a2f74072325a6aa1a5720b1bec1b648530f6265",
+      "bytes": 2555
+    },
+    {
       "path": "docs/REQUIREMENTS.md",
-      "sha256": "017ef9c251deb443341efbb870a081eb2c9adb3bc9af6e66d8b0fc2b6c6ae14e",
-      "bytes": 1856
+      "sha256": "fdb2eda144dc71a0f949ab3688b0172912c577cd55a50ce3deb5d23e9adfc65b",
+      "bytes": 1896
     },
     {
       "path": "docs/SECURITY.md",
@@ -117,8 +124,8 @@
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "f45ff844cbfed8cf48ba0e5f7980a1de82a78a13d900dfe2a3c9bd731eba1e0b",
-      "bytes": 6331
+      "sha256": "346611c20c3c0ffb6bca41972f4b627249b55e5267aac826d847946b506adba7",
+      "bytes": 6858
     },
     {
       "path": "docs/WBS.md",
@@ -201,6 +208,21 @@
       "bytes": 795
     },
     {
+      "path": "rust-scaffold/crates/dsg-cli/dashboard/INDEX.html",
+      "sha256": "e64a16917d91fe8ed0f4986955692a326b11a18f419b290069f99b975640a459",
+      "bytes": 3898
+    },
+    {
+      "path": "rust-scaffold/crates/dsg-cli/dashboard/app.js",
+      "sha256": "5f64d19f78cb6a0be5572c24c6f973259cefbd4adc4f31253279fd9e973137b5",
+      "bytes": 5053
+    },
+    {
+      "path": "rust-scaffold/crates/dsg-cli/dashboard/styles.css",
+      "sha256": "87343015630a1b6835af0119b74e7a2178c5222f076afff15afc9f9364b375e1",
+      "bytes": 6378
+    },
+    {
       "path": "rust-scaffold/crates/dsg-cli/src/cleanup_cli.rs",
       "sha256": "4e2dc70fefb6350efe9b4adb8f07cd38657ec54d20983d90d9afaa951b397808",
       "bytes": 8521
@@ -236,6 +258,11 @@
       "bytes": 11354
     },
     {
+      "path": "rust-scaffold/crates/dsg-cli/src/dashboard.rs",
+      "sha256": "47c65181a4c447ce503e6913f369d8602ea45e567011a78ee5c78fa09c25ae5c",
+      "bytes": 7905
+    },
+    {
       "path": "rust-scaffold/crates/dsg-cli/src/execution.rs",
       "sha256": "f70582df13e2840c7b16e6a83065ae91b0b63da8d02fa455e9debe324cd6dc7f",
       "bytes": 11181
@@ -252,13 +279,13 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/src/main.rs",
-      "sha256": "b2b57e26044821f901fff4f83d9673531c795628482fe2434f7d59d86b1c708e",
-      "bytes": 19186
+      "sha256": "088b0194702793717b18d94495cc2f1925bb4b52fe706f359a00ea27fb902922",
+      "bytes": 19783
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/src/mcp.rs",
-      "sha256": "fe305d2ef12bc4cce13da136b99d92bf1bbb03d7528e6b057761766c244dbb31",
-      "bytes": 12968
+      "sha256": "205a59ccbca64a8bfe19616025b5afda817312cf70c055d317dadd89eee905db",
+      "bytes": 13403
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/tests/cli.rs",
@@ -331,6 +358,11 @@
       "bytes": 8019
     },
     {
+      "path": "scripts/check-dashboard.py",
+      "sha256": "dfb55fb23aa6baeaad10be4c1b8652b9f6e4e3dfae3515fddc3210f6476c106b",
+      "bytes": 3919
+    },
+    {
       "path": "scripts/check-enforcement.py",
       "sha256": "fc1f8ad043c59a6b354c9399af898cf0a06918f9139f454dd0b2f73df34718ce",
       "bytes": 10702
@@ -356,14 +388,24 @@
       "bytes": 6757
     },
     {
+      "path": "scripts/check-release-package.py",
+      "sha256": "76ec12840bd22e5acc983a1b56da34e82e0f9dff448750c9ad19206aa03648e3",
+      "bytes": 5178
+    },
+    {
       "path": "scripts/git-completion.sh",
       "sha256": "4c1307f79e528c02f93fbc3d8dd73606dcfa66b28cd03d503be7a4ff38af1ca1",
       "bytes": 778
     },
     {
+      "path": "scripts/release-package.py",
+      "sha256": "fce4d12fd8c5b4576b38eeaa5977586fcecd1ff5d52dc85f71a7c2ebbe2f9322",
+      "bytes": 12676
+    },
+    {
       "path": "scripts/test-rust.sh",
-      "sha256": "5c301e7f815050e42050e0fbbe67fea60747cfc6e17bf9d7fc0bd1e026d62819",
-      "bytes": 3757
+      "sha256": "e137777b1ec23202e9cc73e34a0a2c69448852fe772df68df5479795e307969c",
+      "bytes": 4073
     },
     {
       "path": "scripts/test.sh",

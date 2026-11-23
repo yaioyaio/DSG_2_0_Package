@@ -244,16 +244,27 @@ fn call(root: &Path, policy: &Policy, params: &Value) -> Result<Value, CallError
             "critical_percent":policy.critical_percent,"max_scan_files":policy.max_scan_files,
             "max_candidates":policy.max_candidates,"gc_min_age_hours":policy.gc_min_age_hours}),
         ),
-        "dsg_inspect_docker" => {
-            let backend = DockerCli::new("default").map_err(|_| CallError::Unavailable)?;
-            let report = docker::inventory(&backend, 8);
-            Ok(
-                json!({"status":report.status,"complete":report.complete,"container_count":report.containers.len(),
-                "image_count":report.images.len(),"volume_count":report.volumes.len(),"duplicate_groups":report.duplicates.len()}),
-            )
-        }
+        "dsg_inspect_docker" => docker_summary("default"),
         _ => Err(CallError::Invalid),
     }
+}
+
+fn docker_summary(context: &str) -> Result<Value, CallError> {
+    let backend = DockerCli::new(context).map_err(|_| CallError::Unavailable)?;
+    let report = docker::inventory(&backend, 8);
+    Ok(json!({"status":report.status,"complete":report.complete,
+        "container_count":report.containers.len(), "image_count":report.images.len(),
+        "volume_count":report.volumes.len(),"duplicate_groups":report.duplicates.len()}))
+}
+
+pub(super) fn overview(root: &Path, policy: &Policy, docker_context: Option<&str>) -> Value {
+    let observe = |name| call(root, policy, &json!({"name":name})).ok();
+    json!({
+        "health": observe("dsg_get_health"),
+        "policy": observe("dsg_get_policy"),
+        "cleanup": observe("dsg_get_gc_plan"),
+        "docker": docker_context.and_then(|context| docker_summary(context).ok()),
+    })
 }
 
 #[cfg(test)]

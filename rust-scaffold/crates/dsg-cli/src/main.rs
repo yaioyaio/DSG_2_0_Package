@@ -12,6 +12,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 mod cleanup_cli;
+mod dashboard;
 mod execution;
 mod hook_install;
 mod hooks;
@@ -131,6 +132,15 @@ enum Command {
     },
     /// 표준 입출력에서 읽기 전용 MCP 서버를 실행합니다.
     Mcp,
+    /// 프로젝트 관측값을 로컬 브라우저에서 조회합니다.
+    Dashboard {
+        #[arg(long, default_value_t = 0)]
+        port: u16,
+        #[arg(long, default_value_t = 600, value_parser = clap::value_parser!(u16).range(1..=3600))]
+        lifetime: u16,
+        #[arg(long)]
+        docker_context: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -192,6 +202,11 @@ fn main() -> ExitCode {
     match &cli.command {
         Command::Hook { agent } => return hooks::run(*agent),
         Command::Mcp => return mcp::run(&cli),
+        Command::Dashboard {
+            port,
+            lifetime,
+            docker_context,
+        } => return dashboard::run(&cli, *port, *lifetime, docker_context.as_deref()),
         _ => {}
     }
     match run(&cli) {
@@ -245,7 +260,10 @@ fn run(cli: &Cli) -> Result<Output, CliError> {
                 ),
             ))
         }
-        Command::Hook { .. } | Command::Agents { .. } | Command::Mcp => unreachable!(),
+        Command::Hook { .. }
+        | Command::Agents { .. }
+        | Command::Mcp
+        | Command::Dashboard { .. } => unreachable!(),
         Command::Scan => {
             let report = read_scan(&root, &settings)?;
             let (status, label, percentage) = budget_status(&settings, &report);
