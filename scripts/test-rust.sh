@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import signal
 import subprocess
+import sys
 import tempfile
 
 def interrupt(_signum, _frame):
@@ -69,8 +70,17 @@ with tempfile.TemporaryDirectory(prefix='dsg-rust-test-') as fixture:
     if os.environ.get('DSG_TEST_LIVE_ENFORCEMENT') == '1':
         subprocess.run(['python3', '-B', '../scripts/check-live-enforcement.py', str(daemon)],
                        timeout=55, check=True)
+    dashboard_environment = os.environ.copy()
+    if os.environ.get('DSG_TEST_WEBKIT') == '1':
+        if sys.platform != 'darwin':
+            raise SystemExit('WebKit rendering verification currently requires macOS.')
+        renderer = Path(fixture) / 'dashboard-render-check'
+        subprocess.run(['/usr/bin/xcrun', 'swiftc', '-module-cache-path', str(Path(fixture) / 'swift-cache'),
+                        '../scripts/check-dashboard-rendering.swift', '-o', str(renderer)],
+                       timeout=45, check=True)
+        dashboard_environment['DSG_TEST_RENDERER'] = str(renderer)
     subprocess.run(['python3', '-B', '../scripts/check-dashboard.py', str(executable)],
-                   timeout=35, check=True)
+                   env=dashboard_environment, timeout=35, check=True)
     if os.name == 'posix':
         subprocess.run(['python3', '-B', '../scripts/check-release-package.py', str(executable), str(daemon)],
                        timeout=70, check=True)

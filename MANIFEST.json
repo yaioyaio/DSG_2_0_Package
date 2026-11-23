@@ -4,23 +4,25 @@
   "validation": {
     "python_tests": "14 passed",
     "docker_runtime": "macOS: isolated inventory and two managed reuse requests passed",
-    "rust_compiler": "82 macOS Rust tests and integrated fixtures; 14 Python tests; independent macOS and Linux ARM64 release builds matched.",
+    "rust_compiler": "macOS arm64: 85 Rust tests passed. Windows ARM64 and x64 binaries optimized and linked.",
     "html_parse": "passed",
     "agent_integration": "macOS arm64: Claude Code 2.1.330, Codex CLI 0.170.0 and Gemini CLI 0.70.0; 9 isolated native allow, deny and hook-error checks passed.",
-    "dockerd_broker": "macOS arm64 live Docker via Seatbelt and launchd; Linux ARM64 Ubuntu systemd and separate UID against live isolated Docker; Windows ARM64/x64 cross-linked only.",
-    "dashboard": "Local API, read-only boundary, and JS rendering state fixture passed; connected browser was unavailable.",
-    "release_packages": "macOS and Linux ARM64 local 0.1.0 exact release archives were installed and run on each OS. Independent builds and archive hashes matched. macOS ad-hoc signature and Linux SHA256 verified."
+    "dockerd_broker": "macOS arm64 live Docker via Seatbelt and launchd; Linux ARM64 Ubuntu systemd and separate UID against live isolated Docker; Windows ARM64 native SCM and two account boundaries passed against a fixture pipe.",
+    "dashboard": "Local API, origin checks, and actual offscreen WebKit rendering of live fixture at 1060 and 390 px passed. Windows ARM64 rc.3 passed the delayed-request regression.",
+    "release_packages": "macOS and Linux ARM64 local 0.1.0 exact release archives were installed and run on each OS. Independent builds and archive hashes matched. macOS ad-hoc signature and Linux SHA256 verified.",
+    "windows_qualification": "Windows ARM64 rc.3 passed native package and dashboard lifecycle on Parallels. Its daemon matches the SCM-tested rc.2 digest. Windows x64 rc.3 passed cross-link, archive reproducibility and PE/hash validation. Windows live Docker, x64 native lifecycle and trusted signing gates outstanding.",
+    "release_signature": "Temporary Ed25519 fixtures verified archive, exact canonical manifest, and signature-gated install and upgrade. The suite rejected 12 invalid verifier inputs. Production publisher authorization is pending."
   },
   "files": [
     {
       "path": ".dockerignore",
-      "sha256": "4079a781a7d309e0a3f8985cef27bb1f9baaa0766f7b54851a126f1de8e1c700",
-      "bytes": 1007
+      "sha256": "560efb57f8dafc2018c6ae28836b5699395d01a330f218a6107b577324be460f",
+      "bytes": 1056
     },
     {
       "path": ".gitignore",
-      "sha256": "1ca990cf7e42246f7fc8336f7c28a64adf961726bfcd5283ba9ce9ff9f66123d",
-      "bytes": 955
+      "sha256": "e976f2070a88c25cf0c03145043c889d922a2bb9db33b9da9100e497bc129735",
+      "bytes": 997
     },
     {
       "path": "AGENTS.md",
@@ -59,8 +61,8 @@
     },
     {
       "path": "docs/API_SPEC.md",
-      "sha256": "dc641b06ad5f8cc15c07f4b008a8f0e5924c806a829cf52196ae43530e0fda57",
-      "bytes": 10509
+      "sha256": "ff0dfcfbe28c88199eb96f977d7b5127d4db76247d5ff9acb20d7b1b662c6045",
+      "bytes": 10676
     },
     {
       "path": "docs/ARCHITECTURE.md",
@@ -74,8 +76,8 @@
     },
     {
       "path": "docs/OPERATIONS.md",
-      "sha256": "aa926879d8947a759e2a1b9a4f9bb5ac3b1072679d3961e9b3c64ab7983df9af",
-      "bytes": 6843
+      "sha256": "fcf1696534ff5d352658e1e768101b1e228145ed657e74b891aa12b7e48f72ed",
+      "bytes": 6946
     },
     {
       "path": "docs/PLAN.md",
@@ -99,13 +101,13 @@
     },
     {
       "path": "docs/RELEASE.md",
-      "sha256": "ba83ce5a7cc0d0b379deffa55a2f74072325a6aa1a5720b1bec1b648530f6265",
-      "bytes": 2555
+      "sha256": "9b8618d537b4ff9f887375711e024d2da8386d3433a92bc8858ee15582671b79",
+      "bytes": 5966
     },
     {
       "path": "docs/REQUIREMENTS.md",
-      "sha256": "fdb2eda144dc71a0f949ab3688b0172912c577cd55a50ce3deb5d23e9adfc65b",
-      "bytes": 1896
+      "sha256": "fee1858ed1301971e952a87c41b6834d33cbe4e5cae887f66ede3d3e028d7cb5",
+      "bytes": 1919
     },
     {
       "path": "docs/SECURITY.md",
@@ -124,8 +126,8 @@
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "346611c20c3c0ffb6bca41972f4b627249b55e5267aac826d847946b506adba7",
-      "bytes": 6858
+      "sha256": "296bc88473b2267aed7cae347ddd993ce526065247d062e352a6ec3b4955121a",
+      "bytes": 8277
     },
     {
       "path": "docs/WBS.md",
@@ -229,8 +231,13 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/src/daemon.rs",
-      "sha256": "97255de7e941d648665bf04d59a95ba70c70d06d8b251886172726f6b53e3af7",
-      "bytes": 5649
+      "sha256": "c1571a2ac307fe2e83eeb0ecbe91832da9642064dbc5a478476fc27a51949743",
+      "bytes": 5700
+    },
+    {
+      "path": "rust-scaffold/crates/dsg-cli/src/daemon_engine_info.rs",
+      "sha256": "461f245b525064f4cdfce48c8fa6f75acaf0ce2be7d659d16455c855ad623597",
+      "bytes": 4693
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/src/daemon_http.rs",
@@ -244,8 +251,8 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/src/daemon_windows.rs",
-      "sha256": "5eb081ca8b170abb21769c0ea746fa3442c92ffbe144e11c79a30879943df03d",
-      "bytes": 11405
+      "sha256": "95c5acd081eccfe61f03ddbbec3480e0e28b06f44ed476cf76443e1b3926bf9c",
+      "bytes": 11658
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/src/daemon_windows_config.rs",
@@ -254,13 +261,13 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/src/daemon_windows_upstream.rs",
-      "sha256": "8bd4e8a5539d86f7e72c1d4165184bf08ab4d4eb20442ca32dd8276fb230a27b",
-      "bytes": 11354
+      "sha256": "71acdcd6724eecf67aca38100e587b289aee77407e8426242f8783efb4710159",
+      "bytes": 9308
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/src/dashboard.rs",
-      "sha256": "47c65181a4c447ce503e6913f369d8602ea45e567011a78ee5c78fa09c25ae5c",
-      "bytes": 7905
+      "sha256": "57ac974e05fa8554cbdc0e3a48bd81f4ea622e137e4ec46323bafe0feb6ed2fe",
+      "bytes": 8173
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/src/execution.rs",
@@ -358,9 +365,14 @@
       "bytes": 8019
     },
     {
+      "path": "scripts/check-dashboard-rendering.swift",
+      "sha256": "d169be343e6f2cb1ad8871d78c7faf2353861c0107df0d160534aab76cf467ca",
+      "bytes": 3690
+    },
+    {
       "path": "scripts/check-dashboard.py",
-      "sha256": "dfb55fb23aa6baeaad10be4c1b8652b9f6e4e3dfae3515fddc3210f6476c106b",
-      "bytes": 3919
+      "sha256": "936acace07f0ea66ab8a616c8ea8870c59902625b5c1993aa18913a74ceeca07",
+      "bytes": 4721
     },
     {
       "path": "scripts/check-enforcement.py",
@@ -389,8 +401,23 @@
     },
     {
       "path": "scripts/check-release-package.py",
-      "sha256": "76ec12840bd22e5acc983a1b56da34e82e0f9dff448750c9ad19206aa03648e3",
-      "bytes": 5178
+      "sha256": "ddcbb0b34c06de9cbb8be3b48349fcdacc10e885ff96d02bb508802cc20b98bf",
+      "bytes": 8933
+    },
+    {
+      "path": "scripts/check-release-signature.py",
+      "sha256": "4ed29740b0b88f6218a93dd071b5f02e28377a75732c8ee692361b08a08d1c09",
+      "bytes": 8553
+    },
+    {
+      "path": "scripts/check-windows-fixture.ps1",
+      "sha256": "60f79d84c6d955023e3efcf17fa6cebaba8277d03eb8ba7f8c8a83df9e65ba4c",
+      "bytes": 4826
+    },
+    {
+      "path": "scripts/check-windows-service.ps1",
+      "sha256": "91da65ff81a0142ab940aa78bdc2319821779e4df5f8d10cc03ba0a5b9448650",
+      "bytes": 12651
     },
     {
       "path": "scripts/git-completion.sh",
@@ -399,18 +426,23 @@
     },
     {
       "path": "scripts/release-package.py",
-      "sha256": "fce4d12fd8c5b4576b38eeaa5977586fcecd1ff5d52dc85f71a7c2ebbe2f9322",
-      "bytes": 12676
+      "sha256": "ee380f921795e3aa0c32a11cc19b58726f9b40810cf9d92b166b64c18f1cac26",
+      "bytes": 31923
     },
     {
       "path": "scripts/test-rust.sh",
-      "sha256": "e137777b1ec23202e9cc73e34a0a2c69448852fe772df68df5479795e307969c",
-      "bytes": 4073
+      "sha256": "550d510a9c633f9e2b56dde8a3e8eb130303c35a20ddc94a6925ab07c561c81e",
+      "bytes": 4707
     },
     {
       "path": "scripts/test.sh",
       "sha256": "49e94038f78eb15a4d287adfd3ce6c633c112d6ba2e3e8e9a28bc47a09e43627",
       "bytes": 155
+    },
+    {
+      "path": "scripts/verify-release-signature.py",
+      "sha256": "109816f09127eed8ced79c9f5eba76ba5b40247b430d5ef6d0489118f3431426",
+      "bytes": 7304
     },
     {
       "path": "skills/build-guard/SKILL.md",

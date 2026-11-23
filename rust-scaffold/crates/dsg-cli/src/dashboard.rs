@@ -54,6 +54,11 @@ fn start(cli: &Cli, port: u16, lifetime: u16, docker_context: Option<&str>) -> i
     while Instant::now() < death && !stopping.load(Ordering::Acquire) {
         match server.accept() {
             Ok((mut stream, endpoint)) if endpoint.ip().is_loopback() => {
+                // The accepted socket can inherit nonblocking mode on Windows.
+                // The request handler uses bounded, blocking reads and writes.
+                if stream.set_nonblocking(false).is_err() {
+                    continue;
+                }
                 let _ = handle(&mut stream, &host, &url, || {
                     let stale = cache
                         .as_ref()
