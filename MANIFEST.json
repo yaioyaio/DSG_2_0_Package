@@ -4,8 +4,9 @@
   "validation": {
     "python_tests": "14 passed",
     "docker_runtime": "macOS: isolated inventory and two managed reuse requests passed",
-    "rust_compiler": "macOS: 58 tests, parity, managed execution, approved GC and automatic cleanup integration passed",
-    "html_parse": "passed"
+    "rust_compiler": "macOS arm64: 71 Rust tests passed with Python/Rust parity and managed execution/cleanup fixtures.",
+    "html_parse": "passed",
+    "agent_integration": "macOS arm64: Claude Code 2.1.330, Codex CLI 0.170.0 and Gemini CLI 0.70.0; 9 isolated native allow, deny and hook-error checks passed."
   },
   "files": [
     {
@@ -40,13 +41,13 @@
     },
     {
       "path": "docs/AI_AGENT_GUIDE.md",
-      "sha256": "d374f9444306ec80b2089fef096422727f07bec020b1c0a6010ecf4641172a87",
-      "bytes": 1206
+      "sha256": "7c8c23fa76114165cf4bc1a6868c72caf0236de55f904e8db12272a1f6e7110b",
+      "bytes": 1272
     },
     {
       "path": "docs/API_SPEC.md",
-      "sha256": "a5e1a3e686c86573c4541a9a80ca047ec860e38636969cfda255737c260cd7d7",
-      "bytes": 6037
+      "sha256": "659b8923cb7740c5a0bbdb3b5022ff082d291e783b19b5dd301f2184e0c43775",
+      "bytes": 8050
     },
     {
       "path": "docs/ARCHITECTURE.md",
@@ -60,8 +61,8 @@
     },
     {
       "path": "docs/OPERATIONS.md",
-      "sha256": "46836194d9d18a19244770608313cf3e77e68a17a76444b1ddbff0d44486a949",
-      "bytes": 3456
+      "sha256": "54d0fee2aad673477004fb3a992f8bdc59b1af6a8fbf43cf67e762b311eea163",
+      "bytes": 4036
     },
     {
       "path": "docs/PLAN.md",
@@ -85,8 +86,8 @@
     },
     {
       "path": "docs/REQUIREMENTS.md",
-      "sha256": "08c47f89a9f74767d82bcaae7ba61a8cbf50ad15049c81fc3f5bfae02dc07f28",
-      "bytes": 1659
+      "sha256": "379ea8ae1fbfebc074f4b209eda6f3ee2a78811c78a5fb19b418f88d7453f874",
+      "bytes": 1771
     },
     {
       "path": "docs/SECURITY.md",
@@ -105,8 +106,8 @@
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "95ce637e335e549717f78975926b2e2e84891dcf5836599166318bb1b7e8e0de",
-      "bytes": 3242
+      "sha256": "9720f81b32a61594e416970b4fcc2cf6ba524da2a01a16c9b54573496aa3b3d3",
+      "bytes": 4140
     },
     {
       "path": "docs/WBS.md",
@@ -115,23 +116,23 @@
     },
     {
       "path": "integrations/README.md",
-      "sha256": "3a2767e16cc682fed45c8649e2c247a65397476f17d8eae302f266f9c2e8540a",
-      "bytes": 910
+      "sha256": "0674bf410cfdcddc3a74e328116d8ec412f28cfb261e4092f77ed1a74c0965a2",
+      "bytes": 1899
     },
     {
       "path": "integrations/claude/README.md",
-      "sha256": "e4b26304aee3cc1844d503106a3d1c7f288e4062ead3baad9e2a558d87169f0a",
-      "bytes": 620
+      "sha256": "ec5a3b063ff15145df359660dc652be9f95838bf8682209e2a26dce3732d302b",
+      "bytes": 600
     },
     {
       "path": "integrations/codex/README.md",
-      "sha256": "e66b1df2cf6f56a0d558a6af4965b55c78d9a147efd8650362a38aa14b7de21f",
-      "bytes": 512
+      "sha256": "02178dd932977994138b4751619e7168a2dd675dc02297444403498ee144290b",
+      "bytes": 558
     },
     {
       "path": "integrations/gemini/README.md",
-      "sha256": "9cf180a38d55fa33465a4295c584ba36dfeb0b9329fa564d031bbbf5e305f6c0",
-      "bytes": 378
+      "sha256": "a7dee9667902d806cf4a9a073a50f9c2fde1ecb829590985af51f4ad0f714c45",
+      "bytes": 557
     },
     {
       "path": "original/DSG_2_0_ORIGINAL_REPORT.md",
@@ -165,8 +166,8 @@
     },
     {
       "path": "rust-scaffold/Cargo.lock",
-      "sha256": "0c33444b17e4cc3dbd62f6d51617f7e6627fb8375400984b6e2e27a2ba6afb3d",
-      "bytes": 19012
+      "sha256": "3c4626a80ce16235acf169f7f799bfc4b56d9b7417036d4486bc017581a7495e",
+      "bytes": 19031
     },
     {
       "path": "rust-scaffold/Cargo.toml",
@@ -175,8 +176,8 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/Cargo.toml",
-      "sha256": "5842111a34aedc62695d0de752568ebb2931d43ce0f9e9ab25a6baa2ee912925",
-      "bytes": 348
+      "sha256": "3c0479988314bbf50420c0d3b66143d1ee59fa63138735e844dd9268d479acd0",
+      "bytes": 453
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/src/cleanup_cli.rs",
@@ -189,9 +190,24 @@
       "bytes": 11181
     },
     {
+      "path": "rust-scaffold/crates/dsg-cli/src/hook_install.rs",
+      "sha256": "b08512dc5b3f45bd9ee5420af0c183ed5bca2ca6a94c85b2fa32d137b8043d47",
+      "bytes": 26616
+    },
+    {
+      "path": "rust-scaffold/crates/dsg-cli/src/hooks.rs",
+      "sha256": "6b0c51853cf8bf3698434df920531a09b74e3dc5d8ad7b8d94ebdf27322072ac",
+      "bytes": 10100
+    },
+    {
       "path": "rust-scaffold/crates/dsg-cli/src/main.rs",
-      "sha256": "76a41dcf7050e6101cdf3c3e1e4cdb735d9cba61e0467821fdbcc7c7f57b5be1",
-      "bytes": 17095
+      "sha256": "b2b57e26044821f901fff4f83d9673531c795628482fe2434f7d59d86b1c708e",
+      "bytes": 19186
+    },
+    {
+      "path": "rust-scaffold/crates/dsg-cli/src/mcp.rs",
+      "sha256": "fe305d2ef12bc4cce13da136b99d92bf1bbb03d7528e6b057761766c244dbb31",
+      "bytes": 12968
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/tests/cli.rs",
@@ -254,6 +270,11 @@
       "bytes": 16588
     },
     {
+      "path": "scripts/check-agent-integration.py",
+      "sha256": "ea939ba48b80a4da275fbef2865e741a2320022425ec0a35ba75cdd2b18d5685",
+      "bytes": 15141
+    },
+    {
       "path": "scripts/check-cleanup.py",
       "sha256": "a2fb7b8aa23117f73982d97eb740784fe5beb3ca06c30173c51b39863b48316d",
       "bytes": 8019
@@ -275,8 +296,8 @@
     },
     {
       "path": "scripts/test-rust.sh",
-      "sha256": "5ca249d75c63330999f3dd6530a8a1f6bc44d5dc7b97093c097ffde4ebd59790",
-      "bytes": 3261
+      "sha256": "32a0180a91ed00e9bbfe14204807d86f941ac7a5505bb5ae322da3c7d6089c58",
+      "bytes": 3376
     },
     {
       "path": "scripts/test.sh",

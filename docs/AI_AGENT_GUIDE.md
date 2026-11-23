@@ -14,9 +14,6 @@ PRD → REQUIREMENTS → ARCHITECTURE → API_SPEC → TASK → TEST_PLAN → �
 - 대량 파일 스캔/삭제는 사용자 승인 및 dry-run 선행.
 - 기능 구현과 테스트 증거는 문서상의 REQ ID와 연결.
 
-## Hook 위치
-- Claude: `.claude/settings.json` 또는 사용자 설정
-- Codex: 공식 Hooks 설정 형식 참조(버전별 확인)
-- Gemini: `.gemini/settings.json`
+## 훅과 읽기 전용 도구
 
-예시 어댑터는 `integrations/`에 있으나 자동 설치는 미지원. `poc`의 Hook 예제는 미검증 CLI 호환 부분이 있으므로 운영 환경에 바로 설치하지 마십시오.
+프로젝트 설정에 Rust `dsg` 훅을 등록하고, 사용 중인 CLI의 훅 신뢰 설정과 버전을 확인한다. 실행을 차단당한 명령은 정책을 검토한다. 상태·정책·정리 후보를 조회할 때는 지정 프로젝트의 stdio MCP를 사용할 수 있다. [에이전트 설치와 제거](../integrations/README.md) · [MCP 도구 명세](API_SPEC.md#읽기-전용-mcp)

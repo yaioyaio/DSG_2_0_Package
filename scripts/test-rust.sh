@@ -63,4 +63,5 @@ with tempfile.TemporaryDirectory(prefix='dsg-rust-test-') as fixture:
         invocation.append(docker_context)
     subprocess.run(invocation, timeout=70, check=True)
     subprocess.run(['python3', '../scripts/check-cleanup.py', str(executable)], timeout=65, check=True)
+    subprocess.run(['python3', '../scripts/check-agent-integration.py', str(executable)], timeout=155, check=True)
 PY

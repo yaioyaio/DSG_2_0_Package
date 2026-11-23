@@ -210,9 +210,11 @@ dependencies = [
  "ctrlc",
  "dsg-core",
  "getrandom",
+ "libc",
  "serde",
  "serde_json",
  "sha2",
+ "shlex",
  "tempfile",
 ]
 

@@ -1,9 +1,7 @@
 # Codex CLI 연동
 
-현재 문서 기준 Codex PreToolUse 차단 응답: `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"..."}}`.
+`dsg --root <프로젝트> agents install --agent codex`는 `.codex/hooks.json`에 `PreToolUse`의 `Bash` 훅을 추가한다. 프로젝트와 훅 등록을 검토한 뒤 Codex에서 신뢰를 승인한다. 변경된 명령은 다시 검토한다. DSG는 일치하는 다른 훅의 실행 순서에 의존하지 않는다. [Codex Hooks 문서](https://developers.openai.com/codex/hooks)
 
-공식: https://learn.chatgpt.com/docs/hooks
-
-샘플 입력: `{"tool_name":"Bash","tool_input":{"command":"docker volume prune"}}`
-
-각 Hook은 다른 매칭 Hook과 병행 실행될 수 있습니다. DSG 정책과 잠금은 Hook 순서에 의존하지 않도록 구현하십시오. 자동 설치는 미구현입니다.
+```sh
+printf '%s\n' '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"docker volume prune"}}' | dsg hook --agent codex
+```
