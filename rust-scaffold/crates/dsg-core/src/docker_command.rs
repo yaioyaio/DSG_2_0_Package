@@ -2,6 +2,8 @@ use crate::docker::{DockerOperation, DockerRead, QueryFailure};
 use std::io;
 #[cfg(any(unix, windows))]
 use std::io::Read;
+#[cfg(unix)]
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdout, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -40,6 +42,15 @@ const IMAGE_FORMAT: &str = concat!(
 pub struct DockerCli {
     context: String,
     deadline: Instant,
+    #[cfg(unix)]
+    local: Option<LocalClient>,
+}
+
+#[cfg(unix)]
+struct LocalClient {
+    executable: PathBuf,
+    host: String,
+    config: PathBuf,
 }
 
 impl DockerCli {
@@ -58,10 +69,50 @@ impl DockerCli {
         Ok(Self {
             context: context.to_owned(),
             deadline: Instant::now() + INVENTORY_TIMEOUT,
+            #[cfg(unix)]
+            local: None,
         })
     }
 
-    fn command(&self, operation: DockerOperation<'_>) -> Result<Command, QueryFailure> {
+    #[cfg(unix)]
+    pub fn for_local_socket(
+        executable: &Path,
+        socket: &Path,
+        config: &Path,
+    ) -> Result<Self, QueryFailure> {
+        let path = socket
+            .to_str()
+            .filter(|path| !path.chars().any(char::is_control) && path.trim_end() == *path);
+        if !executable.is_absolute()
+            || !socket.is_absolute()
+            || !config.is_absolute()
+            || path.is_none()
+        {
+            return Err(QueryFailure::InvalidSelector);
+        }
+        let mut client = Self::new("dsg-local")?;
+        client.local = Some(LocalClient {
+            executable: executable.to_owned(),
+            host: format!("unix://{}", path.ok_or(QueryFailure::InvalidSelector)?),
+            config: config.to_owned(),
+        });
+        Ok(client)
+    }
+
+    fn base_command(&self) -> Command {
+        #[cfg(unix)]
+        if let Some(local) = &self.local {
+            let mut command = Command::new(&local.executable);
+            command
+                .env_clear()
+                .env("HOME", &local.config)
+                .env("PATH", "/usr/bin:/bin")
+                .arg("--config")
+                .arg(&local.config)
+                .arg("--host")
+                .arg(&local.host);
+            return command;
+        }
         let mut command = Command::new("docker");
         command
             .arg("--context")
@@ -69,7 +120,11 @@ impl DockerCli {
             .env_remove("DOCKER_HOST")
             .env_remove("DOCKER_CONTEXT")
             .env_remove("DOCKER_API_VERSION");
+        command
+    }
 
+    fn command(&self, operation: DockerOperation<'_>) -> Result<Command, QueryFailure> {
+        let mut command = self.base_command();
         match operation {
             DockerOperation::Engine => command.args(["info", "--format", "{{.ID}}"]),
             DockerOperation::Containers => command.args([
@@ -374,10 +429,8 @@ mod tests {
 
     #[test]
     fn exhausted_inventory_budget_prevents_child_spawn() {
-        let docker = DockerCli {
-            context: "default".to_owned(),
-            deadline: Instant::now(),
-        };
+        let mut docker = DockerCli::new("default").unwrap();
+        docker.deadline = Instant::now();
         assert!(matches!(
             docker.query(DockerOperation::Engine),
             Err(QueryFailure::Timeout)

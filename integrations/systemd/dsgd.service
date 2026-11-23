@@ -1,0 +1,23 @@
+[Unit]
+Description=DSG read-only Docker broker
+StartLimitIntervalSec=60
+StartLimitBurst=2
+
+[Service]
+Type=simple
+User=dsg
+Group=dsg
+ExecStart=/opt/dsg/bin/dsgd --listen /run/dsgd/client/broker.sock --upstream /run/dsg-private/docker.sock --docker-executable /usr/bin/docker --empty-config-dir /var/lib/dsgd/docker-empty --engine-id REPLACE_WITH_ENGINE_ID --allow-uid REPLACE_WITH_CLIENT_UID
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=30s
+NoNewPrivileges=yes
+PrivateDevices=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/run/dsgd/client
+RestrictAddressFamilies=AF_UNIX
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
