@@ -1,12 +1,14 @@
 use crate::policy::{is_direct_child, Policy};
-use serde::Serialize;
-use std::collections::HashSet;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, DirEntry, Metadata, ReadDir};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-const MAX_DIRECTORY_DEPTH: usize = 64;
+pub(crate) const MAX_DIRECTORY_DEPTH: usize = 64;
+pub(crate) type EntryProof = HashMap<FileIdentity, [u8; 32]>;
 
 #[derive(Debug, Serialize)]
 pub struct ScanReport {
@@ -28,7 +30,7 @@ pub struct ScanEntry {
     pub issues: Vec<InspectionIssue>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct GcPlan {
     pub project_id: String,
     pub candidates: Vec<Candidate>,
@@ -37,29 +39,30 @@ pub struct GcPlan {
     pub observed_at_unix: u64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct Candidate {
     pub relative_path: String,
     pub bytes: u64,
     pub modified_at_unix: u64,
     pub modified_at_subsec_nanos: u32,
     pub identity: Option<FileIdentity>,
-    pub reason: &'static str,
+    pub subtree_digest: String,
+    pub reason: String,
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub struct FileIdentity {
     pub device: u64,
     pub inode: u64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ExcludedCandidate {
     pub relative_path: String,
     pub reason: InspectionIssue,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InspectionIssue {
     ProtectedName,
@@ -67,6 +70,8 @@ pub enum InspectionIssue {
     UnsupportedEntryName,
     LinkOrReparsePoint,
     MountBoundary,
+    SharedFile,
+    SharedOrUnowned,
     UnsupportedType,
     MetadataUnavailable,
     ChangedDuringInspection,
@@ -101,9 +106,13 @@ pub fn scan(root: &Path, policy: &Policy) -> io::Result<ScanReport> {
 
     for name in &policy.scan_dirs {
         let inspection = match inspect_output(&root, &root_metadata, name, policy) {
-            Ok(Some(output)) if seen_outputs.insert(output.key()) => {
-                inspect_tree(&output, &root_metadata, policy, &mut remaining, Mode::Scan)
-            }
+            Ok(Some(output)) if seen_outputs.insert(output.key()) => inspect_tree(
+                &output,
+                &root_metadata,
+                policy,
+                &mut remaining,
+                InspectionOptions::scan(),
+            ),
             Ok(_) => continue,
             Err(issue) => Inspection {
                 issues: vec![issue],
@@ -154,7 +163,16 @@ pub fn plan(root: &Path, policy: &Policy) -> io::Result<GcPlan> {
             if !seen_outputs.insert(output.key()) {
                 return Err(InspectionIssue::DuplicateOutput);
             }
-            candidate(name, output, &root_metadata, policy, &mut remaining, now).map(Some)
+            candidate(
+                name,
+                output,
+                &root_metadata,
+                policy,
+                &mut remaining,
+                now,
+                InspectionOptions::candidate(None, None),
+            )
+            .map(Some)
         });
         match result {
             Ok(Some(candidate)) => plan.candidates.push(candidate),
@@ -208,6 +226,7 @@ impl DirectorySnapshot {
 struct Directory {
     path: PathBuf,
     snapshot: DirectorySnapshot,
+    entry_digest: Option<[u8; 32]>,
 }
 
 #[derive(Eq, Hash, PartialEq)]
@@ -225,6 +244,10 @@ impl Directory {
     }
 
     fn verify(&self) -> Result<(), InspectionIssue> {
+        self.verified_metadata().map(|_| ())
+    }
+
+    fn verified_metadata(&self) -> Result<Metadata, InspectionIssue> {
         let metadata =
             fs::symlink_metadata(&self.path).map_err(|_| InspectionIssue::MetadataUnavailable)?;
         if is_link_or_reparse_point(&metadata) {
@@ -238,7 +261,7 @@ impl Directory {
         if fs::canonicalize(&self.path).ok().as_ref() != Some(&self.path) {
             return Err(InspectionIssue::ChangedDuringInspection);
         }
-        Ok(())
+        Ok(metadata)
     }
 
     fn read(self) -> Result<OpenDirectory, InspectionIssue> {
@@ -248,13 +271,62 @@ impl Directory {
         Ok(OpenDirectory {
             directory: self,
             entries,
+            child_digests: Vec::new(),
         })
     }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) fn output_identity(
+    root: &Path,
+    name: &str,
+    policy: &Policy,
+    mount: &MountId,
+) -> Option<FileIdentity> {
+    let (root, metadata) = resolve_root(root).ok()?;
+    let output = inspect_output(&root, &metadata, name, policy).ok()??;
+    if !mount.contains(&output.path) {
+        return None;
+    }
+    let metadata = output.verified_metadata().ok()?;
+    if !secure_gc_permissions(&metadata, false) {
+        return None;
+    }
+    output.snapshot.identity
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) fn measure_gc_candidate(
+    root: &Path,
+    parent: &Path,
+    name: &str,
+    policy: &Policy,
+    mount: &MountId,
+    proof: Option<&mut EntryProof>,
+) -> Result<Candidate, InspectionIssue> {
+    let (root, root_metadata) =
+        resolve_root(root).map_err(|_| InspectionIssue::MetadataUnavailable)?;
+    if !parent.starts_with(&root) || !mount.contains(parent) {
+        return Err(InspectionIssue::MountBoundary);
+    }
+    let output = inspect_output(parent, &root_metadata, name, policy)?
+        .ok_or(InspectionIssue::MetadataUnavailable)?;
+    let mut remaining = policy.max_scan_files;
+    candidate(
+        name,
+        output,
+        &root_metadata,
+        policy,
+        &mut remaining,
+        SystemTime::now(),
+        InspectionOptions::candidate(Some(mount), proof),
+    )
 }
 
 struct OpenDirectory {
     directory: Directory,
     entries: ReadDir,
+    child_digests: Vec<[u8; 32]>,
 }
 
 fn inspect_output(
@@ -266,7 +338,7 @@ fn inspect_output(
     if !is_direct_child(name) {
         return Err(InspectionIssue::InvalidOutputName);
     }
-    if policy.protects(name) {
+    if protected_entry(policy, name) {
         return Err(InspectionIssue::ProtectedName);
     }
     let path = root.join(name);
@@ -287,22 +359,24 @@ fn inspect_output(
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or(InspectionIssue::UnsupportedEntryName)?;
-    if policy.protects(canonical_name) {
+    if protected_entry(policy, canonical_name) {
         return Err(InspectionIssue::ProtectedName);
     }
     Ok(Some(Directory {
         path: canonical,
         snapshot: DirectorySnapshot::from_metadata(&metadata)?,
+        entry_digest: None,
     }))
 }
 
 fn candidate(
     name: &str,
-    output: Directory,
+    mut output: Directory,
     root_metadata: &Metadata,
     policy: &Policy,
     remaining: &mut usize,
     now: SystemTime,
+    options: InspectionOptions<'_>,
 ) -> Result<Candidate, InspectionIssue> {
     let snapshot = output.snapshot;
     let age = now
@@ -315,7 +389,12 @@ fn candidate(
         .modified
         .duration_since(UNIX_EPOCH)
         .map_err(|_| InspectionIssue::MetadataUnavailable)?;
-    let inspection = inspect_tree(&output, root_metadata, policy, remaining, Mode::Candidate);
+    let metadata = output.verified_metadata()?;
+    if options.mount.is_some() && !secure_gc_permissions(&metadata, false) {
+        return Err(InspectionIssue::SharedOrUnowned);
+    }
+    output.entry_digest = Some(entry_digest("", &metadata, true)?);
+    let inspection = inspect_tree(&output, root_metadata, policy, remaining, options);
     if let Some(issue) = inspection.issues.first() {
         return Err(*issue);
     }
@@ -325,7 +404,10 @@ fn candidate(
         modified_at_unix: modified.as_secs(),
         modified_at_subsec_nanos: modified.subsec_nanos(),
         identity: snapshot.identity,
-        reason: "expired_generated_output",
+        subtree_digest: inspection
+            .subtree_digest
+            .ok_or(InspectionIssue::MetadataUnavailable)?,
+        reason: "expired_generated_output".to_owned(),
     })
 }
 
@@ -335,11 +417,44 @@ enum Mode {
     Candidate,
 }
 
+struct InspectionOptions<'a> {
+    mode: Mode,
+    mount: Option<&'a MountId>,
+    proof: Option<&'a mut EntryProof>,
+}
+
+impl<'a> InspectionOptions<'a> {
+    fn scan() -> Self {
+        Self {
+            mode: Mode::Scan,
+            mount: None,
+            proof: None,
+        }
+    }
+
+    fn candidate(mount: Option<&'a MountId>, proof: Option<&'a mut EntryProof>) -> Self {
+        Self {
+            mode: Mode::Candidate,
+            mount,
+            proof,
+        }
+    }
+
+    fn record_entry(&mut self, identity: Option<FileIdentity>, digest: Option<[u8; 32]>) {
+        if let (Some(proof), Some(identity), Some(digest)) =
+            (self.proof.as_deref_mut(), identity, digest)
+        {
+            proof.insert(identity, digest);
+        }
+    }
+}
+
 #[derive(Default)]
 struct Inspection {
     bytes: u64,
     files: usize,
     issues: Vec<InspectionIssue>,
+    subtree_digest: Option<String>,
 }
 
 impl Inspection {
@@ -356,9 +471,17 @@ fn inspect_tree(
     root_metadata: &Metadata,
     policy: &Policy,
     remaining: &mut usize,
-    mode: Mode,
+    mut options: InspectionOptions<'_>,
 ) -> Inspection {
+    let mode = options.mode;
     let mut result = Inspection::default();
+    if options
+        .mount
+        .is_some_and(|expected| !expected.contains(&output.path))
+    {
+        result.record_issue(InspectionIssue::MountBoundary, mode);
+        return result;
+    }
     let start = match output.clone().read() {
         Ok(start) => start,
         Err(issue) => {
@@ -377,7 +500,19 @@ fn inspect_tree(
                     break;
                 }
             }
-            stack.pop();
+            let finished = stack.pop().expect("current directory is on the stack");
+            if let Some(entry_digest) = finished.directory.entry_digest {
+                let digest = directory_digest(entry_digest, finished.child_digests);
+                match stack.last_mut() {
+                    Some(parent) => parent.child_digests.push(digest),
+                    None => {
+                        result.subtree_digest = Some(format!(
+                            "{:x}",
+                            sha2::digest::Output::<Sha256>::from(digest)
+                        ))
+                    }
+                }
+            }
             continue;
         };
         if *remaining == 0 {
@@ -387,7 +522,9 @@ fn inspect_tree(
         *remaining -= 1;
         let inspected = entry
             .map_err(|_| InspectionIssue::MetadataUnavailable)
-            .and_then(|entry| inspect_child(entry, &current.directory, root_metadata, policy));
+            .and_then(|entry| {
+                inspect_child(entry, &current.directory, root_metadata, policy, &options)
+            });
         let issue = match inspected {
             Ok(Child::Directory(directory)) => {
                 if directory
@@ -399,6 +536,7 @@ fn inspect_tree(
                 } else if stack.len() >= MAX_DIRECTORY_DEPTH {
                     InspectionIssue::DepthLimitReached
                 } else {
+                    options.record_entry(directory.snapshot.identity, directory.entry_digest);
                     match directory.read() {
                         Ok(open) => {
                             stack.push(open);
@@ -408,8 +546,16 @@ fn inspect_tree(
                     }
                 }
             }
-            Ok(Child::File(bytes)) => {
+            Ok(Child::File {
+                bytes,
+                identity,
+                digest,
+            }) => {
                 result.files += 1;
+                options.record_entry(identity, digest);
+                if let Some(digest) = digest {
+                    current.child_digests.push(digest);
+                }
                 if let Some(total) = result.bytes.checked_add(bytes) {
                     result.bytes = total;
                     continue;
@@ -431,7 +577,11 @@ fn inspect_tree(
 
 enum Child {
     Directory(Directory),
-    File(u64),
+    File {
+        bytes: u64,
+        identity: Option<FileIdentity>,
+        digest: Option<[u8; 32]>,
+    },
 }
 
 fn inspect_child(
@@ -439,26 +589,201 @@ fn inspect_child(
     parent: &Directory,
     root_metadata: &Metadata,
     policy: &Policy,
+    options: &InspectionOptions<'_>,
 ) -> Result<Child, InspectionIssue> {
     let name = entry.file_name();
     let name = name.to_str().ok_or(InspectionIssue::UnsupportedEntryName)?;
-    if policy.protects(name) {
+    if protected_entry(policy, name) {
         return Err(InspectionIssue::ProtectedName);
     }
     let metadata = entry
         .metadata()
         .map_err(|_| InspectionIssue::MetadataUnavailable)?;
     check_boundary(&metadata, root_metadata, parent.snapshot.identity)?;
+    if options
+        .mount
+        .is_some_and(|expected| !expected.contains(&entry.path()))
+    {
+        return Err(InspectionIssue::MountBoundary);
+    }
+    if options.mount.is_some() && !secure_gc_permissions(&metadata, false) {
+        return Err(InspectionIssue::SharedOrUnowned);
+    }
     if metadata.is_file() {
-        return Ok(Child::File(metadata.len()));
+        if options.mode == Mode::Candidate && shared_file(&metadata) {
+            return Err(InspectionIssue::SharedFile);
+        }
+        let digest = (options.mode == Mode::Candidate)
+            .then(|| entry_digest(name, &metadata, false))
+            .transpose()?;
+        return Ok(Child::File {
+            bytes: metadata.len(),
+            identity: identity(&metadata),
+            digest,
+        });
     }
     if metadata.is_dir() {
         return Ok(Child::Directory(Directory {
             path: entry.path(),
             snapshot: DirectorySnapshot::from_metadata(&metadata)?,
+            entry_digest: (options.mode == Mode::Candidate)
+                .then(|| entry_digest(name, &metadata, false))
+                .transpose()?,
         }));
     }
     Err(InspectionIssue::UnsupportedType)
+}
+
+pub(crate) fn entry_digest(
+    name: &str,
+    metadata: &Metadata,
+    root: bool,
+) -> Result<[u8; 32], InspectionIssue> {
+    let mut hash = Sha256::new();
+    hash.update(b"DSG metadata entry v1");
+    hash.update((name.len() as u64).to_le_bytes());
+    hash.update(name.as_bytes());
+    hash.update([u8::from(metadata.is_dir())]);
+    if metadata.is_file() {
+        hash.update(metadata.len().to_le_bytes());
+    }
+    let modified = metadata
+        .modified()
+        .map_err(|_| InspectionIssue::MetadataUnavailable)?;
+    let (negative, duration) = match modified.duration_since(UNIX_EPOCH) {
+        Ok(duration) => (false, duration),
+        Err(error) => (true, error.duration()),
+    };
+    hash.update([u8::from(negative)]);
+    hash.update(duration.as_secs().to_le_bytes());
+    hash.update(duration.subsec_nanos().to_le_bytes());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        hash.update(metadata.dev().to_le_bytes());
+        hash.update(metadata.ino().to_le_bytes());
+        hash.update(metadata.mode().to_le_bytes());
+        hash.update(metadata.uid().to_le_bytes());
+        hash.update(metadata.gid().to_le_bytes());
+        if !root {
+            // Moving the approved top directory can change its ctime.
+            hash.update(metadata.ctime().to_le_bytes());
+            hash.update(metadata.ctime_nsec().to_le_bytes());
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = root;
+    Ok(hash.finalize().into())
+}
+
+fn directory_digest(entry: [u8; 32], mut children: Vec<[u8; 32]>) -> [u8; 32] {
+    // At most one 32-byte digest per visited child is retained across open frames.
+    children.sort_unstable();
+    let mut hash = Sha256::new();
+    hash.update(b"DSG metadata directory v1");
+    hash.update(entry);
+    for child in children {
+        hash.update(child);
+    }
+    hash.finalize().into()
+}
+
+#[cfg(unix)]
+pub(crate) fn shared_file(metadata: &Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    metadata.nlink() != 1
+}
+
+#[cfg(not(unix))]
+fn shared_file(_: &Metadata) -> bool {
+    false
+}
+
+pub(crate) fn protected_entry(policy: &Policy, name: &str) -> bool {
+    policy.protects(name)
+        || name.eq_ignore_ascii_case(".dsg")
+        || name.eq_ignore_ascii_case(".dsg.json")
+}
+
+#[cfg(unix)]
+pub(crate) fn secure_gc_permissions(metadata: &Metadata, private: bool) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let forbidden = if private { 0o077 } else { 0o022 };
+    // Getting the effective owner ID does not dereference any pointers.
+    metadata.uid() == unsafe { libc::geteuid() } && metadata.mode() & forbidden == 0
+}
+
+#[cfg(not(unix))]
+fn secure_gc_permissions(_: &Metadata, _: bool) -> bool {
+    false
+}
+
+#[derive(Eq, PartialEq)]
+pub(crate) struct MountId {
+    #[cfg(target_os = "linux")]
+    id: u64,
+    #[cfg(target_os = "macos")]
+    name: [libc::c_char; 1024],
+}
+
+impl MountId {
+    #[cfg(target_os = "linux")]
+    pub(crate) fn read(path: &Path) -> io::Result<Self> {
+        use std::{ffi::CString, mem::MaybeUninit, os::unix::ffi::OsStrExt};
+        let path = CString::new(path.as_os_str().as_bytes())?;
+        let mut info = MaybeUninit::<libc::statx>::zeroed();
+        // The path and writable statx storage outlive the call.
+        let status = unsafe {
+            libc::statx(
+                libc::AT_FDCWD,
+                path.as_ptr(),
+                libc::AT_SYMLINK_NOFOLLOW | libc::AT_NO_AUTOMOUNT,
+                libc::STATX_MNT_ID,
+                info.as_mut_ptr(),
+            )
+        };
+        if status != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let info = unsafe { info.assume_init() };
+        if info.stx_mask & libc::STATX_MNT_ID == 0 {
+            return Err(io::Error::from(io::ErrorKind::Unsupported));
+        }
+        Ok(Self {
+            id: info.stx_mnt_id,
+        })
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn read(path: &Path) -> io::Result<Self> {
+        use std::{ffi::CString, mem::MaybeUninit, os::unix::ffi::OsStrExt};
+        let path = CString::new(path.as_os_str().as_bytes())?;
+        let mut info = MaybeUninit::<libc::statfs>::zeroed();
+        // statfs returns volume metadata; no filesystem source field is used.
+        if unsafe { libc::statfs(path.as_ptr(), info.as_mut_ptr()) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let info = unsafe { info.assume_init() };
+        if info.f_flags & libc::MNT_LOCAL as u32 == 0 || info.f_mntonname[0] == 0 {
+            return Err(io::Error::from(io::ErrorKind::Unsupported));
+        }
+        let mut name = info.f_mntonname;
+        if let Some(end) = name.iter().position(|byte| *byte == 0) {
+            name[end..].fill(0);
+        } else {
+            return Err(io::Error::from(io::ErrorKind::InvalidData));
+        }
+        Ok(Self { name })
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    fn read(_: &Path) -> io::Result<Self> {
+        Err(io::Error::from(io::ErrorKind::Unsupported))
+    }
+
+    pub(crate) fn contains(&self, path: &Path) -> bool {
+        Self::read(path).is_ok_and(|current| current == *self)
+    }
 }
 
 fn check_boundary(
@@ -483,7 +808,7 @@ fn check_boundary(
 }
 
 #[cfg(unix)]
-fn identity(metadata: &Metadata) -> Option<FileIdentity> {
+pub(crate) fn identity(metadata: &Metadata) -> Option<FileIdentity> {
     use std::os::unix::fs::MetadataExt;
     Some(FileIdentity {
         device: metadata.dev(),

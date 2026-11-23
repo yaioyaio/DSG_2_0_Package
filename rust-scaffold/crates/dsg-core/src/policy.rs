@@ -24,6 +24,7 @@ const DEFAULT_SCAN_DIRS: &[&str] = &[
 ];
 const SYSTEM_PROTECTED: &[&str] = &[
     ".git",
+    ".dsg",
     "node_modules",
     ".venv",
     ".env",

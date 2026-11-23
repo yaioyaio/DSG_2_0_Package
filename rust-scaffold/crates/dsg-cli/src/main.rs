@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
 
+mod cleanup_cli;
 mod execution;
 
 #[derive(Parser)]
@@ -52,6 +53,46 @@ enum Command {
     },
     /// 파일을 변경하지 않고 정리 후보의 계획을 기록합니다.
     GcPlan,
+    /// 소유권을 확인한 생성 폴더를 정리 대상으로 등록합니다.
+    GcOwn {
+        #[arg(long)]
+        candidate: String,
+        #[arg(long, required = true)]
+        confirm_generated: bool,
+    },
+    /// 계획의 지정 후보에만 일회용 적용 승인을 발급합니다.
+    GcApprove {
+        #[arg(long)]
+        plan: i64,
+        #[arg(long)]
+        candidate: String,
+        #[arg(long, required = true)]
+        confirm: bool,
+    },
+    /// 표준 입력의 승인으로 지정 후보를 다시 검증하고 적용합니다.
+    GcApply {
+        #[arg(long)]
+        plan: i64,
+        #[arg(long, required = true)]
+        approval_stdin: bool,
+    },
+    /// 적용 도중 격리한 산출물의 원래 경로 복원을 시도합니다.
+    GcRecover {
+        #[arg(long)]
+        plan: i64,
+    },
+    /// 관리 대상 보조 Git 워크트리를 생성합니다.
+    WorktreeCreate {
+        #[arg(long)]
+        branch: String,
+        #[arg(long)]
+        destination: PathBuf,
+    },
+    /// 검증한 Git 완료 이벤트의 보조 워크트리를 확인합니다.
+    CleanupGit {
+        #[arg(long)]
+        feature: String,
+    },
     /// 지정된 Docker 컨텍스트의 리소스와 중복 후보를 조회합니다.
     DockerScan {
         #[arg(long)]
@@ -63,6 +104,8 @@ enum Command {
     Exec {
         #[arg(long, default_value_t = 60, value_parser = clap::value_parser!(u16).range(1..=120))]
         timeout: u16,
+        #[arg(long)]
+        auto_clean_cargo: bool,
         #[arg(required = true, num_args = 1.., trailing_var_arg = true, allow_hyphen_values = true)]
         command: Vec<String>,
     },
@@ -240,13 +283,7 @@ fn run(cli: &Cli) -> Result<Output, CliError> {
             let plan = filesystem::plan(&root, &settings)
                 .map_err(|_| CliError::new("SCAN_FAILED", "정리 후보 확인에 실패했습니다"))?;
             let payload = json!(plan);
-            let policy_digest = format!(
-                "{:x}",
-                Sha256::digest(serde_json::to_vec(&settings).map_err(|_| CliError::new(
-                    "CONFIG_INVALID",
-                    "정책 스냅샷을 만들 수 없습니다"
-                ))?)
-            );
+            let policy_digest = policy_digest(&settings)?;
             let record = registry
                 .save_plan(
                     project.id,
@@ -301,19 +338,46 @@ fn run(cli: &Cli) -> Result<Output, CliError> {
                 exit,
             })
         }
-        Command::Exec { timeout, command } => {
-            execution::exec(cli, &root, &settings, *timeout, command)
-        }
+        Command::Exec {
+            timeout,
+            auto_clean_cargo,
+            command,
+        } => execution::exec(cli, &root, &settings, *timeout, *auto_clean_cargo, command),
         Command::DockerReuse {
             context,
             expectation_json,
         } => execution::reuse(cli, &root, &settings, context, expectation_json),
+        Command::GcOwn {
+            candidate,
+            confirm_generated: true,
+        } => cleanup_cli::own(cli, &root, &settings, candidate),
+        Command::GcApprove {
+            plan,
+            candidate,
+            confirm: true,
+        } => cleanup_cli::approve(cli, &root, &settings, *plan, candidate),
+        Command::GcApply {
+            plan,
+            approval_stdin: true,
+        } => cleanup_cli::apply(cli, &root, &settings, *plan, false),
+        Command::GcRecover { plan } => cleanup_cli::apply(cli, &root, &settings, *plan, true),
+        Command::WorktreeCreate {
+            branch,
+            destination,
+        } => cleanup_cli::create_worktree(cli, &root, branch, destination),
+        Command::CleanupGit { feature } => cleanup_cli::complete_git(cli, &root, feature),
+        Command::GcOwn { .. } | Command::GcApprove { .. } | Command::GcApply { .. } => Err(
+            CliError::new("NEEDS_APPROVAL", "지정한 정리 요청을 명시적으로 승인하세요"),
+        ),
     }
 }
 
 fn open_registry(cli: &Cli) -> Result<Registry, CliError> {
-    let path = cli
-        .state_dir
+    Registry::open(&local_state_dir(cli)?).map_err(registry_error)
+}
+
+fn local_state_dir(cli: &Cli) -> Result<PathBuf, CliError> {
+    cli.state_dir
         .clone()
         .or_else(|| std::env::var_os("DSG_STATE_HOME").map(PathBuf::from))
         .or_else(|| {
@@ -329,12 +393,17 @@ fn open_registry(cli: &Cli) -> Result<Registry, CliError> {
                 "REGISTRY_UNAVAILABLE",
                 "--state-dir로 로컬 상태 위치를 지정하세요",
             )
-        })?;
-    Registry::open(&path).map_err(registry_error)
+        })
 }
 
 fn registry_error(_: dsg_core::registry::RegistryError) -> CliError {
     CliError::new("REGISTRY_UNAVAILABLE", "로컬 상태 저장소를 확인하세요")
+}
+
+fn policy_digest(policy: &Policy) -> Result<String, CliError> {
+    let bytes = serde_json::to_vec(policy)
+        .map_err(|_| CliError::new("CONFIG_INVALID", "정책 스냅샷을 만들 수 없습니다"))?;
+    Ok(format!("{:x}", Sha256::digest(bytes)))
 }
 
 fn read_scan(root: &Path, settings: &Policy) -> Result<ScanReport, CliError> {
