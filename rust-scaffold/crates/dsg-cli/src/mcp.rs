@@ -1,4 +1,4 @@
-use super::{budget_status, check_budget, read_scan, Cli};
+use super::{budget_status, check_budget, mcp_state::Reader, read_scan, Cli};
 use dsg_core::{
     docker, docker_command::DockerCli, evaluate_command, filesystem, policy::Policy, Decision,
 };
@@ -11,6 +11,10 @@ const VERSION: &str = "2025-06-18";
 const MAX_FRAME: usize = 64 * 1024;
 const MAX_ARGC: usize = 128;
 const MAX_ARG_BYTES: usize = 4096;
+const MCP_DOCKER_RESOURCE_LIMIT: usize = 8;
+const DASHBOARD_DOCKER_RESOURCE_LIMIT: usize = 64;
+const EXECUTION_STATUS: &str = "dsg_get_execution_status";
+const APPROVAL_STATUS: &str = "dsg_get_gc_approval_status";
 const TOOLS: &[(&str, &str)] = &[
     ("dsg_get_health", "프로젝트 예산과 측정 상태를 조회합니다."),
     ("dsg_scan_project", "관리 경로의 사용량 합계를 조회합니다."),
@@ -30,6 +34,14 @@ const TOOLS: &[(&str, &str)] = &[
         "dsg_get_policy",
         "세션 시작 시 적용된 정책 한도를 조회합니다.",
     ),
+    (
+        EXECUTION_STATUS,
+        "이 프로젝트에 기록된 관리형 실행 상태를 조회합니다.",
+    ),
+    (
+        APPROVAL_STATUS,
+        "이 프로젝트의 정리 계획에 대해 별도로 발행된 승인 기록의 상태를 조회합니다.",
+    ),
 ];
 
 #[derive(PartialEq, Eq)]
@@ -41,6 +53,7 @@ enum Phase {
 
 struct Server {
     project: Option<(PathBuf, Policy)>,
+    state_reader: Option<Reader>,
     phase: Phase,
 }
 
@@ -56,6 +69,7 @@ pub(super) fn run(cli: &Cli) -> ExitCode {
     });
     let server = Server {
         project,
+        state_reader: Reader::new(cli),
         phase: Phase::New,
     };
     match serve(server, io::stdin().lock(), io::stdout().lock()) {
@@ -148,7 +162,15 @@ impl Server {
                 let Some((root, policy)) = &self.project else {
                     return Some(error(id, -32001, "Project policy unavailable"));
                 };
-                match call(root, policy, params) {
+                let observation = if matches!(
+                    params["name"].as_str(),
+                    Some(EXECUTION_STATUS | APPROVAL_STATUS)
+                ) {
+                    call_state(self.state_reader.as_ref(), root, params)
+                } else {
+                    call(root, policy, params)
+                };
+                match observation {
                     Ok(data) => {
                         json!({"content":[{"type":"text","text":data.to_string()}],"isError":false})
                     }
@@ -172,6 +194,9 @@ fn tool_spec(name: &str, description: &str) -> Value {
         schema["properties"]["argv"] = json!({"type":"array","minItems":1,"maxItems":MAX_ARGC,
             "items":{"type":"string","maxLength":MAX_ARG_BYTES}});
         schema["required"] = json!(["argv"]);
+    } else if name == APPROVAL_STATUS {
+        schema["properties"]["plan_id"] = json!({"type":"integer","minimum":1,"maximum":i64::MAX});
+        schema["required"] = json!(["plan_id"]);
     }
     json!({"name":name,"description":description,"inputSchema":schema,"annotations":{"readOnlyHint":true}})
 }
@@ -179,6 +204,33 @@ fn tool_spec(name: &str, description: &str) -> Value {
 enum CallError {
     Invalid,
     Unavailable,
+}
+
+fn call_state(reader: Option<&Reader>, root: &Path, params: &Value) -> Result<Value, CallError> {
+    let plan_id = match params["name"].as_str() {
+        Some(EXECUTION_STATUS) => match params.get("arguments") {
+            None => None,
+            Some(args) if args.as_object().is_some_and(serde_json::Map::is_empty) => None,
+            _ => return Err(CallError::Invalid),
+        },
+        Some(APPROVAL_STATUS) => {
+            let args = params["arguments"].as_object().ok_or(CallError::Invalid)?;
+            if args.len() != 1 {
+                return Err(CallError::Invalid);
+            }
+            Some(
+                args.get("plan_id")
+                    .and_then(Value::as_i64)
+                    .filter(|id| *id > 0)
+                    .ok_or(CallError::Invalid)?,
+            )
+        }
+        _ => return Err(CallError::Invalid),
+    };
+    let observation = reader
+        .and_then(|reader| reader.observe(root, plan_id))
+        .ok_or(CallError::Unavailable)?;
+    serde_json::to_value(observation).map_err(|_| CallError::Unavailable)
 }
 
 fn call(root: &Path, policy: &Policy, params: &Value) -> Result<Value, CallError> {
@@ -244,14 +296,14 @@ fn call(root: &Path, policy: &Policy, params: &Value) -> Result<Value, CallError
             "critical_percent":policy.critical_percent,"max_scan_files":policy.max_scan_files,
             "max_candidates":policy.max_candidates,"gc_min_age_hours":policy.gc_min_age_hours}),
         ),
-        "dsg_inspect_docker" => docker_summary("default"),
+        "dsg_inspect_docker" => docker_summary("default", MCP_DOCKER_RESOURCE_LIMIT),
         _ => Err(CallError::Invalid),
     }
 }
 
-fn docker_summary(context: &str) -> Result<Value, CallError> {
+fn docker_summary(context: &str, max_resources: usize) -> Result<Value, CallError> {
     let backend = DockerCli::new(context).map_err(|_| CallError::Unavailable)?;
-    let report = docker::inventory(&backend, 8);
+    let report = docker::inventory(&backend, max_resources);
     Ok(json!({"status":report.status,"complete":report.complete,
         "container_count":report.containers.len(), "image_count":report.images.len(),
         "volume_count":report.volumes.len(),"duplicate_groups":report.duplicates.len()}))
@@ -263,7 +315,9 @@ pub(super) fn overview(root: &Path, policy: &Policy, docker_context: Option<&str
         "health": observe("dsg_get_health"),
         "policy": observe("dsg_get_policy"),
         "cleanup": observe("dsg_get_gc_plan"),
-        "docker": docker_context.and_then(|context| docker_summary(context).ok()),
+        "docker": docker_context.and_then(|context| {
+            docker_summary(context, DASHBOARD_DOCKER_RESOURCE_LIMIT).ok()
+        }),
     })
 }
 
@@ -276,6 +330,7 @@ mod tests {
         let project = tempfile::tempdir().unwrap();
         let mut server = Server {
             project: Some((project.path().into(), Policy::default())),
+            state_reader: None,
             phase: Phase::New,
         };
         let request = |method: &str, params: Value| json!({"jsonrpc":"2.0","id":1,"method":method,"params":params});
@@ -294,18 +349,42 @@ mod tests {
             .is_none());
         let list = server.handle(&request("tools/list", json!({}))).unwrap();
         let tools = list["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 6);
+        assert_eq!(tools.len(), 8);
+        assert_eq!(
+            tools
+                .iter()
+                .find(|tool| tool["name"] == APPROVAL_STATUS)
+                .unwrap()["inputSchema"]["required"],
+            json!(["plan_id"])
+        );
         assert!(tools
             .iter()
             .all(|t| t["annotations"]["readOnlyHint"] == true));
         for params in [
             json!({"name":"dsg_gc_apply"}),
+            json!({"name":"dsg_gc_approve"}),
+            json!({"name":"dsg_gc_recover"}),
+            json!({"name":"dsg_exec"}),
             json!({"name":"dsg_scan_project","arguments":{"root":"/"}}),
             json!({"name":"dsg_check_command","arguments":{"argv":[1]}}),
+            json!({"name":EXECUTION_STATUS,"arguments":{"project_id":2}}),
+            json!({"name":APPROVAL_STATUS,"arguments":{"plan_id":0}}),
+            json!({"name":APPROVAL_STATUS,"arguments":{"plan_id":3,"approval":"fixture"}}),
         ] {
             assert_eq!(
                 server.handle(&request("tools/call", params)).unwrap()["error"]["code"],
                 -32602
+            );
+        }
+        for params in [
+            json!({"name":EXECUTION_STATUS}),
+            json!({"name":APPROVAL_STATUS,"arguments":{"plan_id":3}}),
+        ] {
+            let response = server.handle(&request("tools/call", params)).unwrap();
+            assert_eq!(response["result"]["isError"], true);
+            assert_eq!(
+                response["result"]["content"][0]["text"],
+                "Observation unavailable"
             );
         }
         for tool in [
@@ -337,6 +416,7 @@ mod tests {
         serve(
             Server {
                 project: None,
+                state_reader: None,
                 phase: Phase::New,
             },
             vec![b'x'; MAX_FRAME + 2].as_slice(),

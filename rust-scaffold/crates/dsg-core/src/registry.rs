@@ -6,7 +6,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use fs2::FileExt;
 use rusqlite::{params, Connection, ErrorCode, OpenFlags, OptionalExtension, TransactionBehavior};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -24,6 +24,44 @@ const MAX_PLAN_BYTES: usize = 1024 * 1024;
 const LEASE_SLOTS: i64 = 2;
 const MAX_LEASE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 const MAX_APPROVAL_TTL: Duration = Duration::from_secs(15 * 60);
+
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionState {
+    None,
+    Active,
+    ExpiredUnreleased,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalState {
+    AwaitingApproval,
+    ApprovedRecorded,
+    Expired,
+    PolicyChanged,
+    OwnershipChanged,
+    Applying,
+    RecoveryRequired,
+    Applied,
+    Preserved,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "observation", rename_all = "snake_case", deny_unknown_fields)]
+pub enum StateObservation {
+    Execution {
+        status: ExecutionState,
+        observed_at_ms: i64,
+        heartbeat_at_ms: Option<i64>,
+        expires_at_ms: Option<i64>,
+    },
+    Approval {
+        status: ApprovalState,
+        observed_at_ms: i64,
+        expires_at_ms: Option<i64>,
+    },
+}
 
 const INITIAL_SCHEMA: &str = "
     CREATE TABLE project (
@@ -284,6 +322,168 @@ pub struct Registry {
     state_dir: PathBuf,
 }
 
+/// Observe the registered project under a process-level filesystem write denial.
+/// The SQLite read-only flag alone does not prevent WAL sidecar operations.
+#[cfg(target_os = "macos")]
+pub fn observe_state(
+    state_dir: &Path,
+    root: &Path,
+    label: &str,
+    policy_version: u32,
+    policy_digest: &str,
+    plan_id: Option<i64>,
+) -> Result<StateObservation, RegistryError> {
+    use std::os::unix::{ffi::OsStrExt, fs::MetadataExt};
+
+    let metadata = fs::symlink_metadata(state_dir).map_err(RegistryError::StateIo)?;
+    let owner = unsafe { libc::geteuid() };
+    if owner == 0 || metadata.uid() != owner || !metadata.is_dir() || is_shared_writable(&metadata)
+    {
+        return Err(RegistryError::UnsafeStatePath);
+    }
+    let dir = state_dir.canonicalize().map_err(RegistryError::StateIo)?;
+    let database = dir.join(DATABASE_NAME);
+    for suffix in ["", "-journal", "-wal", "-shm"] {
+        let path = dir.join(format!("{DATABASE_NAME}{suffix}"));
+        validate_state_file(&path)?;
+        match fs::symlink_metadata(path) {
+            Ok(metadata) if metadata.uid() == owner => {}
+            Err(error) if !suffix.is_empty() && error.kind() == io::ErrorKind::NotFound => {}
+            _ => return Err(RegistryError::UnsafeStatePath),
+        }
+    }
+
+    let mut uri = String::from("file:");
+    for &byte in database.as_os_str().as_bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'-' | b'_' | b'.' | b'~') {
+            uri.push(char::from(byte));
+        } else {
+            use std::fmt::Write;
+            write!(uri, "%{byte:02X}").expect("writing to a String");
+        }
+    }
+    uri.push_str("?mode=ro&readonly_shm=1");
+    let flags = OpenFlags::SQLITE_OPEN_READ_ONLY
+        | OpenFlags::SQLITE_OPEN_URI
+        | OpenFlags::SQLITE_OPEN_NO_MUTEX
+        | OpenFlags::SQLITE_OPEN_NOFOLLOW;
+    let mut connection = Connection::open_with_flags(uri, flags)?;
+    connection.busy_timeout(Duration::from_millis(150))?;
+    connection.pragma_update(None, "trusted_schema", false)?;
+    connection.pragma_update(None, "temp_store", "MEMORY")?;
+    connection.pragma_update(None, "query_only", true)?;
+    let snapshot = connection.transaction()?;
+    let application_id: i64 =
+        snapshot.pragma_query_value(None, "application_id", |row| row.get(0))?;
+    if application_id != APPLICATION_ID {
+        return Err(RegistryError::UnrecognizedDatabase);
+    }
+    let version: i64 = snapshot.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if version != SCHEMA_VERSION {
+        return Err(RegistryError::UnsupportedSchema(version));
+    }
+    let mode: String = snapshot.pragma_query_value(None, "journal_mode", |row| row.get(0))?;
+    if !mode.eq_ignore_ascii_case("wal") {
+        return Err(RegistryError::WalUnavailable);
+    }
+    observe_snapshot(
+        &snapshot,
+        root,
+        label,
+        policy_version,
+        policy_digest,
+        plan_id,
+    )
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn observe_snapshot(
+    snapshot: &Connection,
+    root: &Path,
+    label: &str,
+    policy_version: u32,
+    policy_digest: &str,
+    plan_id: Option<i64>,
+) -> Result<StateObservation, RegistryError> {
+    let root = root.to_str().ok_or(RegistryError::InvalidProjectRoot)?;
+    let project_id: i64 = snapshot
+        .query_row(
+            "SELECT id FROM project WHERE root_path = ?1 AND label = ?2 AND policy_version = ?3",
+            params![root, label, policy_version],
+            |row| row.get(0),
+        )
+        .optional()?
+        .ok_or(RegistryError::ProjectNotFound)?;
+    let observed_at_ms = lease_now_ms()?;
+    if let Some(plan_id) = plan_id {
+        let plan = snapshot
+            .query_row(
+                "SELECT p.status, p.expires_at, p.policy_digest = ?3,
+                        a.expires_at_ms, a.claimed_at_ms IS NOT NULL,
+                        EXISTS (SELECT 1 FROM gc_output o WHERE o.project_id = p.project_id
+                                AND o.relative_path = a.relative_path AND o.identity = a.identity)
+                 FROM gc_plan p LEFT JOIN gc_application a ON a.plan_id = p.id
+                 WHERE p.id = ?1 AND p.project_id = ?2",
+                params![plan_id, project_id, policy_digest],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, bool>(2)?,
+                        row.get::<_, Option<i64>>(3)?,
+                        row.get::<_, bool>(4)?,
+                        row.get::<_, bool>(5)?,
+                    ))
+                },
+            )
+            .optional()?
+            .ok_or(RegistryError::GcPlanNotFound)?;
+        let (state, plan_expiry, same_policy, approval_expiry, claimed, owned) = plan;
+        let plan_expiry = plan_expiry.saturating_mul(1000);
+        let expiry = approval_expiry.map_or(plan_expiry, |approval| approval.min(plan_expiry));
+        let status = match (state.as_str(), approval_expiry, claimed) {
+            ("applying", Some(_), true) => ApprovalState::Applying,
+            ("recovery_required", Some(_), true) => ApprovalState::RecoveryRequired,
+            ("applied", Some(_), true) => ApprovalState::Applied,
+            ("preserved", Some(_), true) => ApprovalState::Preserved,
+            ("planned", None, false) | ("approved", Some(_), false) if !same_policy => {
+                ApprovalState::PolicyChanged
+            }
+            ("planned", None, false) | ("approved", Some(_), false) if expiry <= observed_at_ms => {
+                ApprovalState::Expired
+            }
+            ("planned", None, false) => ApprovalState::AwaitingApproval,
+            ("approved", Some(_), false) if !owned => ApprovalState::OwnershipChanged,
+            ("approved", Some(_), false) => ApprovalState::ApprovedRecorded,
+            _ => return Err(RegistryError::GcStateConflict),
+        };
+        return Ok(StateObservation::Approval {
+            status,
+            observed_at_ms,
+            expires_at_ms: Some(expiry),
+        });
+    }
+    let lease = snapshot
+        .query_row(
+            "SELECT heartbeat_at_ms, expires_at_ms FROM execution_lease
+             WHERE project_id = ?1 AND released_at_ms IS NULL",
+            [project_id],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+        )
+        .optional()?;
+    let status = match lease {
+        Some((_, expiry)) if expiry > observed_at_ms => ExecutionState::Active,
+        Some(_) => ExecutionState::ExpiredUnreleased,
+        None => ExecutionState::None,
+    };
+    Ok(StateObservation::Execution {
+        status,
+        observed_at_ms,
+        heartbeat_at_ms: lease.map(|(heartbeat, _)| heartbeat),
+        expires_at_ms: lease.map(|(_, expiry)| expiry),
+    })
+}
+
 impl Registry {
     pub fn open(state_dir: &Path) -> Result<Self, RegistryError> {
         let state_dir: PathBuf = state_dir.components().collect();
@@ -329,6 +529,23 @@ impl Registry {
             connection.pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get(0))?;
         if !mode.eq_ignore_ascii_case("wal") {
             return Err(RegistryError::WalUnavailable);
+        }
+        #[cfg(target_os = "macos")]
+        {
+            // Keep SQLite's sidecars after checkpoint so the sandboxed
+            // observer can open an idle registry without creating any files.
+            let mut keep: libc::c_int = 1;
+            let status = unsafe {
+                rusqlite::ffi::sqlite3_file_control(
+                    connection.handle(),
+                    c"main".as_ptr(),
+                    rusqlite::ffi::SQLITE_FCNTL_PERSIST_WAL,
+                    std::ptr::from_mut(&mut keep).cast(),
+                )
+            };
+            if status != rusqlite::ffi::SQLITE_OK {
+                return Err(RegistryError::WalUnavailable);
+            }
         }
         connection.pragma_update(None, "synchronous", "FULL")?;
         Ok(connection)
@@ -520,6 +737,28 @@ impl Registry {
 
     pub fn read_gc_plan(&self, project_id: i64, plan_id: i64) -> Result<Value, RegistryError> {
         gc_plan_row(&self.connection, project_id, plan_id)?.payload()
+    }
+
+    pub fn read_current_gc_plan(
+        &self,
+        project_id: i64,
+        plan_id: i64,
+        policy_digest: &str,
+    ) -> Result<Value, RegistryError> {
+        let plan = gc_plan_row(&self.connection, project_id, plan_id)?;
+        plan.require_current(policy_digest, lease_now_ms()?)?;
+        if plan.status != "planned" {
+            return Err(RegistryError::GcStateConflict);
+        }
+        plan.payload()
+    }
+
+    pub fn has_open_execution_lease(&self) -> Result<bool, RegistryError> {
+        Ok(self.connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM execution_lease WHERE released_at_ms IS NULL)",
+            [],
+            |row| row.get(0),
+        )?)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1786,6 +2025,121 @@ mod tests {
             policy_digest,
             identity,
         }
+    }
+
+    #[test]
+    fn observation_reports_only_scoped_lease_and_approval_state() {
+        let temp = tempdir().unwrap();
+        let root = temp.path().join("project");
+        let other = temp.path().join("other");
+        fs::create_dir(&root).unwrap();
+        fs::create_dir(&other).unwrap();
+        let root = root.canonicalize().unwrap();
+        let other = other.canonicalize().unwrap();
+        let mut registry = Registry::open(&temp.path().join("state")).unwrap();
+        let fixture = gc_fixture(&root, &mut registry);
+        let other_fixture = gc_fixture(&other, &mut registry);
+        let observe = |registry: &Registry, root: &Path, plan_id, digest: &str| {
+            observe_snapshot(&registry.connection, root, "fixture", 2, digest, plan_id)
+        };
+        let approval = |registry: &Registry, digest: &str| {
+            observe(registry, &root, Some(fixture.plan_id), digest).unwrap()
+        };
+        assert!(matches!(
+            observe(
+                &registry,
+                &root,
+                Some(other_fixture.plan_id),
+                &fixture.policy_digest
+            ),
+            Err(RegistryError::GcPlanNotFound)
+        ));
+        assert!(matches!(
+            approval(&registry, &fixture.policy_digest),
+            StateObservation::Approval {
+                status: ApprovalState::AwaitingApproval,
+                ..
+            }
+        ));
+        let lease = registry
+            .acquire_lease(
+                fixture.project_id,
+                &"c".repeat(64),
+                Duration::from_secs(10),
+                |_| false,
+            )
+            .unwrap();
+        assert!(matches!(
+            observe(&registry, &other, None, &fixture.policy_digest).unwrap(),
+            StateObservation::Execution {
+                status: ExecutionState::None,
+                ..
+            }
+        ));
+        assert!(matches!(
+            observe(&registry, &root, None, &fixture.policy_digest).unwrap(),
+            StateObservation::Execution {
+                status: ExecutionState::Active,
+                ..
+            }
+        ));
+        force_lease_expiry(&registry, lease.id);
+        assert!(matches!(
+            observe(&registry, &root, None, &fixture.policy_digest).unwrap(),
+            StateObservation::Execution {
+                status: ExecutionState::ExpiredUnreleased,
+                ..
+            }
+        ));
+        registry
+            .register_gc_output(fixture.project_id, "build", &fixture.identity)
+            .unwrap();
+        let token_digest = "b".repeat(64);
+        fixture.approve(&mut registry, &token_digest).unwrap();
+        let recorded = approval(&registry, &fixture.policy_digest);
+        assert!(matches!(
+            recorded,
+            StateObservation::Approval {
+                status: ApprovalState::ApprovedRecorded,
+                ..
+            }
+        ));
+        let output = serde_json::to_value(recorded).unwrap();
+        assert_eq!(output.as_object().unwrap().len(), 4);
+        assert!(!output.to_string().contains(&token_digest));
+        assert!(matches!(
+            approval(&registry, &"e".repeat(64)),
+            StateObservation::Approval {
+                status: ApprovalState::PolicyChanged,
+                ..
+            }
+        ));
+        registry
+            .connection
+            .execute("UPDATE gc_application SET expires_at_ms = 2, approved_at_ms = 1 WHERE plan_id = ?1", [fixture.plan_id])
+            .unwrap();
+        assert!(matches!(
+            approval(&registry, &fixture.policy_digest),
+            StateObservation::Approval {
+                status: ApprovalState::Expired,
+                ..
+            }
+        ));
+        registry
+            .connection
+            .execute(
+                "UPDATE gc_application SET claimed_at_ms = 2 WHERE plan_id = ?1",
+                [fixture.plan_id],
+            )
+            .unwrap();
+        set_gc_status(&registry.connection, fixture.plan_id, "applied").unwrap();
+        assert!(matches!(
+            approval(&registry, &fixture.policy_digest),
+            StateObservation::Approval {
+                status: ApprovalState::Applied,
+                ..
+            }
+        ));
     }
 
     #[test]

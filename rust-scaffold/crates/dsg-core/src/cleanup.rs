@@ -42,7 +42,17 @@ pub struct CargoOutput {
 }
 
 #[cfg(unix)]
-pub use local::CleanupQueue;
+pub use local::{CleanupQueue, PlaywrightEvidence};
+
+#[cfg(not(unix))]
+pub struct PlaywrightEvidence;
+
+#[cfg(not(unix))]
+impl PlaywrightEvidence {
+    pub fn create(_: &Path, _: &str) -> io::Result<Self> {
+        Err(io::ErrorKind::Unsupported.into())
+    }
+}
 
 #[cfg(not(unix))]
 pub struct CleanupQueue;
@@ -50,6 +60,21 @@ pub struct CleanupQueue;
 #[cfg(not(unix))]
 impl CleanupQueue {
     pub fn open(_: &Path) -> io::Result<Self> {
+        Err(io::ErrorKind::Unsupported.into())
+    }
+    pub fn register_success_traces(
+        &self,
+        _: &str,
+        _: &PlaywrightEvidence,
+        _: std::time::Duration,
+    ) -> io::Result<u32> {
+        Err(io::ErrorKind::Unsupported.into())
+    }
+    pub fn expire_success_trace(
+        &self,
+        _: &str,
+        _: std::time::Duration,
+    ) -> io::Result<CleanupReport> {
         Err(io::ErrorKind::Unsupported.into())
     }
     pub fn prepare_cargo(&self) -> io::Result<CargoOutput> {
@@ -87,6 +112,9 @@ mod local {
         process::{Command, Stdio},
         time::{Duration, Instant},
     };
+
+    mod success_trace;
+    pub use success_trace::PlaywrightEvidence;
 
     const ENTRY_LIMIT: usize = 4096;
     const BYTE_LIMIT: u64 = 256 << 20;
@@ -158,7 +186,13 @@ mod local {
                     identity TEXT NOT NULL DEFAULT '', head TEXT NOT NULL DEFAULT '',
                     bytes INTEGER NOT NULL DEFAULT 0, reason TEXT NOT NULL DEFAULT ''
                 );
-                CREATE INDEX IF NOT EXISTS jobs_state ON jobs(state,id);").map_err(database)?;
+                CREATE INDEX IF NOT EXISTS jobs_state ON jobs(state,id);
+                CREATE INDEX IF NOT EXISTS jobs_trace_leaf ON jobs(leaf) WHERE kind='trace';
+                CREATE INDEX IF NOT EXISTS jobs_inflight ON jobs(id) WHERE state!='done';
+                CREATE TABLE IF NOT EXISTS success_trace_due(
+                    job INTEGER PRIMARY KEY REFERENCES jobs(id), registered_ns INTEGER NOT NULL,
+                    expires_ns INTEGER NOT NULL, last_attempt_ns INTEGER NOT NULL DEFAULT 0
+                );").map_err(database)?;
             let queue = Self { root, db };
             // Recover at most one interrupted success dispatch. An interrupted destructive operation
             // stays journaled for inspection, as its remaining ownership is uncertain.

@@ -23,13 +23,19 @@ python3 -m dsg hook --agent codex
 
 ### Docker 읽기 전용 인벤토리
 
+`dsg --json docker-contexts [--max-contexts <1~64>]`는 로컬에 등록된 Docker 컨텍스트 이름을 정렬해 반환한다. 컨텍스트를 선택하거나 엔진에 연결하는 작업은 사용자 요청으로 수행한다. 조회가 제한을 넘거나 이름을 검증할 수 없으면 `contexts=null`, `complete=false`와 종료 코드 5를 반환한다.
+
 `dsg --json docker-scan --context <context> [--max-resources <1~64>]`는 컨텍스트를 명시해 엔진 ID, 컨테이너·이미지·볼륨, Compose 중복 후보를 조회한다. 허용된 필드만 수집하며 컨텍스트 환경변수로 대상이 바뀌지 않게 한다. 조회가 불완전하면 `complete=false`와 `issues`가 반환된다. 예산 안에서 조회 결과가 비어 있는 경우에는 완전한 0건으로 기록한다. 엔진 ID를 확인할 수 없으면 동일 구조의 JSON과 종료 코드 5를 반환한다.
 
 중복 후보는 관측된 동일성에 관한 정보다. 실제 재사용에 필요한 엔진·구성 해시·이미지·마운트·health가 확인되지 않으면 판정을 미확인으로 남긴다. 마운트 대상 위치와 명명 볼륨을 비교한다. bind 소스는 수집 범위 밖이며, healthcheck가 없거나 이미지 digest가 없는 경우도 재사용 미확인이다.
 
+`dsg --json docker-build-cache --context <context>`는 지정한 Docker 엔진의 내장 빌더 캐시 총량과 활성 항목 수를 조회한다. 조회 전후 엔진 ID가 일치해야 한다. 개별 캐시 소유권은 감지할 수 없어 모든 경우에 `disposition=preserve`를 반환한다. 집계 실패 시 수치는 `null`이며 종료 코드는 5다. 이 경로의 지원 범위는 엔진이 보고하는 내장 빌더 집계다.
+
 ### 관리형 실행과 Compose 재사용
 
 `dsg exec --timeout 1~120 -- <argv...>`는 등록된 프로젝트의 정책과 호스트·프로젝트 예산을 확인한 뒤 직접 실행한다. 관리형 실행은 프로젝트별 lease 하나와 동일 상태 저장소의 전역 두 슬롯으로 제한한다. 조회가 불완전하거나 정책상 추가 확인이 필요하면 기존 판단 형식으로 반환한다. 성공 0, 정책 거부 3, 승인 필요 4, 제어 미확인 5, 시간 초과 124, 정상 중단 130을 사용한다. 자식이 실패하면 자식의 종료 코드를 반환한다. `--json`에서는 명령과 자식 원문 출력 없이 `run.outcome`, `run.exit_code`, `run.tree_confirmed_gone`과 `lease_released`를 제공한다.
+
+`dsg exec --provider <cargo|node|pnpm|gradle|uv|go|playwright> -- <작업>`는 등록된 정형 작업을 실행한다. Cargo는 `build`, `check`, `test`, pnpm·Gradle·Go는 `build`, `test`, Node·uv·Playwright는 `test`를 받는다. 하나의 작업만 받으며 각 도구의 병렬 실행 옵션을 제한한다. pnpm이 호출한 프로젝트 스크립트 내부의 작업자는 프로젝트 설정을 따른다. Playwright는 프로젝트에 준비된 실행기를 사용하고 실행마다 독립된 상태 폴더에 성공·실패 추적 자료를 저장한다. 응답 `evidence_path`는 상태 디렉터리 기준 상대 경로다. 트리 종료가 확인되면 Provider·작업·결과 코드가 해당 lease 감사 이벤트에 기록된다.
 
 `dsg docker-reuse --context <context> --expectation-json <JSON>`은 `engine_id`, `project`, `service`, `number`, `config_hash`, `image_id`, `image_digest`, `mounts`를 받는다. 같은 실행 중인 정상 컨테이너가 두 번 모두 유일한 후보면 `verified=true`와 `assessment.container_id`를 반환한다. 확인할 수 없으면 종료 코드 5와 판정 사유를 반환한다. 이미 실행 중인 컨테이너 식별자를 전달하는 경로다.
 
@@ -38,6 +44,8 @@ python3 -m dsg hook --agent codex
 등록된 프로젝트에서 `gc-own --candidate <이름> --confirm-generated`로 직접 하위의 생성 폴더에 소유권을 기록한다. `gc-plan` 결과에서 후보를 확인한 뒤 `gc-approve --plan <번호> --candidate <이름> --confirm`으로 한 후보에 대한 일회용 승인을 발급한다. 승인 유효 기간은 10분 이내이며 계획 만료 시각을 넘지 않는다.
 
 `gc-apply --plan <번호> --approval-stdin`에 승인값을 표준 입력으로 전달한다. 적용은 활성 lease, 소유권, 파일 식별자와 트리 메타데이터를 재확인하며, 입력 승인 원문은 감사 기록과 명령 인자로 보관하지 않는다. 결과는 `applied`, `preserved`, `recovery_required`로 구분한다. 복구가 필요하면 `gc-recover --plan <번호>`가 일치하는 격리 자료를 확인해 빈 원래 경로로 복원을 시도한다.
+
+`gc-plan --docker-context <context> --docker-engine <ID> --docker-image <sha256:전체ID>`는 파일 정리 계획과 별도로 `plan.docker_images`에 이미지 후보 또는 보존 사유를 기록한다. 후보는 선택한 엔진, 프로젝트의 소유 표식 `io.dsg.gc.owner`(정규 경로의 SHA-256), 전체 이미지 ID가 일치하며 태그·digest·컨테이너 참조·활성 lease가 없어야 한다. 관측 한도 초과와 이미지 마운트의 참조 불명은 보존한다. `docker-image-recheck --plan <번호>`는 유효기간과 정책을 확인하고 같은 엔진에서 후보 지문을 비교한다. 이미지 경로의 기능 범위는 계획과 재확인이다.
 
 `exec --auto-clean-cargo -- cargo check …`는 자동 회수 대상인 전용 Cargo 산출물 디렉터리를 만든다. 실행 결과의 `cleanup`에서 회수·보존 건수와 확인된 바이트를 읽는다. Git 완료는 `scripts/git-completion.sh`로 전달한다. 이 경로는 여섯 참조의 파일 일치 후 사용자 원본과 브랜치를 보존하면서 등록된 보조 워크트리만 검사한다.
 
@@ -90,8 +98,10 @@ Windows SCM 어댑터는 고정 로컬 named pipe에서 `/_ping`, `/info`, `/dsg
 | `dsg_check_command` | `{ "argv": ["docker", "volume", "ls"] }` 형태의 배열을 평가해 정책 결과를 반환한다. |
 | `dsg_get_gc_plan` | 인자 없이 현재 정리 후보의 건수와 바이트 집계를 반환한다. 승인용 계획을 저장하는 명령은 `gc-plan`이다. |
 | `dsg_get_policy` | 인자 없이 현재 적용되는 정책의 수치 한도와 보호 규칙 건수를 반환한다. |
+| `dsg_get_execution_status` | 인자 없이 프로젝트의 lease 관측 상태와 시각을 조회한다. |
+| `dsg_get_gc_approval_status` | `{ "plan_id": 1 }`을 받아 같은 프로젝트의 승인 기록, 정책 상태 및 만료를 조회한다. |
 
-실행 상태 조회 `dsg_get_execution_status`는 읽기 전용 상태 저장소 접근이 지원된 뒤 제공한다. 적용·실행·승인은 별도 관리형 CLI 기능이다.
+상태 도구의 macOS 실행은 파일 쓰기가 차단된 프로세스에서 SQLite를 읽는다. 정상 읽기에 필요한 WAL·SHM은 관리형 쓰기 경로에서 보존된다. 상태를 확인할 수 없거나 다른 프로젝트의 기록이면 조회 불가를 반환한다. `approved_recorded`는 승인 기록 존재를 나타낸다. 승인 발급·적용·실행은 관리형 CLI에서 수행한다.
 
 ### 오류 코드
 `CONFIG_INVALID`, `PROJECT_UNKNOWN`, `RESOURCE_ACTIVE`, `RESOURCE_SHARED`, `RESOURCE_CHANGED`, `POLICY_DENY`, `INSUFFICIENT_SPACE`, `PLAN_EXPIRED`, `NEEDS_APPROVAL`, `ENGINE_UNAVAILABLE`.
