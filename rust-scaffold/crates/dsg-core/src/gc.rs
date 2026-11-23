@@ -419,12 +419,15 @@ mod supported {
         // rejects a rename if the destination appeared after the earlier check.
         #[cfg(target_os = "linux")]
         let status = unsafe {
-            libc::renameat2(
-                source_fd,
+            // The kernel interface is also available with musl builds whose libc
+            // lacks the renameat2 wrapper. Unsupported calls still fail closed.
+            libc::syscall(
+                libc::SYS_renameat2,
+                libc::c_long::from(source_fd),
                 name.as_ptr(),
-                target_fd,
+                libc::c_long::from(target_fd),
                 name.as_ptr(),
-                libc::RENAME_NOREPLACE,
+                libc::c_long::from(libc::RENAME_NOREPLACE),
             )
         };
         #[cfg(target_os = "macos")]

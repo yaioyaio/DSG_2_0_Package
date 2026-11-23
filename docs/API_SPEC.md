@@ -59,6 +59,8 @@ python3 -m dsg hook --agent codex
 
 브로커는 허용 경로 외 호출과 본문·업그레이드 요청을 거부한다. 요청 경로, 헤더, 본문을 엔진으로 전달하는 대신 미리 정의된 Docker 조회를 실행한다. 권한 또는 엔진 검증에 실패하면 연결을 닫거나 실패 응답을 반환한다. [서비스 권한과 복구](OPERATIONS.md#docker-조회-브로커)
 
+Windows SCM 어댑터의 검증 대상은 고정 로컬 named pipe를 통한 `/_ping`과 `/info`다. 시작 인수는 `--listen`, `--upstream`, `--engine-id`, `--service-name`, `--allow-sid`, `--upstream-sid`다. `--allow-sid`에는 쉼표로 구분한 사용자 SID를 지정한다. 엔진 파이프에서 서버 토큰, 소유자와 허용 ACL을 확인한다. Windows 인벤토리 경로는 현재 `503`을 반환한다. 배포 상태는 플랫폼 시험 결과를 따른다.
+
 ## 계획 API (미구현)
 - `dsg inspect <resource-id>`
 - `dsg docker reuse --project <id>`

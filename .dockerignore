@@ -39,6 +39,7 @@ uploads
 **/*.log
 **/*.pid
 **/*.sock
+**/*.dsg-owner
 **/*.sqlite
 **/*.sqlite3
 **/*.sqlite-wal

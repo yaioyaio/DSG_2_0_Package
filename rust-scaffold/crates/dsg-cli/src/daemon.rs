@@ -1,10 +1,16 @@
 use clap::Parser;
 use std::{path::PathBuf, process::ExitCode};
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
 mod daemon_http;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod daemon_socket;
+#[cfg(windows)]
+mod daemon_windows;
+#[cfg(any(windows, test))]
+mod daemon_windows_config;
+#[cfg(windows)]
+mod daemon_windows_upstream;
 
 #[derive(Parser)]
 #[command(name = "dsgd", about = "로컬 Docker 읽기 전용 브로커")]
@@ -15,14 +21,27 @@ struct Options {
     upstream: PathBuf,
     #[arg(long)]
     engine_id: String,
+    #[cfg(unix)]
     #[arg(long)]
     docker_executable: PathBuf,
+    #[cfg(unix)]
     #[arg(long)]
     empty_config_dir: PathBuf,
+    #[cfg(unix)]
     #[arg(long, required = true)]
     allow_uid: Vec<u32>,
+    #[cfg(unix)]
     #[arg(long, default_value_t = 16, value_parser = clap::value_parser!(u32).range(1..=32))]
     max_resources: u32,
+    #[cfg(windows)]
+    #[arg(long)]
+    service_name: String,
+    #[cfg(windows)]
+    #[arg(long)]
+    allow_sid: String,
+    #[cfg(windows)]
+    #[arg(long)]
+    upstream_sid: String,
 }
 
 fn main() -> ExitCode {
@@ -36,9 +55,38 @@ fn main() -> ExitCode {
     }
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 fn run(_: &Options) -> std::io::Result<()> {
     Err(std::io::ErrorKind::Unsupported.into())
+}
+
+#[cfg(windows)]
+fn run(options: &Options) -> std::io::Result<()> {
+    use daemon_windows_config::{WindowsBrokerConfig, WindowsSid};
+    use std::io;
+
+    let config = WindowsBrokerConfig::parse(
+        options.listen.to_str().ok_or(io::ErrorKind::InvalidInput)?,
+        options
+            .upstream
+            .to_str()
+            .ok_or(io::ErrorKind::InvalidInput)?,
+        &options.service_name,
+        &options.allow_sid,
+    )
+    .map_err(|_| io::ErrorKind::InvalidInput)?;
+    let upstream_sid =
+        WindowsSid::parse(&options.upstream_sid).map_err(|_| io::ErrorKind::InvalidInput)?;
+    if config.client_sids().contains(&upstream_sid)
+        || config
+            .client_sids()
+            .iter()
+            .any(|sid| sid.as_str() == "S-1-5-18")
+    {
+        return Err(io::ErrorKind::PermissionDenied.into());
+    }
+    daemon_windows_upstream::configure(upstream_sid, &options.engine_id)?;
+    daemon_windows::run(config, daemon_windows_upstream::observe)
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]

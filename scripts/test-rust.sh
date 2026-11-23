@@ -66,4 +66,7 @@ with tempfile.TemporaryDirectory(prefix='dsg-rust-test-') as fixture:
     subprocess.run(['python3', '../scripts/check-agent-integration.py', str(executable)], timeout=155, check=True)
     daemon = target / 'debug' / ('dsgd.exe' if os.name == 'nt' else 'dsgd')
     subprocess.run(['python3', '../scripts/check-enforcement.py', str(daemon)], timeout=75, check=True)
+    if os.environ.get('DSG_TEST_LIVE_ENFORCEMENT') == '1':
+        subprocess.run(['python3', '-B', '../scripts/check-live-enforcement.py', str(daemon)],
+                       timeout=55, check=True)
 PY

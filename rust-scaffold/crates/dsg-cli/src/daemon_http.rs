@@ -1,5 +1,9 @@
-use std::io::{self, Read, Write};
+use std::io;
+#[cfg(unix)]
+use std::io::{Read, Write};
+#[cfg(unix)]
 use std::net::Shutdown;
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
 use std::time::{Duration, Instant};
 
@@ -153,13 +157,33 @@ fn remaining(deadline: Instant) -> io::Result<Duration> {
     Ok(left)
 }
 
-fn read_route(stream: &mut UnixStream) -> io::Result<Result<Route, ErrorStatus>> {
+pub(crate) trait Transport {
+    fn read_bounded(&mut self, buffer: &mut [u8], timeout: Duration) -> io::Result<usize>;
+    fn write_bounded(&mut self, buffer: &[u8], timeout: Duration) -> io::Result<usize>;
+    fn authorize_request(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
+impl Transport for UnixStream {
+    fn read_bounded(&mut self, buffer: &mut [u8], timeout: Duration) -> io::Result<usize> {
+        self.set_read_timeout(Some(timeout))?;
+        self.read(buffer)
+    }
+
+    fn write_bounded(&mut self, buffer: &[u8], timeout: Duration) -> io::Result<usize> {
+        self.set_write_timeout(Some(timeout))?;
+        self.write(buffer)
+    }
+}
+
+fn read_route(stream: &mut impl Transport) -> io::Result<Result<Route, ErrorStatus>> {
     let deadline = Instant::now() + IO_TIMEOUT;
     let mut header = [0; MAX_HEADERS_BYTES];
     let mut used: usize = 0;
     loop {
-        stream.set_read_timeout(Some(remaining(deadline)?))?;
-        let n = match stream.read(&mut header[used..]) {
+        let n = match stream.read_bounded(&mut header[used..], remaining(deadline)?) {
             Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
             other => other?,
         };
@@ -184,7 +208,7 @@ fn read_route(stream: &mut UnixStream) -> io::Result<Result<Route, ErrorStatus>>
     }
 }
 
-fn write_reply(stream: &mut UnixStream, reply: Reply) -> io::Result<()> {
+fn write_reply(stream: &mut impl Transport, reply: Reply) -> io::Result<()> {
     let deadline = Instant::now() + IO_TIMEOUT;
     let status = reply.status.map(ErrorStatus::reason).unwrap_or("200 OK");
     let headers = format!(
@@ -194,8 +218,7 @@ fn write_reply(stream: &mut UnixStream, reply: Reply) -> io::Result<()> {
     );
     for mut bytes in [headers.as_bytes(), reply.body.as_slice()] {
         while !bytes.is_empty() {
-            stream.set_write_timeout(Some(remaining(deadline)?))?;
-            match stream.write(bytes) {
+            match stream.write_bounded(bytes, remaining(deadline)?) {
                 Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
                 Ok(n) => bytes = &bytes[n..],
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
@@ -206,12 +229,15 @@ fn write_reply(stream: &mut UnixStream, reply: Reply) -> io::Result<()> {
     Ok(())
 }
 
-pub(crate) fn serve(
-    stream: &mut UnixStream,
+pub(crate) fn exchange(
+    stream: &mut impl Transport,
     response: impl FnOnce(Route) -> Reply,
 ) -> io::Result<()> {
     let reply = match read_route(stream) {
-        Ok(Ok(route)) => response(route),
+        Ok(Ok(route)) => {
+            stream.authorize_request()?;
+            response(route)
+        }
         Ok(Err(status)) => Reply::error(status),
         Err(e)
             if matches!(
@@ -223,7 +249,15 @@ pub(crate) fn serve(
         }
         Err(e) => return Err(e),
     };
-    let written = write_reply(stream, reply);
+    write_reply(stream, reply)
+}
+
+#[cfg(unix)]
+pub(crate) fn serve(
+    stream: &mut UnixStream,
+    response: impl FnOnce(Route) -> Reply,
+) -> io::Result<()> {
+    let written = exchange(stream, response);
     let closed = stream.shutdown(Shutdown::Both);
     written.and(closed)
 }
@@ -266,6 +300,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn invalid_input_never_dispatches() {
         for input in [

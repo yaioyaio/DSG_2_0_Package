@@ -45,6 +45,8 @@ CLI 훅 설치 후 신뢰 설정과 실행 파일 위치를 확인한다. CLI가
 
 macOS LaunchDaemon 예시는 비정상 종료 상태를 보존하고 관리자가 확인한 뒤 수동으로 다시 시작하도록 설정한다. Linux systemd 예시는 60초에 두 번의 시작 시도까지만 허용한다. 예시의 계정·클라이언트 UID·엔진 ID와 경로를 검토한 뒤 대상 호스트에서 검증한다. 수신 경로에 외부 파일이나 소유 증거가 없는 소켓이 있으면 그대로 보존한다. [macOS 서비스 예시](../integrations/launchd/LOCAL.DSG.DSGD.plist) · [Linux 서비스 예시](../integrations/systemd/dsgd.service)
 
+Windows SCM 어댑터의 시험 구성은 `LocalSystem` 서비스와 전용 로컬 named pipe를 사용한다. 제한 클라이언트는 개별 읽기·쓰기와 동기화 권한 `0x00100003`으로 브로커 파이프를 연다. upstream 서버 계정 SID와 파이프 소유자 SID가 일치하고 제한 계정이 upstream ACL에서 제외돼야 한다. 운영 배포 전에 해당 호스트에서 실제 계정과 SCM 수명 주기를 검증한다. [Windows 플랫폼 검증](TEST_PLAN.md#브로커와-서비스-검증)
+
 ## 응급 정리 안내
 대규모 prune 대신 Docker의 `docker system df -v`, `docker buildx du`, `docker ps -a`, `docker volume ls`로 먼저 조사. 영속 데이터 보호 확인 후 대상 범위에 국한해 수동 정리.
 

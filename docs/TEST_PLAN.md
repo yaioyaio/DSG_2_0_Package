@@ -42,6 +42,10 @@ Linux 검증용 소켓은 기본적으로 사용자 홈의 임시 디렉터리�
 
 macOS는 샌드박스에서 원본 소켓 접근이 거부되고 브로커 조회는 성공해야 한다. `DSG_TEST_LAUNCHD=1`로 실행하면 현재 GUI 사용자 도메인에 임시 테스트 서비스를 등록하고 한 번 종료·재시작한 뒤 해제한다. 실제 엔진 또는 배포용 서비스 계정 경계 확인에는 운영 전용 격리 엔진과 제한 계정이 필요하다. Linux systemd와 Windows SCM은 각각 해당 호스트에서 확인한다.
 
+- macOS `DSG_TEST_LIVE_ENFORCEMENT=1 sh scripts/test-rust.sh`는 기존 `dockerguard-test` 루프백 엔진의 `/info`만 조회한다. 샌드박스의 Unix·TCP 직접 접속 거부와 브로커 조회를 확인한다. 실행 프로세스들의 UID는 같다.
+- Linux `python3 -IB scripts/check-linux-service.py --disposable-guest --dockerd <경로> --docker <경로> <dsgd>`를 폐기 가능한 systemd 게스트에서 실행한다. 검증용 Docker 엔진과 런타임은 읽기 전용 미디어로 공급한다. 별도 제한 UID, 엔진·릴레이 직접 접근 거부, 변경 요청 전달 0건, broker 충돌 이후 단일 재시작과 정상 중지 및 등록 자원 회수를 확인한다.
+- Windows 교차 빌드는 컴파일·링크를 검증한다. 실제 Windows 시험에서는 SCM 시작·정지·재시작, 허용·거부 SID, upstream 소유자·DACL 및 별도 제한 계정 경계를 확인한다.
+
 ## POC 제한
 - 정규식 명령 필터는 모든 셸 표현을 탐지하지 않음.
 - 파일/디렉터리 변경 간 TOCTOU 경합이 존재하므로 실제 프로젝트의 삭제 자동화 비권장.
