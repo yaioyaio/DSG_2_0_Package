@@ -27,6 +27,12 @@ python3 -m dsg hook --agent codex
 
 중복 후보는 관측된 동일성에 관한 정보다. 실제 재사용에 필요한 엔진·구성 해시·이미지·마운트·health가 확인되지 않으면 판정을 미확인으로 남긴다. 마운트 대상 위치와 명명 볼륨을 비교한다. bind 소스는 수집 범위 밖이며, healthcheck가 없거나 이미지 digest가 없는 경우도 재사용 미확인이다.
 
+### 관리형 실행과 Compose 재사용
+
+`dsg exec --timeout 1~120 -- <argv...>`는 등록된 프로젝트의 정책과 호스트·프로젝트 예산을 확인한 뒤 직접 실행한다. 관리형 실행은 프로젝트별 lease 하나와 동일 상태 저장소의 전역 두 슬롯으로 제한한다. 조회가 불완전하거나 정책상 추가 확인이 필요하면 기존 판단 형식으로 반환한다. 성공 0, 정책 거부 3, 승인 필요 4, 제어 미확인 5, 시간 초과 124, 정상 중단 130을 사용한다. 자식이 실패하면 자식의 종료 코드를 반환한다. `--json`에서는 명령과 자식 원문 출력 없이 `run.outcome`, `run.exit_code`, `run.tree_confirmed_gone`과 `lease_released`를 제공한다.
+
+`dsg docker-reuse --context <context> --expectation-json <JSON>`은 `engine_id`, `project`, `service`, `number`, `config_hash`, `image_id`, `image_digest`, `mounts`를 받는다. 같은 실행 중인 정상 컨테이너가 두 번 모두 유일한 후보면 `verified=true`와 `assessment.container_id`를 반환한다. 확인할 수 없으면 종료 코드 5와 판정 사유를 반환한다. 이미 실행 중인 컨테이너 식별자를 전달하는 경로다.
+
 ## 계획 API (미구현)
 - `dsg inspect <resource-id>`
 - `dsg docker reuse --project <id>`
