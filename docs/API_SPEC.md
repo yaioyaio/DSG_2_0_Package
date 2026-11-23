@@ -61,6 +61,12 @@ python3 -m dsg hook --agent codex
 
 Windows SCM 어댑터의 검증 대상은 고정 로컬 named pipe를 통한 `/_ping`과 `/info`다. 시작 인수는 `--listen`, `--upstream`, `--engine-id`, `--service-name`, `--allow-sid`, `--upstream-sid`다. `--allow-sid`에는 쉼표로 구분한 사용자 SID를 지정한다. 엔진 파이프에서 서버 토큰, 소유자와 허용 ACL을 확인한다. Windows 인벤토리 경로는 현재 `503`을 반환한다. 배포 상태는 플랫폼 시험 결과를 따른다.
 
+### 로컬 대시보드
+
+`dsg --root <프로젝트> dashboard [--port <포트>] [--lifetime <초>] [--docker-context <컨텍스트>]`는 `127.0.0.1`에서 읽기 전용 화면을 제공한다. 기본 포트는 자동으로 배정되고 기본 실행 시간은 600초다. `--json`은 `result.url`을 반환한다. Docker 집계는 컨텍스트를 지정한 경우에만 요청한다.
+
+`GET /api/overview`는 `health`, `policy`, `docker`, `cleanup`의 집계 객체를 반환한다. 각 부분은 조회가 불가능하면 `null`이다. 자료가 불완전할 때 수치를 미확인으로 표시하며, 완전한 0건은 숫자로 표시한다. 정리 미리보기는 승인이나 적용 이력을 생성하지 않는다. 서비스는 루프백 Host 및 같은 출처 요청을 확인하고 연결을 한 번에 하나씩 처리한다. [운영 방법](OPERATIONS.md#로컬-대시보드)
+
 ## 계획 API (미구현)
 - `dsg inspect <resource-id>`
 - `dsg docker reuse --project <id>`

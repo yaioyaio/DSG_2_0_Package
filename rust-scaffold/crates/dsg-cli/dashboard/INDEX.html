@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DSG · 로컬 대시보드</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="layout topbar-inner">
+      <span class="brand">DSG</span>
+      <span class="mode">읽기 전용</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <div class="page-header">
+      <div>
+        <h1>로컬 대시보드</h1>
+        <p class="observation">마지막 스캔 <span id="observed-at">미확인</span></p>
+      </div>
+      <button class="refresh" id="refresh" type="button">
+        <span class="refresh-icon" aria-hidden="true">↻</span>새로고침
+      </button>
+    </div>
+
+    <p class="feedback" id="feedback" role="status"></p>
+    <noscript><p class="feedback" data-tone="error">조회하려면 JavaScript를 활성화해 주세요.</p></noscript>
+
+    <div class="overview" id="overview" aria-busy="true">
+      <section class="storage" aria-labelledby="storage-title">
+        <div class="section-heading">
+          <h2 id="storage-title">디스크 사용 현황</h2>
+          <span class="pill" id="budget-status" data-tone="unknown">미확인</span>
+        </div>
+        <div class="storage-grid">
+          <div class="usage">
+            <div class="usage-label" id="usage-label">프로젝트 예산 사용률</div>
+            <div class="usage-value" id="usage-percent" data-unknown>미확인</div>
+            <div class="meter-track">
+              <progress id="usage-meter" max="100" aria-labelledby="usage-label" hidden></progress>
+            </div>
+            <p class="storage-note" id="scan-note" hidden>프로젝트 스캔이 완료되지 않았습니다.</p>
+          </div>
+          <dl class="storage-metrics">
+            <dt>프로젝트 사용량</dt><dd id="project-size" data-unknown>미확인</dd>
+            <dt>디스크 여유 공간</dt><dd id="disk-free" data-unknown>미확인</dd>
+          </dl>
+        </div>
+      </section>
+
+      <div class="detail-grid">
+        <section class="card" aria-labelledby="docker-title">
+          <div class="section-heading">
+            <h2 id="docker-title">Docker 인벤토리</h2>
+            <span class="pill" id="docker-status" data-tone="unknown">미확인</span>
+          </div>
+          <dl class="metric-list">
+            <dt>컨테이너</dt><dd id="docker-containers" data-unknown>미확인</dd>
+            <dt>이미지</dt><dd id="docker-images" data-unknown>미확인</dd>
+            <dt>볼륨</dt><dd id="docker-volumes" data-unknown>미확인</dd>
+            <dt>중복 그룹</dt><dd id="docker-duplicates" data-unknown>미확인</dd>
+          </dl>
+        </section>
+
+        <section class="card" aria-labelledby="cleanup-title">
+          <div class="section-heading">
+            <h2 id="cleanup-title">정리 미리보기</h2>
+          </div>
+          <dl class="metric-list">
+            <dt>정리 후보</dt><dd id="cleanup-candidates" data-unknown>미확인</dd>
+            <dt>후보 용량</dt><dd id="cleanup-size" data-unknown>미확인</dd>
+            <dt>정리 제외</dt><dd id="cleanup-excluded" data-unknown>미확인</dd>
+          </dl>
+        </section>
+
+        <section class="card" aria-labelledby="policy-title">
+          <div class="section-heading">
+            <h2 id="policy-title">적용 정책</h2>
+          </div>
+          <dl class="metric-list">
+            <dt>프로젝트 예산</dt><dd id="policy-budget" data-unknown>미확인</dd>
+            <dt>주의 기준</dt><dd id="policy-warning" data-unknown>미확인</dd>
+            <dt>위험 기준</dt><dd id="policy-critical" data-unknown>미확인</dd>
+          </dl>
+        </section>
+      </div>
+    </div>
+  </main>
+</body>
+</html>

@@ -13,7 +13,7 @@
 | REQ-009 | 세션 Lease | P1 | 동시 실행 소유권 관리 | 미구현 |
 | REQ-010 | AI Hook | P1 | CLI별 정확한 JSON 입출력 | 3개 CLI의 셸 훅과 프로젝트 설치·제거 |
 | REQ-011 | MCP | P2 | 읽기 전용 도구+승인 도구 | 읽기 전용 stdio 도구 6개. 실행 상태 조회와 승인 도구는 예정 |
-| REQ-012 | Docker Proxy | P2 | 직접 소켓 우회 제한 | 조회 브로커와 macOS·Linux 서비스 예시. 배포 계정과 OS별 경계 검증 대기 |
+| REQ-012 | Docker Proxy | P2 | 직접 소켓 우회 제한 | macOS 샌드박스·launchd 및 Linux 제한 UID·systemd 격리 검증. Windows SCM·파이프 교차 링크, 런타임 검증 대기 |
 | REQ-013 | 확장 Provider | P2 | SDK/서명/격리 | 미구현 |
 
 ## 수용 기준
