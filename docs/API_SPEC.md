@@ -13,6 +13,14 @@ python3 -m dsg exec --root PATH -- python3 -V
 python3 -m dsg hook --agent codex
 ```
 
+## Rust CLI Foundation
+
+소스 워크스페이스는 `rust-scaffold/`이며 바이너리 이름은 `dsg`다. 명령은 `init`, `doctor`, `scan`, `check -- <argv...>`, `gc-plan`이다. 전역 옵션 `--root`, `--state-dir`, `--global-policy`, `--session-policy`, `--json`으로 대상과 출력 형식을 선택한다.
+
+`init`은 `.dsg.json`을 덮어쓰지 않고 생성하고 프로젝트를 등록한다. `doctor`와 `scan`은 관측 시각, 사용량, 예산 상태 및 검사 완전성을 보여 준다. `normal`, `warning`, `critical`, `unknown`을 구분하며 알 수 없는 수치는 JSON `null`로 표시한다. `gc-plan`은 보호·미확인 후보의 제외 사유와 계획 번호를 제공한다. SQLite에 계획과 감사 이벤트를 함께 저장한다.
+
+`--json` 성공 응답은 `schema_version`, `command`, `result`를 반환한다. 실행 오류는 stderr에 `schema_version`과 `error.code`·`error.message`를 반환한다. `check`의 결과는 아래 공통 판단 응답 형태이며 종료 코드는 허용·경고 0, 실행 오류 2, 거부 3, 승인 필요 4다. 입력 명령의 인자는 판단 응답이나 감사 기록에 포함하지 않는다.
+
 ## 계획 API (미구현)
 - `dsg inspect <resource-id>`
 - `dsg docker reuse --project <id>`
