@@ -7,9 +7,9 @@
 - `original/DSG_2_0_ORIGINAL_REPORT.md`: 기존 대화의 설계 설명·표·코드·체크리스트를 Markdown으로 변환한 원문 보존용 문서입니다. 채팅 전용 UI는 HTML로 분리했으며, 일부 서식은 Markdown으로 바꾸었습니다.
 - `artifact/DSG_2_0_Interactive_Artifact.html`: 브라우저에서 파일로 열어 사용할 수 있는 독립형 인터랙티브 시뮬레이션. **로컬 디스크 변경 없음**.
 - `poc/`: **실제 동작** 진단/스캔/Dry-run/정책 차단 예제/관리형 실행; Python 3.10+ 필요.
-- `rust-scaffold/`: Rust CLI와 코어 워크스페이스. 프로젝트 등록, 정책, 용량 스캔과 정리 미리보기를 제공하며 SQLite에 등록과 명령 판단·계획 감사 기록을 저장합니다.
-- `docs/`: 개발 실무 문서. POC가 제공하지 않는 Daemon, Docker Proxy, MCP, 실제 중복 판정 기능은 미래 개발 범위입니다.
-- `integrations/`, `skills/`: CLI Hook 샘플 및 Skill 지침; **자동 설치되지 않음**. 실제 적용 전 해당 버전의 공식 Hook 문서 확인.
+- `rust-scaffold/`: Rust CLI와 코어 워크스페이스. 프로젝트 등록·정책·용량 스캔·승인 정리·Docker 조회·관리형 실행을 제공하고 SQLite에 상태와 감사 기록을 저장합니다. `dsgd`는 Unix 소켓을 통한 Docker 읽기 전용 브로커입니다.
+- `docs/`: 개발 순서, API, 운영과 검증 근거를 관리합니다. [개발 백로그](docs/BACKLOG.md) · [핸드오프](docs/HANDOFF.md)
+- `integrations/`, `skills/`: 프로젝트별 훅 설치·제거, 스킬 절차, 서비스 구성 예시를 제공합니다. [에이전트 연동](integrations/README.md) · [서비스 운영](docs/OPERATIONS.md#docker-조회-브로커)
 
 ## 빠른 테스트 (macOS/Linux/Windows Python 환경)
 

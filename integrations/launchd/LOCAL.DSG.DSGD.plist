@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>local.dsg.dsgd</string>
+  <key>UserName</key>
+  <string>dsg</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/dsg/bin/dsgd</string>
+    <string>--listen</string>
+    <string>/private/var/run/dsgd/client/broker.sock</string>
+    <string>--upstream</string>
+    <string>/private/var/run/dsg-private/docker.sock</string>
+    <string>--docker-executable</string>
+    <string>/opt/dsg/bin/docker</string>
+    <string>--empty-config-dir</string>
+    <string>/private/var/db/dsgd/docker-empty</string>
+    <string>--engine-id</string>
+    <string>REPLACE_WITH_ENGINE_ID</string>
+    <string>--allow-uid</string>
+    <string>REPLACE_WITH_CLIENT_UID</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <false/>
+  <key>ExitTimeOut</key>
+  <integer>30</integer>
+</dict>
+</plist>
