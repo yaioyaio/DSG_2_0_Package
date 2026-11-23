@@ -33,6 +33,18 @@ pub fn run_command(
     cancelled: &AtomicBool,
     notify: impl FnMut(RunEvent) -> io::Result<()>,
 ) -> io::Result<RunResult> {
+    run_with_target(root, argv, timeout, quiet, cancelled, None, notify)
+}
+
+pub fn run_with_target(
+    root: &Path,
+    argv: &[String],
+    timeout: Duration,
+    quiet: bool,
+    cancelled: &AtomicBool,
+    cargo_target: Option<&Path>,
+    notify: impl FnMut(RunEvent) -> io::Result<()>,
+) -> io::Result<RunResult> {
     if timeout.is_zero() || timeout > Duration::from_secs(120) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -53,11 +65,11 @@ pub fn run_command(
     }
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
-        posix::run(root, argv, timeout, quiet, cancelled, notify)
+        posix::run(root, argv, timeout, quiet, cancelled, cargo_target, notify)
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
-        let _ = (root, quiet, cancelled, notify);
+        let _ = (root, quiet, cancelled, cargo_target, notify);
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
             "managed process groups unavailable",
@@ -252,6 +264,7 @@ mod posix {
         timeout: Duration,
         quiet: bool,
         cancelled: &AtomicBool,
+        cargo_target: Option<&Path>,
         notify: impl FnMut(RunEvent) -> io::Result<()>,
     ) -> io::Result<RunResult> {
         if cancelled.load(Ordering::Acquire) {
@@ -267,6 +280,9 @@ mod posix {
             .args(&argv[1..])
             .current_dir(root)
             .stdin(Stdio::null());
+        if let Some(target) = cargo_target {
+            command.env("CARGO_TARGET_DIR", target);
+        }
         if quiet {
             command.stdout(Stdio::null()).stderr(Stdio::null());
         }

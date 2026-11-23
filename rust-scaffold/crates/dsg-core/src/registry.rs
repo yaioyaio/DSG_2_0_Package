@@ -8,11 +8,14 @@ use fs2::FileExt;
 use rusqlite::{params, Connection, ErrorCode, OpenFlags, OptionalExtension, TransactionBehavior};
 use serde::Serialize;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use thiserror::Error;
+
+use crate::policy::is_direct_child;
 
 const DATABASE_NAME: &str = "registry.sqlite3";
 const APPLICATION_ID: i64 = 0x4453_4732;
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 const BUSY_TIMEOUT: Duration = Duration::from_millis(500);
 const OPEN_RETRY_WINDOW: Duration = Duration::from_secs(3);
 const MAX_REASON_CODE_BYTES: usize = 64;
@@ -20,6 +23,7 @@ const MAX_LABEL_BYTES: usize = 200;
 const MAX_PLAN_BYTES: usize = 1024 * 1024;
 const LEASE_SLOTS: i64 = 2;
 const MAX_LEASE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
+const MAX_APPROVAL_TTL: Duration = Duration::from_secs(15 * 60);
 
 const INITIAL_SCHEMA: &str = "
     CREATE TABLE project (
@@ -70,6 +74,26 @@ const LEASE_SCHEMA: &str = "
     ALTER TABLE audit_event ADD COLUMN lease_id INTEGER REFERENCES execution_lease(id);
 ";
 
+const GC_APPROVAL_SCHEMA: &str = "
+    CREATE TABLE gc_output (
+        project_id INTEGER NOT NULL REFERENCES project(id),
+        relative_path TEXT NOT NULL,
+        identity TEXT NOT NULL CHECK (length(identity) = 64),
+        registered_at INTEGER NOT NULL,
+        PRIMARY KEY (project_id, relative_path)
+    );
+    CREATE TABLE gc_application (
+        plan_id INTEGER PRIMARY KEY REFERENCES gc_plan(id),
+        relative_path TEXT NOT NULL,
+        identity TEXT NOT NULL CHECK (length(identity) = 64),
+        token_digest TEXT NOT NULL UNIQUE CHECK (length(token_digest) = 64),
+        approved_at_ms INTEGER NOT NULL,
+        expires_at_ms INTEGER NOT NULL CHECK (expires_at_ms > approved_at_ms),
+        claimed_at_ms INTEGER,
+        bytes_applied INTEGER CHECK (bytes_applied >= 0)
+    );
+";
+
 #[derive(Debug, Error)]
 pub enum RegistryError {
     #[error("레지스트리 상태 경로를 준비할 수 없습니다")]
@@ -118,6 +142,26 @@ pub enum RegistryError {
     InvalidLeaseOwner,
     #[error("실행 lease 슬롯의 파일 잠금에 실패했습니다")]
     LeaseLock(#[source] io::Error),
+    #[error("프로젝트 소유 정리 계획을 찾을 수 없습니다")]
+    GcPlanNotFound,
+    #[error("정리 대상 이름 또는 파일 식별 다이제스트가 유효하지 않습니다")]
+    InvalidGcOutput,
+    #[error("정리 대상의 등록된 소유권을 확인할 수 없습니다")]
+    GcOwnershipConflict,
+    #[error("정리 대상이 계획의 후보와 일치하지 않습니다")]
+    GcCandidateMismatch,
+    #[error("정리 계획이 현재 정책과 일치하지 않습니다")]
+    GcPolicyChanged,
+    #[error("정리 계획 또는 승인이 만료되었습니다")]
+    GcExpired,
+    #[error("정리 승인 증명을 확인할 수 없습니다")]
+    GcApprovalInvalid,
+    #[error("정리 계획의 현재 상태에서는 이 작업을 할 수 없습니다")]
+    GcStateConflict,
+    #[error("정리 승인 유효 기간이 지원되는 범위를 벗어났습니다")]
+    InvalidGcApprovalTtl,
+    #[error("적용 바이트 수를 기록할 수 없습니다")]
+    InvalidGcBytes,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -133,6 +177,35 @@ pub struct StoredPlan {
     pub plan_id: i64,
     pub created_at: i64,
     pub expires_at: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GcClaim {
+    pub plan_id: i64,
+    pub relative_path: String,
+    pub identity: String,
+    pub payload: Value,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum GcApplyStatus {
+    Applied,
+    Preserved,
+    RecoveryRequired,
+}
+
+impl GcApplyStatus {
+    fn audit_fields(self) -> (&'static str, AuditOutcome, &'static str) {
+        match self {
+            Self::Applied => ("applied", AuditOutcome::Success, "GC_APPLIED"),
+            Self::Preserved => ("preserved", AuditOutcome::Success, "GC_PRESERVED"),
+            Self::RecoveryRequired => (
+                "recovery_required",
+                AuditOutcome::Incomplete,
+                "GC_RECOVERY_REQUIRED",
+            ),
+        }
+    }
 }
 
 pub struct Lease {
@@ -158,6 +231,9 @@ pub enum AuditAction {
     PolicyCheck,
     Scan,
     GcPlan,
+    GcOutputRegister,
+    GcApprove,
+    GcApply,
     ManagedExecution,
     ComposeReuse,
 }
@@ -169,6 +245,9 @@ impl AuditAction {
             Self::PolicyCheck => "policy_check",
             Self::Scan => "scan",
             Self::GcPlan => "gc_plan",
+            Self::GcOutputRegister => "gc_output_register",
+            Self::GcApprove => "gc_approve",
+            Self::GcApply => "gc_apply",
             Self::ManagedExecution => "managed_execution",
             Self::ComposeReuse => "compose_reuse",
         }
@@ -397,6 +476,222 @@ impl Registry {
             created_at,
             expires_at,
         })
+    }
+
+    pub fn register_gc_output(
+        &mut self,
+        project_id: i64,
+        relative: &str,
+        identity: &str,
+    ) -> Result<(), RegistryError> {
+        let identity = gc_output_identity(relative, identity)?;
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if let Some(previous) = gc_registered_identity(&tx, project_id, relative)? {
+            return if previous == identity {
+                tx.commit()?;
+                Ok(())
+            } else {
+                Err(RegistryError::GcOwnershipConflict)
+            };
+        }
+        let now = timestamp()?;
+        let updated = tx.execute(
+            "INSERT INTO gc_output (project_id, relative_path, identity, registered_at)
+             SELECT id, ?2, ?3, ?4 FROM project WHERE id = ?1",
+            params![project_id, relative, identity, now],
+        )?;
+        if updated != 1 {
+            return Err(RegistryError::ProjectNotFound);
+        }
+        insert_event(
+            &tx,
+            Some(project_id),
+            EventReference::None,
+            AuditAction::GcOutputRegister,
+            AuditOutcome::Success,
+            "GC_OUTPUT_REGISTERED",
+            now,
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn read_gc_plan(&self, project_id: i64, plan_id: i64) -> Result<Value, RegistryError> {
+        gc_plan_row(&self.connection, project_id, plan_id)?.payload()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn approve_gc(
+        &mut self,
+        project_id: i64,
+        plan_id: i64,
+        relative: &str,
+        policy_digest: &str,
+        identity: &str,
+        token_digest: &str,
+        ttl: Duration,
+    ) -> Result<(), RegistryError> {
+        let identity = gc_output_identity(relative, identity)?;
+        let policy_digest =
+            normalized_digest(policy_digest).ok_or(RegistryError::InvalidPolicyDigest)?;
+        let token_digest =
+            normalized_digest(token_digest).ok_or(RegistryError::GcApprovalInvalid)?;
+        if ttl < Duration::from_millis(1) || ttl > MAX_APPROVAL_TTL {
+            return Err(RegistryError::InvalidGcApprovalTtl);
+        }
+        let ttl_ms =
+            i64::try_from(ttl.as_millis()).map_err(|_| RegistryError::InvalidGcApprovalTtl)?;
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let now_ms = lease_now_ms()?;
+        let plan = gc_plan_row(&tx, project_id, plan_id)?;
+        let plan_expires_at_ms = plan.require_current(&policy_digest, now_ms)?;
+        if plan.status != "planned" {
+            return Err(RegistryError::GcStateConflict);
+        }
+        require_gc_ownership(&tx, project_id, relative, &identity)?;
+        require_gc_candidate(&plan.payload()?, relative, &identity)?;
+        let duplicate_token: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM gc_application WHERE token_digest = ?1)",
+            [&token_digest],
+            |row| row.get(0),
+        )?;
+        if duplicate_token {
+            return Err(RegistryError::GcApprovalInvalid);
+        }
+        let expires_at_ms = now_ms
+            .checked_add(ttl_ms)
+            .ok_or(RegistryError::InvalidGcApprovalTtl)?
+            .min(plan_expires_at_ms);
+        tx.execute(
+            "INSERT INTO gc_application
+             (plan_id, relative_path, identity, token_digest, approved_at_ms, expires_at_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                plan_id,
+                relative,
+                identity,
+                token_digest,
+                now_ms,
+                expires_at_ms
+            ],
+        )?;
+        set_gc_status(&tx, plan_id, "approved")?;
+        insert_event(
+            &tx,
+            Some(project_id),
+            EventReference::Plan(plan_id),
+            AuditAction::GcApprove,
+            AuditOutcome::Success,
+            "GC_APPROVED",
+            now_ms / 1000,
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn claim_gc(
+        &mut self,
+        lease: &Lease,
+        plan_id: i64,
+        policy_digest: &str,
+        token_digest: &str,
+    ) -> Result<GcClaim, RegistryError> {
+        self.validate_lease_owner(lease)?;
+        let token_digest =
+            normalized_digest(token_digest).ok_or(RegistryError::GcApprovalInvalid)?;
+        let policy_digest =
+            normalized_digest(policy_digest).ok_or(RegistryError::InvalidPolicyDigest)?;
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        require_active_lease(&tx, lease)?;
+        let now_ms = lease_now_ms()?;
+        let plan = gc_plan_row(&tx, lease.project_id, plan_id)?;
+        if plan.status != "approved" {
+            return Err(RegistryError::GcStateConflict);
+        }
+        plan.require_current(&policy_digest, now_ms)?;
+        let approval = gc_application_row(&tx, plan_id)?;
+        if approval.claimed || approval.token_digest != token_digest {
+            return Err(RegistryError::GcApprovalInvalid);
+        }
+        if approval.expires_at_ms <= now_ms {
+            return Err(RegistryError::GcExpired);
+        }
+        let claim = approval.into_claim(plan_id, plan.payload()?);
+        require_gc_ownership(&tx, lease.project_id, &claim.relative_path, &claim.identity)?;
+        require_gc_candidate(&claim.payload, &claim.relative_path, &claim.identity)?;
+        let claimed = tx.execute(
+            "UPDATE gc_application SET claimed_at_ms = ?1
+             WHERE plan_id = ?2 AND claimed_at_ms IS NULL",
+            params![now_ms, plan_id],
+        )?;
+        if claimed != 1 {
+            return Err(RegistryError::GcApprovalInvalid);
+        }
+        set_gc_status(&tx, plan_id, "applying")?;
+        insert_event(
+            &tx,
+            Some(lease.project_id),
+            EventReference::PlanLease(plan_id, lease.id),
+            AuditAction::GcApply,
+            AuditOutcome::Allow,
+            "GC_APPLY_INTENT",
+            now_ms / 1000,
+        )?;
+        tx.commit()?;
+        Ok(claim)
+    }
+
+    pub fn pending_gc(&self, lease: &Lease, plan_id: i64) -> Result<GcClaim, RegistryError> {
+        self.validate_lease_owner(lease)?;
+        require_active_lease(&self.connection, lease)?;
+        pending_gc_claim(&self.connection, lease.project_id, plan_id)
+    }
+
+    pub fn finish_gc(
+        &mut self,
+        lease: &Lease,
+        plan_id: i64,
+        status: GcApplyStatus,
+        bytes: u64,
+    ) -> Result<(), RegistryError> {
+        self.validate_lease_owner(lease)?;
+        let bytes = i64::try_from(bytes).map_err(|_| RegistryError::InvalidGcBytes)?;
+        if status == GcApplyStatus::Preserved && bytes != 0 {
+            return Err(RegistryError::InvalidGcBytes);
+        }
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        require_active_lease(&tx, lease)?;
+        pending_gc_claim(&tx, lease.project_id, plan_id)?;
+        let (status, outcome, reason_code) = status.audit_fields();
+        let now = timestamp()?;
+        let updated = tx.execute(
+            "UPDATE gc_application SET bytes_applied = MAX(COALESCE(bytes_applied, 0), ?1)
+             WHERE plan_id = ?2 AND claimed_at_ms IS NOT NULL",
+            params![bytes, plan_id],
+        )?;
+        if updated != 1 {
+            return Err(RegistryError::GcApprovalInvalid);
+        }
+        set_gc_status(&tx, plan_id, status)?;
+        insert_event(
+            &tx,
+            Some(lease.project_id),
+            EventReference::PlanLease(plan_id, lease.id),
+            AuditAction::GcApply,
+            outcome,
+            reason_code,
+            now,
+        )?;
+        tx.commit()?;
+        Ok(())
     }
 
     /// The bounded reclaim probe must return true only when the recorded process scope has ended.
@@ -704,7 +999,7 @@ fn migrate(connection: &mut Connection) -> Result<(), RegistryError> {
             tx.commit()?;
             return Ok(());
         }
-        (APPLICATION_ID, 1) => {}
+        (APPLICATION_ID, 1 | 2) => {}
         (APPLICATION_ID, version) => return Err(RegistryError::UnsupportedSchema(version)),
         (0, 0) => {
             let has_objects: bool =
@@ -719,7 +1014,10 @@ fn migrate(connection: &mut Connection) -> Result<(), RegistryError> {
         }
         _ => return Err(RegistryError::UnrecognizedDatabase),
     }
-    tx.execute_batch(LEASE_SCHEMA)?;
+    if version < 2 {
+        tx.execute_batch(LEASE_SCHEMA)?;
+    }
+    tx.execute_batch(GC_APPROVAL_SCHEMA)?;
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()?;
     Ok(())
@@ -805,10 +1103,220 @@ fn release_lease(
     )
 }
 
+fn require_active_lease(connection: &Connection, lease: &Lease) -> Result<(), RegistryError> {
+    let active: bool = connection.query_row(
+        "SELECT EXISTS (SELECT 1 FROM execution_lease WHERE
+            id = ?1 AND project_id = ?2 AND slot = ?3 AND released_at_ms IS NULL)",
+        params![lease.id, lease.project_id, lease.slot],
+        |row| row.get(0),
+    )?;
+    if !active {
+        return Err(RegistryError::InvalidLeaseOwner);
+    }
+    Ok(())
+}
+
+struct GcPlanRow {
+    policy_digest: String,
+    payload_json: String,
+    expires_at: i64,
+    status: String,
+}
+
+impl GcPlanRow {
+    fn payload(&self) -> Result<Value, RegistryError> {
+        serde_json::from_str(&self.payload_json).map_err(|_| RegistryError::InvalidPlanPayload)
+    }
+
+    fn require_current(&self, policy_digest: &str, now_ms: i64) -> Result<i64, RegistryError> {
+        if self.policy_digest != policy_digest {
+            return Err(RegistryError::GcPolicyChanged);
+        }
+        let expires_at_ms = self.expires_at.saturating_mul(1000);
+        if expires_at_ms <= now_ms {
+            return Err(RegistryError::GcExpired);
+        }
+        Ok(expires_at_ms)
+    }
+}
+
+fn gc_plan_row(
+    connection: &Connection,
+    project_id: i64,
+    plan_id: i64,
+) -> Result<GcPlanRow, RegistryError> {
+    connection
+        .query_row(
+            "SELECT policy_digest, payload_json, expires_at, status FROM gc_plan
+             WHERE id = ?1 AND project_id = ?2",
+            params![plan_id, project_id],
+            |row| {
+                Ok(GcPlanRow {
+                    policy_digest: row.get(0)?,
+                    payload_json: row.get(1)?,
+                    expires_at: row.get(2)?,
+                    status: row.get(3)?,
+                })
+            },
+        )
+        .optional()?
+        .ok_or(RegistryError::GcPlanNotFound)
+}
+
+struct GcApprovalRow {
+    relative_path: String,
+    identity: String,
+    token_digest: String,
+    expires_at_ms: i64,
+    claimed: bool,
+}
+
+impl GcApprovalRow {
+    fn into_claim(self, plan_id: i64, payload: Value) -> GcClaim {
+        GcClaim {
+            plan_id,
+            relative_path: self.relative_path,
+            identity: self.identity,
+            payload,
+        }
+    }
+}
+
+fn gc_application_row(
+    connection: &Connection,
+    plan_id: i64,
+) -> Result<GcApprovalRow, RegistryError> {
+    connection
+        .query_row(
+            "SELECT relative_path, identity, token_digest, expires_at_ms, claimed_at_ms IS NOT NULL
+             FROM gc_application WHERE plan_id = ?1",
+            [plan_id],
+            |row| {
+                Ok(GcApprovalRow {
+                    relative_path: row.get(0)?,
+                    identity: row.get(1)?,
+                    token_digest: row.get(2)?,
+                    expires_at_ms: row.get(3)?,
+                    claimed: row.get(4)?,
+                })
+            },
+        )
+        .optional()?
+        .ok_or(RegistryError::GcApprovalInvalid)
+}
+
+fn pending_gc_claim(
+    connection: &Connection,
+    project_id: i64,
+    plan_id: i64,
+) -> Result<GcClaim, RegistryError> {
+    let plan = gc_plan_row(connection, project_id, plan_id)?;
+    if !matches!(plan.status.as_str(), "applying" | "recovery_required") {
+        return Err(RegistryError::GcStateConflict);
+    }
+    let approval = gc_application_row(connection, plan_id)?;
+    if !approval.claimed {
+        return Err(RegistryError::GcApprovalInvalid);
+    }
+    let claim = approval.into_claim(plan_id, plan.payload()?);
+    require_gc_ownership(
+        connection,
+        project_id,
+        &claim.relative_path,
+        &claim.identity,
+    )?;
+    require_gc_candidate(&claim.payload, &claim.relative_path, &claim.identity)?;
+    Ok(claim)
+}
+
+fn set_gc_status(connection: &Connection, plan_id: i64, status: &str) -> Result<(), RegistryError> {
+    let updated = connection.execute(
+        "UPDATE gc_plan SET status = ?1 WHERE id = ?2",
+        params![status, plan_id],
+    )?;
+    if updated != 1 {
+        return Err(RegistryError::GcStateConflict);
+    }
+    Ok(())
+}
+
+fn normalized_digest(digest: &str) -> Option<String> {
+    (digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .then(|| digest.to_ascii_lowercase())
+}
+
+fn gc_output_identity(relative: &str, identity: &str) -> Result<String, RegistryError> {
+    if !is_direct_child(relative) {
+        return Err(RegistryError::InvalidGcOutput);
+    }
+    normalized_digest(identity).ok_or(RegistryError::InvalidGcOutput)
+}
+
+fn gc_registered_identity(
+    connection: &Connection,
+    project_id: i64,
+    relative: &str,
+) -> Result<Option<String>, RegistryError> {
+    Ok(connection
+        .query_row(
+            "SELECT identity FROM gc_output WHERE project_id = ?1 AND relative_path = ?2",
+            params![project_id, relative],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
+
+fn require_gc_ownership(
+    connection: &Connection,
+    project_id: i64,
+    relative: &str,
+    identity: &str,
+) -> Result<(), RegistryError> {
+    if gc_registered_identity(connection, project_id, relative)?.as_deref() != Some(identity) {
+        return Err(RegistryError::GcOwnershipConflict);
+    }
+    Ok(())
+}
+
+fn require_gc_candidate(
+    payload: &Value,
+    relative: &str,
+    identity: &str,
+) -> Result<(), RegistryError> {
+    let candidates = payload["candidates"]
+        .as_array()
+        .filter(|_| payload["dry_run"].as_bool() == Some(true))
+        .ok_or(RegistryError::GcCandidateMismatch)?;
+    let mut matches = candidates
+        .iter()
+        .filter(|candidate| candidate["relative_path"].as_str() == Some(relative));
+    let candidate = matches
+        .next()
+        .filter(|_| matches.next().is_none())
+        .ok_or(RegistryError::GcCandidateMismatch)?;
+    let clean_identity = candidate["identity"]
+        .as_object()
+        .filter(|fields| fields.len() == 2)
+        .and_then(|fields| {
+            let device = fields.get("device")?.as_u64()?;
+            let inode = fields.get("inode")?.as_u64()?;
+            Some(crate::filesystem::FileIdentity { device, inode })
+        })
+        .ok_or(RegistryError::GcCandidateMismatch)?;
+    let encoded =
+        serde_json::to_vec(&clean_identity).map_err(|_| RegistryError::GcCandidateMismatch)?;
+    let candidate_digest = format!("{:x}", Sha256::digest(encoded));
+    if candidate_digest != identity {
+        return Err(RegistryError::GcCandidateMismatch);
+    }
+    Ok(())
+}
+
 enum EventReference {
     None,
     Plan(i64),
     Lease(i64),
+    PlanLease(i64, i64),
 }
 
 fn insert_event(
@@ -833,6 +1341,7 @@ fn insert_event(
         EventReference::None => (None, None),
         EventReference::Plan(id) => (Some(id), None),
         EventReference::Lease(id) => (None, Some(id)),
+        EventReference::PlanLease(plan, lease) => (Some(plan), Some(lease)),
     };
     connection.execute(
         "INSERT INTO audit_event
@@ -1055,7 +1564,7 @@ mod tests {
             .connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 2);
+        assert_eq!(version, SCHEMA_VERSION);
         let previous: (i64, i64, i64, String) = registry
             .connection
             .query_row(
@@ -1224,6 +1733,262 @@ mod tests {
         assert!(matches!(
             registry.acquire_lease(first, &scope, ttl, |_| true),
             Err(RegistryError::LeaseConflict)
+        ));
+    }
+
+    struct GcFixture {
+        project_id: i64,
+        plan_id: i64,
+        policy_digest: String,
+        identity: String,
+    }
+
+    impl GcFixture {
+        fn approve(&self, registry: &mut Registry, token: &str) -> Result<(), RegistryError> {
+            registry.approve_gc(
+                self.project_id,
+                self.plan_id,
+                "build",
+                &self.policy_digest,
+                &self.identity,
+                token,
+                Duration::from_secs(60),
+            )
+        }
+    }
+
+    fn gc_fixture(root: &Path, registry: &mut Registry) -> GcFixture {
+        let project_id = registry.register(root, "fixture", 2).unwrap().id;
+        let file_identity = crate::filesystem::FileIdentity {
+            device: 7,
+            inode: 11,
+        };
+        let identity = format!(
+            "{:x}",
+            Sha256::digest(serde_json::to_vec(&file_identity).unwrap())
+        );
+        let policy_digest = "a".repeat(64);
+        let plan_id = registry
+            .save_plan(
+                project_id,
+                &policy_digest,
+                &json!({
+                    "dry_run": true,
+                    "candidates": [{"relative_path": "build", "identity": file_identity}]
+                }),
+                Duration::from_secs(600),
+            )
+            .unwrap()
+            .plan_id;
+        GcFixture {
+            project_id,
+            plan_id,
+            policy_digest,
+            identity,
+        }
+    }
+
+    #[test]
+    fn v2_migration_preserves_existing_leases_and_events() {
+        let temp = tempdir().unwrap();
+        let connection = Connection::open(temp.path().join(DATABASE_NAME)).unwrap();
+        connection.execute_batch(INITIAL_SCHEMA).unwrap();
+        connection.execute_batch(LEASE_SCHEMA).unwrap();
+        connection
+            .pragma_update(None, "application_id", APPLICATION_ID)
+            .unwrap();
+        connection.pragma_update(None, "user_version", 2).unwrap();
+        connection
+            .execute_batch(
+                "INSERT INTO project VALUES (1, 'fixture', 'project', 2, 3, 4);
+                 INSERT INTO execution_lease VALUES (2, 1, printf('%064d', 0), 0, 7, 3, 4, 5, 6);
+                 INSERT INTO audit_event VALUES
+                    (3, 1, NULL, 'local_cli', 'managed_execution', 'success',
+                     'EXECUTION_COMPLETED', 5, 2);",
+            )
+            .unwrap();
+        drop(connection);
+
+        let registry = Registry::open(temp.path()).unwrap();
+        let version: i64 = registry
+            .connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 3);
+        let existing: (u32, String) = registry
+            .connection
+            .query_row(
+                "SELECT process_id, reason_code FROM execution_lease JOIN audit_event
+                 ON execution_lease.id = audit_event.lease_id",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(existing, (7, "EXECUTION_COMPLETED".into()));
+    }
+
+    #[test]
+    fn gc_approval_requires_registered_identity_matching_plan_snapshot() {
+        let temp = tempdir().unwrap();
+        let mut registry = Registry::open(&temp.path().join("state")).unwrap();
+        let fixture = gc_fixture(temp.path(), &mut registry);
+        let token = "b".repeat(64);
+        assert!(matches!(
+            fixture.approve(&mut registry, &token),
+            Err(RegistryError::GcOwnershipConflict)
+        ));
+        let other_identity = "c".repeat(64);
+        registry
+            .register_gc_output(fixture.project_id, "build", &other_identity)
+            .unwrap();
+        assert!(matches!(
+            registry.register_gc_output(fixture.project_id, "build", &fixture.identity),
+            Err(RegistryError::GcOwnershipConflict)
+        ));
+        assert!(matches!(
+            registry.approve_gc(
+                fixture.project_id,
+                fixture.plan_id,
+                "build",
+                &fixture.policy_digest,
+                &other_identity,
+                &token,
+                Duration::from_secs(60)
+            ),
+            Err(RegistryError::GcCandidateMismatch)
+        ));
+        assert!(matches!(
+            registry.read_gc_plan(fixture.project_id + 1, fixture.plan_id),
+            Err(RegistryError::GcPlanNotFound)
+        ));
+    }
+
+    #[test]
+    fn concurrent_approval_has_one_winner_and_terminal_apply_cannot_replay() {
+        let temp = tempdir().unwrap();
+        let state = temp.path().join("state");
+        let mut registry = Registry::open(&state).unwrap();
+        let fixture = Arc::new(gc_fixture(temp.path(), &mut registry));
+        registry
+            .register_gc_output(fixture.project_id, "build", &fixture.identity)
+            .unwrap();
+        let barrier = Arc::new(Barrier::new(2));
+        let workers = ["b".repeat(64), "c".repeat(64)].map(|token| {
+            let state = state.clone();
+            let barrier = Arc::clone(&barrier);
+            let fixture = Arc::clone(&fixture);
+            thread::spawn(move || {
+                let mut connection = Registry::open(&state).unwrap();
+                barrier.wait();
+                let result = fixture.approve(&mut connection, &token);
+                (token, result)
+            })
+        });
+        let approvals = workers.map(|worker| worker.join().unwrap());
+        let token = approvals
+            .iter()
+            .find(|(_, result)| result.is_ok())
+            .map(|(token, _)| token)
+            .unwrap();
+        assert_eq!(
+            approvals
+                .iter()
+                .filter(|(_, result)| matches!(result, Err(RegistryError::GcStateConflict)))
+                .count(),
+            1
+        );
+        let ttl = Duration::from_secs(60);
+        let lease = registry
+            .acquire_lease(fixture.project_id, &"d".repeat(64), ttl, |_| false)
+            .unwrap();
+        assert!(matches!(
+            registry.claim_gc(&lease, fixture.plan_id, &"e".repeat(64), token),
+            Err(RegistryError::GcPolicyChanged)
+        ));
+        let claim = registry
+            .claim_gc(&lease, fixture.plan_id, &fixture.policy_digest, token)
+            .unwrap();
+        assert_eq!(claim.relative_path, "build");
+        assert_eq!(claim.identity, fixture.identity);
+        assert!(matches!(
+            registry.claim_gc(&lease, fixture.plan_id, &fixture.policy_digest, token),
+            Err(RegistryError::GcStateConflict)
+        ));
+        registry
+            .finish_gc(&lease, fixture.plan_id, GcApplyStatus::RecoveryRequired, 0)
+            .unwrap();
+        registry
+            .finish_lease(lease, AuditOutcome::Incomplete, "GC_INTERRUPTED")
+            .unwrap();
+        let recovery_lease = registry
+            .acquire_lease(fixture.project_id, &"d".repeat(64), ttl, |_| false)
+            .unwrap();
+        assert_eq!(
+            registry
+                .pending_gc(&recovery_lease, fixture.plan_id)
+                .unwrap()
+                .identity,
+            claim.identity
+        );
+        registry
+            .finish_gc(&recovery_lease, fixture.plan_id, GcApplyStatus::Applied, 17)
+            .unwrap();
+        assert!(matches!(
+            registry.pending_gc(&recovery_lease, fixture.plan_id),
+            Err(RegistryError::GcStateConflict)
+        ));
+        let evidence: (i64, i64) = registry
+            .connection
+            .query_row(
+                "SELECT bytes_applied, count(*) FROM gc_application
+                 JOIN audit_event ON gc_application.plan_id = audit_event.plan_id
+                 WHERE gc_application.plan_id = ?1 AND action = 'gc_apply'",
+                [fixture.plan_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(evidence, (17, 3));
+    }
+
+    #[test]
+    fn expired_approval_and_plan_cannot_be_claimed() {
+        let temp = tempdir().unwrap();
+        let mut registry = Registry::open(&temp.path().join("state")).unwrap();
+        let fixture = gc_fixture(temp.path(), &mut registry);
+        let token = "b".repeat(64);
+        registry
+            .register_gc_output(fixture.project_id, "build", &fixture.identity)
+            .unwrap();
+        fixture.approve(&mut registry, &token).unwrap();
+        registry
+            .connection
+            .execute(
+                "UPDATE gc_application SET approved_at_ms = 0, expires_at_ms = 1 WHERE plan_id = ?1",
+                [fixture.plan_id],
+            )
+            .unwrap();
+        let lease = registry
+            .acquire_lease(
+                fixture.project_id,
+                &"d".repeat(64),
+                Duration::from_secs(60),
+                |_| false,
+            )
+            .unwrap();
+        assert!(matches!(
+            registry.claim_gc(&lease, fixture.plan_id, &fixture.policy_digest, &token),
+            Err(RegistryError::GcExpired)
+        ));
+        registry
+            .connection
+            .execute(
+                "UPDATE gc_plan SET created_at = 0, expires_at = 1 WHERE id = ?1",
+                [fixture.plan_id],
+            )
+            .unwrap();
+        assert!(matches!(
+            fixture.approve(&mut registry, &token),
+            Err(RegistryError::GcExpired)
         ));
     }
 
