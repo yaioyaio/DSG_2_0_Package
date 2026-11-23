@@ -10,7 +10,7 @@
 | DSG-04 관리형 실행과 재사용 | P0/P1 · REQ-005/006/009 | DSG-03 | 제한된 프로세스 실행·lease·Compose 재사용. 격리 엔진에서 중복과 오재사용 0건, 중단 후 lease 회수 | 지휘자·등록부·실행기·재사용 검증 서브에이전트 · 완료 |
 | DSG-05 승인 기반 정리와 자동 회수 | P0 · REQ-008/009 | DSG-04 | 소유권·승인·재검증·감사 복구. 종료·Git 이벤트별 자동 정리와 보존 근거 검증 | 지휘자·등록부·정리 경계·자동 정리 서브에이전트 · 완료 |
 | DSG-06 에이전트 연동 | P1/P2 · REQ-010/011 | DSG-05 | Claude·Codex·Gemini 어댑터와 읽기 전용 MCP. 해당 CLI 버전 호출과 오류 경로 검증 | 지휘자·훅 계약·설치·MCP 서브에이전트 · 완료 |
-| DSG-07 OS 서비스와 강제 통제 | P2 · REQ-012 | DSG-06 | OS별 수명 주기, 접근 권한, Docker 프록시. 해당 OS 실측과 격리 경계 확인 | macOS 샌드박스·launchd 및 Linux 제한 UID·systemd 통과. Windows 요약 교차 빌드 및 SCM 검증 진입점 작성. Windows 실제 엔진·계정·서비스 및 macOS 배포 계정 검증 대기 |
-| DSG-08 웹 대시보드와 제품화 | P2 · REQ-011/013 | DSG-07의 플랫폼별 검증 | 검증된 조회 API 기반 웹, 패키지·설치·서명·운영 문서. 플랫폼별 설치·제거 검증 | macOS·Linux ARM64 로컬 패키지와 WebKit 렌더링 통과. Windows 두 아키텍처 후보 생성, 네이티브 설치 및 공인 서명 대기 |
+| DSG-07 OS 서비스와 강제 통제 | P2 · REQ-012 | DSG-06 | OS별 수명 주기, 접근 권한, Docker 프록시. 해당 OS 실측과 격리 경계 확인 | macOS 샌드박스·launchd 및 Linux 제한 UID·systemd 통과. Windows ARM64 실제 SCM·계정 경계·재시작 시험은 합성 파이프로 통과. Windows 실제 Docker 엔진 및 macOS 배포 계정 검증 대기 |
+| DSG-08 웹 대시보드와 제품화 | P2 · REQ-011/013 | DSG-07의 플랫폼별 검증 | 검증된 조회 API 기반 웹, 패키지·설치·서명·운영 문서. 플랫폼별 설치·제거 검증 | macOS·Linux ARM64 로컬 패키지와 WebKit 렌더링 통과. Windows ARM64 실제 설치 수명 주기·대시보드 HTTP 및 로컬 분리 서명 검증 통과. Windows x64 설치 수명 주기와 공인 서명 대기 |
 
 기준선, 검증 결과와 재개 순서는 [핸드오프](HANDOFF.md)에 기록한다.

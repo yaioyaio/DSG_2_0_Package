@@ -15,7 +15,8 @@ use windows_sys::Win32::Security::Authorization::{
 };
 use windows_sys::Win32::Security::*;
 use windows_sys::Win32::Storage::FileSystem::{
-    ReadFile, WriteFile, FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_ACCESS_DUPLEX,
+    ReadFile, WriteFile, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_READ_ATTRIBUTES, FILE_READ_DATA,
+    FILE_WRITE_DATA, PIPE_ACCESS_DUPLEX, SYNCHRONIZE,
 };
 use windows_sys::Win32::System::Pipes::*;
 use windows_sys::Win32::System::Services::*;
@@ -138,14 +139,16 @@ struct Listener {
 impl Listener {
     fn create(config: &WindowsBrokerConfig) -> io::Result<Self> {
         // LocalSystem owns the endpoint. Only SYSTEM receives server creation
-        // rights. Clients open using explicit data read/write and synchronize.
+        // rights. CreateFile can request FILE_READ_ATTRIBUTES in addition to
+        // the client's explicit data access and synchronization rights.
+        let client_access = FILE_READ_DATA | FILE_WRITE_DATA | FILE_READ_ATTRIBUTES | SYNCHRONIZE;
         let mut acl = String::from("O:SYD:P(A;;GA;;;SY)");
         let mut allowed = Vec::new();
         for sid in config.client_sids() {
             let mut parsed = null_mut();
             checked(unsafe { ConvertStringSidToSidW(wide(sid.as_str()).as_ptr(), &mut parsed) })?;
             allowed.push(Local(parsed));
-            acl.push_str(&format!("(A;;0x00100003;;;{})", sid.as_str()));
+            acl.push_str(&format!("(A;;0x{client_access:08x};;;{})", sid.as_str()));
         }
         let mut descriptor = null_mut();
         checked(unsafe {

@@ -71,7 +71,7 @@ $probe = {
     $ErrorActionPreference = 'Stop'
     Set-StrictMode -Version Latest
     function Open-Pipe([string]$PipeName) {
-        $pipe = [IO.Pipes.NamedPipeClientStream]::new('.', $PipeName, [IO.Pipes.PipeAccessRights]0x100003,
+        $pipe = [IO.Pipes.NamedPipeClientStream]::new('.', $PipeName, [IO.Pipes.PipeAccessRights]0x100083,
             [IO.Pipes.PipeOptions]::None, [Security.Principal.TokenImpersonationLevel]::Identification,
             [IO.HandleInheritability]::None)
         try { $pipe.Connect(2500) } catch { $pipe.Dispose(); throw }
@@ -87,37 +87,48 @@ $probe = {
         throw 'DSG_BOUNDARY_OPEN'
     }
     function Read-Route([string]$Path, [int]$Status) {
-        $pipe = Open-Pipe $listenName
+        try { $pipe = Open-Pipe $listenName }
+        catch {
+            $cause = $_.Exception.GetBaseException()
+            if ($cause -is [UnauthorizedAccessException]) { throw 'DSG_PROBE_LISTENER_DENIED' }
+            if ($cause -is [TimeoutException]) { throw 'DSG_PROBE_LISTENER_TIMEOUT' }
+            throw 'DSG_PROBE_LISTENER_CONNECT'
+        }
         try {
             $request = [Text.Encoding]::ASCII.GetBytes("GET $Path HTTP/1.0`r`n`r`n")
-            $pipe.Write($request, 0, $request.Length)
+            try { $pipe.Write($request, 0, $request.Length) } catch { throw 'DSG_PROBE_LISTENER_WRITE' }
             $buffer = [byte[]]::new(4096)
             $used = 0
             while ($used -lt $buffer.Length) {
-                $count = $pipe.Read($buffer, $used, $buffer.Length - $used)
+                try { $count = $pipe.Read($buffer, $used, $buffer.Length - $used) }
+                catch { throw 'DSG_PROBE_LISTENER_READ' }
                 if (!$count) { break }
                 $used += $count
                 $raw = [Text.Encoding]::ASCII.GetString($buffer, 0, $used)
                 $end = $raw.IndexOf("`r`n`r`n")
                 if ($end -lt 0) { continue }
                 $head = $raw.Substring(0, $end)
-                if (!$head.StartsWith("HTTP/1.1 $Status ") -or $head -notmatch '(?im)^Content-Length: ([0-9]+)\r?$') {
-                    throw 'DSG_HTTP_FRAMING'
-                }
+                if ($head -notmatch '^HTTP/1\.1 ([0-9]{3}) ') { throw 'DSG_HTTP_FRAMING' }
+                if ([int]$Matches[1] -ne $Status) { throw "DSG_HTTP_STATUS_$($Matches[1])" }
+                if ($head -notmatch '(?im)^Content-Length: ([0-9]+)\r?$') { throw 'DSG_HTTP_FRAMING' }
                 $length = [int]$Matches[1]
                 if ($used -eq $end + 4 + $length) { return $raw.Substring($end + 4) }
             }
             throw 'DSG_RESPONSE_INCOMPLETE'
         } finally { $pipe.Dispose() }
     }
+    $failureCode = 20
     try {
         if ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value -ne $sid) { exit 10 }
         if ($mode -eq 'denied') { Assert-Denied $listenName; exit 0 }
         if ($mode -eq 'full') { Assert-Denied $upName }
+        $failureCode = 21
         if ((Read-Route '/_ping' 200) -cne 'OK') { exit 11 }
         if ($mode -eq 'restart') { exit 0 }
+        $failureCode = 22
         $info = (Read-Route '/info' 200) | ConvertFrom-Json
         if ($info.ID -cne $expected -or @($info.PSObject.Properties).Count -ne 1) { exit 12 }
+        $failureCode = 23
         $inventory = (Read-Route '/dsg/v1/inventory' 200) | ConvertFrom-Json
         if ($inventory.engine_id -cne $expected -or $inventory.status -cne 'unknown' -or
             $inventory.complete -isnot [bool] -or $inventory.complete -or
@@ -128,9 +139,24 @@ $probe = {
         foreach ($key in @('containers', 'images', 'volumes', 'duplicates')) {
             if ($null -ne $inventory.$key) { exit 15 }
         }
+        $failureCode = 24
         $null = Read-Route '/unsupported' 403
         exit 0
-    } catch { exit 16 }
+    } catch {
+        if ($_.Exception.Message -match '^DSG_HTTP_STATUS_([0-9]{3})$') {
+            exit (1000 * $failureCode + [int]$Matches[1])
+        }
+        switch ($_.Exception.Message) {
+            'DSG_PROBE_LISTENER_CONNECT' { exit 31 }
+            'DSG_PROBE_LISTENER_WRITE' { exit 32 }
+            'DSG_PROBE_LISTENER_READ' { exit 33 }
+            'DSG_HTTP_FRAMING' { exit 34 }
+            'DSG_RESPONSE_INCOMPLETE' { exit 35 }
+            'DSG_PROBE_LISTENER_DENIED' { exit 36 }
+            'DSG_PROBE_LISTENER_TIMEOUT' { exit 37 }
+            default { exit $failureCode }
+        }
+    }
 }
 
 function Invoke-Probe([string]$Mode, [string]$Sid) {
@@ -158,7 +184,7 @@ function Invoke-Probe([string]$Mode, [string]$Sid) {
             $task = Get-OwnedTask
             $info = Get-ScheduledTaskInfo -InputObject $task
             if ($task.State -eq 'Ready' -and $info.LastRunTime -gt $before -and $info.LastTaskResult -ne 267009) {
-                if ($info.LastTaskResult -ne 0) { throw 'DSG_PROBE_FAILED' }
+                if ($info.LastTaskResult -ne 0) { throw "DSG_PROBE_FAILED_$($info.LastTaskResult)" }
                 return
             }
             Start-Sleep -Milliseconds 200
@@ -205,6 +231,7 @@ try {
     Invoke-Probe restart S-1-5-19
 } catch {
     $failure = $stage
+    if ($_.Exception.Message -match '^DSG_[A-Z0-9_]+$') { Write-Output $_.Exception.Message }
 } finally {
     if ($created) {
         try {

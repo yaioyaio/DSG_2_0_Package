@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import platform
 import re
+import runpy
 import stat
 import struct
 import subprocess
@@ -681,8 +682,18 @@ def main():
         if command in ("install", "upgrade"):
             action.add_argument("--archive", required=True)
             action.add_argument("--sha256", required=True)
+            action.add_argument("--signatures", help="detached Ed25519 signatures JSON")
+            action.add_argument("--public-key", help="Ed25519 public key in SPKI DER encoding")
+            action.add_argument("--public-key-sha256", help="independently approved public key SHA-256")
+            action.add_argument("--openssl", help="absolute path to caller-trusted OpenSSL 3")
     args = cli.parse_args()
     try:
+        if args.command in ("install", "upgrade"):
+            signature_options = (args.signatures, args.public_key, args.public_key_sha256, args.openssl)
+            if any(option is not None for option in signature_options):
+                require(all(signature_options), "provide all four detached signature verification options")
+                verifier = runpy.run_path(str(Path(__file__).with_name("verify-release-signature.py")))
+                verifier["verify"](args)
         manager = manage_windows if sys.platform == "win32" else manage_posix
         (build if args.command == "build" else manager)(args)
     except (OSError, ValueError, EOFError, tarfile.TarError, subprocess.SubprocessError) as err:
