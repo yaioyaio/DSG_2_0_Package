@@ -1,6 +1,8 @@
 pub mod cleanup;
 pub mod docker;
+pub mod docker_cache;
 pub mod docker_command;
+pub mod docker_image_gc;
 pub mod filesystem;
 pub mod gc;
 pub mod policy;

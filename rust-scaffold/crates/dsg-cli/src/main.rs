@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 use dsg_core::docker;
-use dsg_core::docker_command::DockerCli;
+use dsg_core::docker_cache::build_cache_inventory;
+use dsg_core::docker_command::{discover_contexts, DockerCli};
 use dsg_core::filesystem::{self, ScanReport};
 use dsg_core::policy::{self, Policy, PolicyError, POLICY_VERSION, PROJECT_CONFIG};
 use dsg_core::registry::{AuditAction, AuditOutcome, Registry};
@@ -13,10 +14,12 @@ use std::time::Duration;
 
 mod cleanup_cli;
 mod dashboard;
+mod docker_gc_cli;
 mod execution;
 mod hook_install;
 mod hooks;
 mod mcp;
+mod mcp_state;
 
 #[derive(Parser)]
 #[command(
@@ -56,7 +59,19 @@ enum Command {
         command: Vec<String>,
     },
     /// 파일을 변경하지 않고 정리 후보의 계획을 기록합니다.
-    GcPlan,
+    GcPlan {
+        #[arg(long, requires_all = ["docker_engine", "docker_image"])]
+        docker_context: Option<String>,
+        #[arg(long, requires = "docker_context")]
+        docker_engine: Option<String>,
+        #[arg(long, requires = "docker_context")]
+        docker_image: Option<String>,
+    },
+    /// 저장한 Docker 이미지 계획을 같은 엔진에서 재확인합니다.
+    DockerImageRecheck {
+        #[arg(long)]
+        plan: i64,
+    },
     /// 소유권을 확인한 생성 폴더를 정리 대상으로 등록합니다.
     GcOwn {
         #[arg(long)]
@@ -97,6 +112,16 @@ enum Command {
         #[arg(long)]
         feature: String,
     },
+    /// 로컬 Docker 구성에 등록된 컨텍스트 이름을 조회합니다.
+    DockerContexts {
+        #[arg(long, default_value_t = docker::MAX_CONTEXTS, value_parser = clap::value_parser!(u16).range(1..=i64::from(docker::MAX_CONTEXTS)))]
+        max_contexts: u16,
+    },
+    /// 선택한 엔진의 빌드 캐시를 읽기 전용으로 집계합니다.
+    DockerBuildCache {
+        #[arg(long)]
+        context: String,
+    },
     /// 지정된 Docker 컨텍스트의 리소스와 중복 후보를 조회합니다.
     DockerScan {
         #[arg(long)]
@@ -110,6 +135,12 @@ enum Command {
         timeout: u16,
         #[arg(long)]
         auto_clean_cargo: bool,
+        /// 등록된 빌드·테스트 Provider의 정형 작업을 실행합니다.
+        #[arg(long)]
+        provider: Option<String>,
+        /// 검증된 Playwright 성공 trace의 보존 기간을 초 단위로 지정합니다.
+        #[arg(long, requires = "provider", value_parser = clap::value_parser!(u64).range(1..=604_800))]
+        trace_ttl_seconds: Option<u64>,
         #[arg(required = true, num_args = 1.., trailing_var_arg = true, allow_hyphen_values = true)]
         command: Vec<String>,
     },
@@ -132,6 +163,11 @@ enum Command {
     },
     /// 표준 입출력에서 읽기 전용 MCP 서버를 실행합니다.
     Mcp,
+    #[command(hide = true)]
+    McpStateRead {
+        #[arg(long)]
+        plan_id: Option<i64>,
+    },
     /// 프로젝트 관측값을 로컬 브라우저에서 조회합니다.
     Dashboard {
         #[arg(long, default_value_t = 0)]
@@ -202,6 +238,7 @@ fn main() -> ExitCode {
     match &cli.command {
         Command::Hook { agent } => return hooks::run(*agent),
         Command::Mcp => return mcp::run(&cli),
+        Command::McpStateRead { plan_id } => return mcp_state::run(&cli, *plan_id),
         Command::Dashboard {
             port,
             lifetime,
@@ -236,6 +273,37 @@ fn main() -> ExitCode {
 }
 
 fn run(cli: &Cli) -> Result<Output, CliError> {
+    if let Command::DockerContexts { max_contexts } = &cli.command {
+        let inventory = discover_contexts(*max_contexts);
+        let (text, exit) = match &inventory.contexts {
+            Some(names) => (names.join("\n"), 0),
+            None => ("Docker 컨텍스트 목록 미확인".to_owned(), 5),
+        };
+        return Ok(Output {
+            command: "docker-contexts",
+            data: json!(inventory),
+            text,
+            exit,
+        });
+    }
+    if let Command::DockerBuildCache { context } = &cli.command {
+        let backend = DockerCli::new(context)
+            .map_err(|_| CliError::new("CONFIG_INVALID", "Docker 컨텍스트 이름을 확인하세요"))?;
+        let inventory = build_cache_inventory(&backend);
+        let (text, exit) = match (inventory.total_count, inventory.active_count) {
+            (Some(total), Some(active)) => (
+                format!("빌드 캐시 {total}개 · 활성 {active}개 · 소유권 미확인으로 보존"),
+                0,
+            ),
+            _ => ("Docker 빌드 캐시 집계 미확인 · 보존".to_owned(), 5),
+        };
+        return Ok(Output {
+            command: "docker-build-cache",
+            data: json!(inventory),
+            text,
+            exit,
+        });
+    }
     let root = filesystem::canonical_root(&cli.root)
         .map_err(|_| CliError::new("PROJECT_UNKNOWN", "프로젝트 디렉터리에 접근할 수 없습니다"))?;
     if let Command::Agents { action } = &cli.command {
@@ -263,6 +331,9 @@ fn run(cli: &Cli) -> Result<Output, CliError> {
         Command::Hook { .. }
         | Command::Agents { .. }
         | Command::Mcp
+        | Command::McpStateRead { .. }
+        | Command::DockerContexts { .. }
+        | Command::DockerBuildCache { .. }
         | Command::Dashboard { .. } => unreachable!(),
         Command::Scan => {
             let report = read_scan(&root, &settings)?;
@@ -329,14 +400,25 @@ fn run(cli: &Cli) -> Result<Output, CliError> {
                 exit,
             })
         }
-        Command::GcPlan => {
+        Command::GcPlan {
+            docker_context,
+            docker_engine,
+            docker_image,
+        } => {
             let mut registry = open_registry(cli)?;
             let project = registry
                 .register(&root, &settings.project_id, settings.version)
                 .map_err(registry_error)?;
             let plan = filesystem::plan(&root, &settings)
                 .map_err(|_| CliError::new("SCAN_FAILED", "정리 후보 확인에 실패했습니다"))?;
-            let payload = json!(plan);
+            let mut payload = json!(plan);
+            if let (Some(context), Some(engine), Some(image)) =
+                (docker_context, docker_engine, docker_image)
+            {
+                payload["docker_images"] = json!(docker_gc_cli::observe(
+                    &registry, &root, context, engine, image
+                )?);
+            }
             let policy_digest = policy_digest(&settings)?;
             let record = registry
                 .save_plan(
@@ -363,6 +445,9 @@ fn run(cli: &Cli) -> Result<Output, CliError> {
                 json!({"record": record, "plan": payload}),
                 text,
             ))
+        }
+        Command::DockerImageRecheck { plan } => {
+            docker_gc_cli::recheck(cli, &root, &settings, *plan)
         }
         Command::DockerScan {
             context,
@@ -395,8 +480,19 @@ fn run(cli: &Cli) -> Result<Output, CliError> {
         Command::Exec {
             timeout,
             auto_clean_cargo,
+            provider,
+            trace_ttl_seconds,
             command,
-        } => execution::exec(cli, &root, &settings, *timeout, *auto_clean_cargo, command),
+        } => execution::exec(
+            cli,
+            &root,
+            &settings,
+            *timeout,
+            *auto_clean_cargo,
+            provider.as_deref(),
+            *trace_ttl_seconds,
+            command,
+        ),
         Command::DockerReuse {
             context,
             expectation_json,

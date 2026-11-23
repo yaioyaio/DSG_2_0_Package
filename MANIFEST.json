@@ -2,16 +2,17 @@
   "package": "Dev Storage Guardian 2.0",
   "created": "2026-11-19",
   "validation": {
-    "python_tests": "14 passed",
-    "docker_runtime": "macOS: isolated inventory and two managed reuse requests passed",
-    "rust_compiler": "macOS arm64: 85 Rust tests passed. Windows ARM64 and x64 binaries optimized and linked.",
+    "python_tests": "14 passed; POC CLI baseline and bytecode prevention passed",
+    "docker_runtime": "macOS isolated real inventory and repeated Compose up passed; embedded builder cache observed (208 total, 0 active), existing image preserved by dry-run.",
+    "rust_compiler": "macOS ARM64: 98 Rust tests and local integration passed. Windows ARM64 0.1.1-rc.1 cross-linked and ran on the existing guest.",
     "html_parse": "passed",
-    "agent_integration": "macOS arm64: Claude Code 2.1.330, Codex CLI 0.170.0 and Gemini CLI 0.70.0; 9 isolated native allow, deny and hook-error checks passed.",
-    "dockerd_broker": "macOS arm64 live Docker via Seatbelt and launchd; Linux ARM64 Ubuntu systemd and separate UID against live isolated Docker; Windows ARM64 native SCM and two account boundaries passed against a fixture pipe.",
-    "dashboard": "Local API, origin checks, and actual offscreen WebKit rendering of live fixture at 1060 and 390 px passed. Windows ARM64 rc.3 passed the delayed-request regression.",
-    "release_packages": "macOS and Linux ARM64 local 0.1.0 exact release archives were installed and run on each OS. Independent builds and archive hashes matched. macOS ad-hoc signature and Linux SHA256 verified.",
-    "windows_qualification": "Windows ARM64 rc.3 passed native package and dashboard lifecycle on Parallels. Its daemon matches the SCM-tested rc.2 digest. Windows x64 rc.3 passed cross-link, archive reproducibility and PE/hash validation. Windows live Docker, x64 native lifecycle and trusted signing gates outstanding.",
-    "release_signature": "Temporary Ed25519 fixtures verified archive, exact canonical manifest, and signature-gated install and upgrade. The suite rejected 12 invalid verifier inputs. Production publisher authorization is pending."
+    "agent_integration": "macOS historical native hook checks plus current read-only MCP execution and approval status projection; fixture state files unchanged.",
+    "dockerd_broker": "macOS sandbox and launchd passed with isolated live Docker; Parallels Windows ARM64 0.1.1-rc.1 native SCM lifecycle and two account boundaries passed with a fixture pipe.",
+    "dashboard": "Independent real Docker counts matched the API and WebKit at 1060px and 390px, plus read-only and origin checks.",
+    "release_packages": "macOS ARM64 0.1.1-rc.1: two clean builds matched archive SHA-256; upgrade from 0.1.0, runtime, removal, and ad-hoc signature verification passed.",
+    "windows_qualification": "Windows ARM64 0.1.1-rc.1 passed Parallels native package, dashboard and SCM with assigned fixture pipe. Guest restored suspended. Windows x64 native and live Windows Docker remain separate.",
+    "release_signature": "Temporary Ed25519 keys verified both signed artifacts and manifest; invalid verification and rejected upgrade covered. Official signer qualification is separate.",
+    "build_providers": "Cargo, Node, pnpm, Gradle, uv, Go and Playwright ran on macOS. Playwright retained success and failure traces, opt-in TTL reclaimed one expired success and preserved expected failure."
   },
   "files": [
     {
@@ -61,8 +62,8 @@
     },
     {
       "path": "docs/API_SPEC.md",
-      "sha256": "ff0dfcfbe28c88199eb96f977d7b5127d4db76247d5ff9acb20d7b1b662c6045",
-      "bytes": 10676
+      "sha256": "261b1a5e3ffe2ec490120ff49447085e94b912dc4c894c7489682884dc98e34c",
+      "bytes": 13421
     },
     {
       "path": "docs/ARCHITECTURE.md",
@@ -76,8 +77,8 @@
     },
     {
       "path": "docs/OPERATIONS.md",
-      "sha256": "fcf1696534ff5d352658e1e768101b1e228145ed657e74b891aa12b7e48f72ed",
-      "bytes": 6946
+      "sha256": "5c8ab7fc83e2aa39fff6bbaf0c1c5e74d438b1c06a713cc122e6ecb57bdfdfd6",
+      "bytes": 7521
     },
     {
       "path": "docs/PLAN.md",
@@ -101,18 +102,18 @@
     },
     {
       "path": "docs/RELEASE.md",
-      "sha256": "9b8618d537b4ff9f887375711e024d2da8386d3433a92bc8858ee15582671b79",
-      "bytes": 5966
+      "sha256": "de814514694e1ff85baec186a05768f1343d9d3aef60951e6b86e6857bfd2424",
+      "bytes": 7118
     },
     {
       "path": "docs/REQUIREMENTS.md",
-      "sha256": "fee1858ed1301971e952a87c41b6834d33cbe4e5cae887f66ede3d3e028d7cb5",
-      "bytes": 1919
+      "sha256": "724d662079feb5eb1a37e931859699aae750ec6a4290313fd687a6b066b2fe9c",
+      "bytes": 2160
     },
     {
       "path": "docs/SECURITY.md",
-      "sha256": "ed1a5521766898371a14b71a3ff8749826899cee24474bc5bb5f13a540933f9e",
-      "bytes": 1840
+      "sha256": "d05b6cc7533222450c1eed3b6af0d674a334616339a5fd4c356d16275862e0d8",
+      "bytes": 2184
     },
     {
       "path": "docs/SOURCES.md",
@@ -126,8 +127,8 @@
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "296bc88473b2267aed7cae347ddd993ce526065247d062e352a6ec3b4955121a",
-      "bytes": 8277
+      "sha256": "8648283618f03452615ed1b1d1808746f751dbd8eaabf3ca8356dce99c92057f",
+      "bytes": 9010
     },
     {
       "path": "docs/WBS.md",
@@ -196,8 +197,8 @@
     },
     {
       "path": "rust-scaffold/Cargo.lock",
-      "sha256": "9f402b2344b1bc36ae7ddec20f43ca5e738a8a9ca98ed29ab025c546a2a841bf",
-      "bytes": 19047
+      "sha256": "1311485caa987221e28129670f325d7f4679cfb198f6f3f4714176bd3600bc7e",
+      "bytes": 19057
     },
     {
       "path": "rust-scaffold/Cargo.toml",
@@ -206,8 +207,8 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/Cargo.toml",
-      "sha256": "9774fce32077c54171340b7fdeeb34848bc6f6378f4ba787700503acb2d4d809",
-      "bytes": 795
+      "sha256": "93922e9dfe8d41bbc8614cc24e46cb7881829f1723dce99735f3568365298951",
+      "bytes": 800
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/dashboard/INDEX.html",
@@ -223,6 +224,11 @@
       "path": "rust-scaffold/crates/dsg-cli/dashboard/styles.css",
       "sha256": "87343015630a1b6835af0119b74e7a2178c5222f076afff15afc9f9364b375e1",
       "bytes": 6378
+    },
+    {
+      "path": "rust-scaffold/crates/dsg-cli/src/build_provider.rs",
+      "sha256": "65bfc506c3ff9a0b381eb004042e5a058c7a394bbcab5f215cb9643c43000375",
+      "bytes": 3681
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/src/cleanup_cli.rs",
@@ -270,9 +276,14 @@
       "bytes": 8173
     },
     {
+      "path": "rust-scaffold/crates/dsg-cli/src/docker_gc_cli.rs",
+      "sha256": "fe0691a71d2e7e186f761dde4342c58524e45f3c334ae04fc979f969a4007158",
+      "bytes": 2478
+    },
+    {
       "path": "rust-scaffold/crates/dsg-cli/src/execution.rs",
-      "sha256": "f70582df13e2840c7b16e6a83065ae91b0b63da8d02fa455e9debe324cd6dc7f",
-      "bytes": 11181
+      "sha256": "f7ac3054dfc8936536c0cf1a1d44a349fde2b1a1395390310f96266d7d3b533f",
+      "bytes": 19859
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/src/hook_install.rs",
@@ -286,38 +297,58 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/src/main.rs",
-      "sha256": "088b0194702793717b18d94495cc2f1925bb4b52fe706f359a00ea27fb902922",
-      "bytes": 19783
+      "sha256": "f881f8a536fd2590ff59bdd2ab6cd3e30d6aae2997cb5b1c04ce527a726127f5",
+      "bytes": 23490
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/src/mcp.rs",
-      "sha256": "205a59ccbca64a8bfe19616025b5afda817312cf70c055d317dadd89eee905db",
-      "bytes": 13403
+      "sha256": "5e404f5612052d409f54f4264b3c8412f7e3ddaec29a8f50cddb796905b8441f",
+      "bytes": 16799
+    },
+    {
+      "path": "rust-scaffold/crates/dsg-cli/src/mcp_state.rs",
+      "sha256": "0589df2ac324daa809b2fee8e8265434bacbc3e9b4b9442702e301c1b64398d3",
+      "bytes": 8037
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/tests/cli.rs",
-      "sha256": "b8793dc5000226d15cb494b25e768a74088f593053ab89431dacfaa547bfcd71",
-      "bytes": 3817
+      "sha256": "61950fe236a4470b2c85b149bb18ed89fb9b61f1542bc10d0d2c2ff39aace912",
+      "bytes": 7003
     },
     {
       "path": "rust-scaffold/crates/dsg-core/Cargo.toml",
-      "sha256": "1ffea91fa1503bc3fbd2c97741fe731a6d7bd50bc945fab30e82de7afd8ddd75",
-      "bytes": 437
+      "sha256": "bea1da5430f13726ae7b40a3197789819c2060270f549608fc32ed37e5d339d1",
+      "bytes": 442
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/cleanup.rs",
-      "sha256": "3966603016358525e439f61e0132e1e1809023c34c30488423199d6198652cc2",
-      "bytes": 45192
+      "sha256": "c11d062233980e50884c791c3e5b6bb72c32ffa636cb8373ab5728ea5052f427",
+      "bytes": 46346
+    },
+    {
+      "path": "rust-scaffold/crates/dsg-core/src/cleanup/local/success_trace.rs",
+      "sha256": "05bc204938acdfb851a3f0c77213dd27ad7759d30e432232c722f81950865ea7",
+      "bytes": 20323
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/docker.rs",
-      "sha256": "09939aaac536184188e77628c6d8adc47d799b82e46cfac1effccc8a160346ee",
-      "bytes": 37411
+      "sha256": "c8e6b4cc993d199a05e2cf0627462a626797358c92e91012f8aeb63e7533dd13",
+      "bytes": 39541
+    },
+    {
+      "path": "rust-scaffold/crates/dsg-core/src/docker_cache.rs",
+      "sha256": "3d1b89a270d62f895f85d82644d155a8a16f09604b45636b659426fcb5ce30a0",
+      "bytes": 9498
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/docker_command.rs",
-      "sha256": "8fda269170ed0e6858c40ccafadb8c0839247da0313b2d99d8ed1efcae786eb7",
-      "bytes": 17557
+      "sha256": "9adedd23beec50bb36f3a484738b3e4c0aee57ded5edac89affcb577ab26ff4a",
+      "bytes": 20327
+    },
+    {
+      "path": "rust-scaffold/crates/dsg-core/src/docker_image_gc.rs",
+      "sha256": "df2c029f96f15c054b6ff9051c7fe6f71f422203fc9c3b7722c628a89332ff6d",
+      "bytes": 12979
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/filesystem.rs",
@@ -331,8 +362,8 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/lib.rs",
-      "sha256": "c9ac39a4fa42ba4131f4d4f7e87085386925e80a12dc18813996428260bff102",
-      "bytes": 5488
+      "sha256": "1c695ed05a6a1feda1643b4ff55a1080fae65da1e93aa2c6354a34f8c80867fc",
+      "bytes": 5535
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/policy.rs",
@@ -341,23 +372,33 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/registry.rs",
-      "sha256": "996e96cfcb2c34e220e4ca4139cc2990bed0c58a584bffab078c5b65bb8195c0",
-      "bytes": 71501
+      "sha256": "af40c4eaf1255e060c0889474e02c47c07494cff14b9f6fe2a79318c8cf24661",
+      "bytes": 84831
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/reuse.rs",
-      "sha256": "3adb99dd0470535255e895c0f411c7ea0ce92191767b4a8dbe2af1ebc1057c6e",
-      "bytes": 7626
+      "sha256": "c001d585476d04f4b539bfaf2a09872e1714b969bd7cddd936b26344020d6d6b",
+      "bytes": 7786
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/runner.rs",
-      "sha256": "2fdcc9c3bd003e582142ea9c3be976545e2448655ed5946ed648565d695d97fb",
-      "bytes": 16588
+      "sha256": "57880936469d7761be90369317f2c735be1a58b8b4dcaed502b9c81cff509aa8",
+      "bytes": 17651
+    },
+    {
+      "path": "scripts/build-macos-release.py",
+      "sha256": "b6107f89e48064a827807e0dfd2ace03d4e49376c6fe56713fccf0fa7ae0d5e7",
+      "bytes": 3089
     },
     {
       "path": "scripts/check-agent-integration.py",
-      "sha256": "ea939ba48b80a4da275fbef2865e741a2320022425ec0a35ba75cdd2b18d5685",
-      "bytes": 15141
+      "sha256": "3cd4e88cf7837e730aec587d1ca7e265a699034dab7ae5bfb54be058ef557701",
+      "bytes": 18196
+    },
+    {
+      "path": "scripts/check-build-providers.py",
+      "sha256": "5aa5ac5ff79afca0075e899c7a4981ec23c586e90c59c12e0a9fc0354395c498",
+      "bytes": 7684
     },
     {
       "path": "scripts/check-cleanup.py",
@@ -366,13 +407,13 @@
     },
     {
       "path": "scripts/check-dashboard-rendering.swift",
-      "sha256": "d169be343e6f2cb1ad8871d78c7faf2353861c0107df0d160534aab76cf467ca",
-      "bytes": 3690
+      "sha256": "073a9b4f35a7103a1a5ad82c7c43b8907adee1c8cc078903d99be231ae30b4b7",
+      "bytes": 5078
     },
     {
       "path": "scripts/check-dashboard.py",
-      "sha256": "936acace07f0ea66ab8a616c8ea8870c59902625b5c1993aa18913a74ceeca07",
-      "bytes": 4721
+      "sha256": "6b27ec7bfe81caad9534b2771fde6c1fead0d1cf08329f7bc8c7b6e9414771ba",
+      "bytes": 7075
     },
     {
       "path": "scripts/check-enforcement.py",
@@ -381,8 +422,8 @@
     },
     {
       "path": "scripts/check-foundation-parity.py",
-      "sha256": "5e9bbfb19c6d5b6cac91caa72c07264fc0c120d8cf0749125957a7e3fcf3c558",
-      "bytes": 2283
+      "sha256": "26ac6e031a3920817f9b5391f2fa896f7449c9fc52e453352682f43ccd742688",
+      "bytes": 3429
     },
     {
       "path": "scripts/check-linux-service.py",
@@ -396,8 +437,8 @@
     },
     {
       "path": "scripts/check-managed-execution.py",
-      "sha256": "cb84188031ade8cf7934a3b947a52897354dc5559d68fc3bb4583d59007ef037",
-      "bytes": 6757
+      "sha256": "b5a6221264757b5ff635f58340eee92712b2e083718fa33fe13d108dc5e486b1",
+      "bytes": 11754
     },
     {
       "path": "scripts/check-release-package.py",
@@ -431,13 +472,13 @@
     },
     {
       "path": "scripts/test-rust.sh",
-      "sha256": "550d510a9c633f9e2b56dde8a3e8eb130303c35a20ddc94a6925ab07c561c81e",
-      "bytes": 4707
+      "sha256": "33cdd10560cdf2e48b24c81492b0f2c0b8a17b9410da46c259d5d4332fe61f32",
+      "bytes": 7251
     },
     {
       "path": "scripts/test.sh",
-      "sha256": "49e94038f78eb15a4d287adfd3ce6c633c112d6ba2e3e8e9a28bc47a09e43627",
-      "bytes": 155
+      "sha256": "954c6b12ace41da8363d305024c0c0cc801c6bf28d5051f3ca0e00daad4d3cf1",
+      "bytes": 188
     },
     {
       "path": "scripts/verify-release-signature.py",

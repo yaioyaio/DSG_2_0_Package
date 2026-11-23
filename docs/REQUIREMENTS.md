@@ -12,8 +12,8 @@
 | REQ-008 | GC Apply | P0 | 재검증 및 명시적 승인 필수 | 제한 구현 |
 | REQ-009 | 세션 Lease | P1 | 동시 실행 소유권 관리 | 미구현 |
 | REQ-010 | AI Hook | P1 | CLI별 정확한 JSON 입출력 | 3개 CLI의 셸 훅과 프로젝트 설치·제거 |
-| REQ-011 | MCP | P2 | 읽기 전용 도구+승인 도구 | 읽기 전용 stdio 도구 6개. 실행 상태 조회와 승인 도구는 예정 |
-| REQ-012 | Docker Proxy | P2 | 직접 소켓 우회 제한 | macOS 샌드박스·launchd 및 Linux 제한 UID·systemd 격리 검증. Windows SCM·파이프와 인벤토리 요약 교차 링크, 런타임 검증 대기 |
+| REQ-011 | MCP | P2 | 읽기 전용 도구와 승인 상태 검증 | stdio 조회 도구 8개. macOS에서 실행·승인 기록을 세션에 고정한 프로젝트 범위에서 조회한다. 승인 발급과 적용은 운영자가 관리형 CLI에서 수행한다. |
+| REQ-012 | Docker Proxy | P2 | 직접 소켓 우회 제한 | macOS 샌드박스·launchd와 Linux 제한 UID·systemd를 실측했다. Windows ARM64는 실제 SCM에서 계정별 파이프 경계와 재시작을 합성 상류로 검증했다. Windows 실제 엔진 및 macOS 운영 배포 계정 분리는 별도 실측 항목이다. |
 | REQ-013 | 확장 Provider | P2 | SDK/서명/격리 | 미구현 |
 
 ## 수용 기준

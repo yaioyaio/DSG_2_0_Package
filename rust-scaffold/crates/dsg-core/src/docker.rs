@@ -3,7 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
-const MAX_RESOURCES: usize = 512;
+pub const MAX_CONTEXTS: u16 = 64;
+pub(crate) const MAX_RESOURCES: usize = 512;
 const MAX_MOUNTS: usize = 128;
 const MAX_DIGESTS: usize = 128;
 
@@ -14,7 +15,12 @@ pub enum DockerOperation<'a> {
     Container(&'a str),
     Images,
     Image(&'a str),
+    ImageGcEvidence {
+        id: &'a str,
+        owner_fingerprint: &'a str,
+    },
     Volumes,
+    BuildCache,
 }
 
 #[derive(Clone, Copy, Debug, Error, Eq, PartialEq, Serialize)]
@@ -57,12 +63,21 @@ pub enum InventoryStage {
     Volumes,
     ImageReferences,
     VolumeReferences,
+    BuildCache,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 pub struct InventoryIssue {
     pub stage: InventoryStage,
     pub failure: QueryFailure,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ContextInventory {
+    pub contexts: Option<Vec<String>>,
+    pub complete: bool,
+    pub status: InventoryStatus,
+    pub issues: Vec<InventoryIssue>,
 }
 
 #[derive(Debug, Serialize)]
@@ -194,7 +209,56 @@ fn safe_name(value: &str, max: usize) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
 }
 
-fn engine_id(value: &str) -> Option<String> {
+pub(crate) fn valid_context_name(value: &str) -> bool {
+    safe_name(value, 128)
+}
+
+pub(crate) fn context_inventory(
+    response: Result<String, QueryFailure>,
+    max_contexts: u16,
+) -> ContextInventory {
+    match response.and_then(|raw| parse_context_names(&raw, max_contexts.min(MAX_CONTEXTS))) {
+        Ok(contexts) => ContextInventory {
+            contexts: Some(contexts),
+            complete: true,
+            status: InventoryStatus::Complete,
+            issues: Vec::new(),
+        },
+        Err(failure) => ContextInventory {
+            contexts: None,
+            complete: false,
+            status: InventoryStatus::Unknown,
+            issues: vec![InventoryIssue {
+                stage: InventoryStage::Context,
+                failure,
+            }],
+        },
+    }
+}
+
+fn parse_context_names(raw: &str, max_contexts: u16) -> Result<Vec<String>, QueryFailure> {
+    if raw.len() > MAX_RESPONSE_BYTES {
+        return Err(QueryFailure::TooLarge);
+    }
+    let mut names = BTreeSet::new();
+    for line in raw.lines() {
+        if names.len() == usize::from(max_contexts) {
+            return Err(QueryFailure::TooLarge);
+        }
+        let name: Option<String> =
+            serde_json::from_str(line).map_err(|_| QueryFailure::Malformed)?;
+        let name = name.ok_or(QueryFailure::Unavailable)?;
+        if !valid_context_name(&name) || !names.insert(name) {
+            return Err(QueryFailure::Malformed);
+        }
+    }
+    if !names.contains("default") {
+        return Err(QueryFailure::Malformed);
+    }
+    Ok(names.into_iter().collect())
+}
+
+pub(crate) fn engine_id(value: &str) -> Option<String> {
     let legacy = value.len() == 59
         && value.split(':').count() == 12
         && value.split(':').all(|group| {
@@ -211,7 +275,7 @@ fn hex_id(value: &str) -> Option<String> {
         .then(|| value.to_ascii_lowercase())
 }
 
-fn image_id(value: &str) -> Option<String> {
+pub(crate) fn image_id(value: &str) -> Option<String> {
     hex_id(value.strip_prefix("sha256:").unwrap_or(value)).map(|id| format!("sha256:{id}"))
 }
 
@@ -445,7 +509,7 @@ pub fn inventory(query: &impl DockerRead, max_resources: usize) -> Inventory {
         volumes: Vec::new(),
         duplicates: Vec::new(),
     };
-    if !safe_name(query.context(), 128) {
+    if !valid_context_name(query.context()) {
         result.issue(InventoryStage::Context, QueryFailure::InvalidSelector);
         return result;
     }
@@ -868,6 +932,9 @@ mod tests {
                     .map_err(|error| *error),
                 DockerOperation::Image(_) => Err(QueryFailure::InvalidSelector),
                 DockerOperation::Volumes => Ok(self.volumes.to_owned()),
+                DockerOperation::BuildCache | DockerOperation::ImageGcEvidence { .. } => {
+                    Err(QueryFailure::Unavailable)
+                }
             }
         }
     }

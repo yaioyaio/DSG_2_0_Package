@@ -137,6 +137,9 @@ mod tests {
                     .to_string())
                 }
                 DockerOperation::Volumes => Ok(String::new()),
+                DockerOperation::BuildCache | DockerOperation::ImageGcEvidence { .. } => {
+                    Err(QueryFailure::Unavailable)
+                }
             }
         }
     }

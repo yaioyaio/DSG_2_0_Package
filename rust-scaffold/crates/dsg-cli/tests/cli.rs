@@ -105,3 +105,93 @@ fn docker_scan_queries_the_requested_context_and_keeps_empty_lists_known() {
     assert_eq!(output["result"]["complete"], true);
     assert_eq!(output["result"]["containers"], serde_json::json!([]));
 }
+
+#[test]
+#[cfg(unix)]
+fn docker_contexts_lists_only_local_names_and_preserves_unknown_results() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let fixture = tempfile::tempdir().unwrap();
+    let client = fixture.path().join("docker");
+    fs::write(
+        &client,
+        r#"#!/bin/sh
+[ "$#" = 4 ] && [ "$1:$2:$3:$4" = 'context:ls:--format:{{if .Error}}null{{else}}{{json .Name}}{{end}}' ] || exit 10
+[ -z "${DOCKER_HOST+x}${DOCKER_CONTEXT+x}${DOCKER_API_VERSION+x}" ] || exit 11
+[ -z "${DOCKER_TLS+x}${DOCKER_TLS_VERIFY+x}${DOCKER_CERT_PATH+x}" ] || exit 14
+case "$DSG_CONTEXT_FIXTURE" in
+  complete) printf '%s\n' '"remote-fixture"' '"default"';;
+  missing) printf '%s\n' '"remote-fixture"';;
+  unreadable) printf '%s\n' '"default"' 'null';;
+  empty) :;;
+  malformed) printf '%s\n' '"default"' '"/synthetic-path"';;
+  duplicate) printf '%s\n' '"default"' '"default"';;
+  large) printf '%065537d\n' 0;;
+  failed) printf '%s\n' 'synthetic-diagnostic' >&2; exit 12;;
+  *) exit 13;;
+esac
+"#,
+    )
+    .unwrap();
+    fs::set_permissions(&client, fs::Permissions::from_mode(0o700)).unwrap();
+
+    let invoke = |mode: &str, args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_dsg"))
+            .arg("--root")
+            .arg(fixture.path().join("missing-project"))
+            .args(["--json", "docker-contexts"])
+            .args(args)
+            .env("PATH", fixture.path())
+            .env("DOCKER_HOST", "synthetic-invalid")
+            .env("DOCKER_CONTEXT", "synthetic-invalid")
+            .env("DOCKER_API_VERSION", "synthetic-invalid")
+            .env("DOCKER_TLS", "synthetic-invalid")
+            .env("DOCKER_TLS_VERIFY", "synthetic-invalid")
+            .env("DOCKER_CERT_PATH", "synthetic-invalid")
+            .env("DSG_CONTEXT_FIXTURE", mode)
+            .output()
+            .unwrap()
+    };
+
+    let result = invoke("complete", &["--max-contexts", "2"]);
+    assert!(result.status.success());
+    assert!(result.stderr.is_empty());
+    assert_eq!(
+        body(&result),
+        serde_json::json!({
+            "schema_version": 1,
+            "command": "docker-contexts",
+            "result": {
+                "contexts": ["default", "remote-fixture"],
+                "complete": true,
+                "status": "complete",
+                "issues": []
+            }
+        })
+    );
+
+    for (mode, args, failure) in [
+        ("complete", &["--max-contexts", "1"][..], "too_large"),
+        ("missing", &[], "malformed"),
+        ("unreadable", &[], "unavailable"),
+        ("empty", &[], "malformed"),
+        ("malformed", &[], "malformed"),
+        ("duplicate", &[], "malformed"),
+        ("large", &[], "too_large"),
+        ("failed", &[], "unavailable"),
+    ] {
+        let result = invoke(mode, args);
+        assert_eq!(result.status.code(), Some(5), "{mode}");
+        assert!(result.stderr.is_empty(), "{mode}");
+        assert_eq!(
+            body(&result)["result"],
+            serde_json::json!({
+                "contexts": null,
+                "complete": false,
+                "status": "unknown",
+                "issues": [{"stage": "context", "failure": failure}]
+            }),
+            "{mode}"
+        );
+    }
+}
