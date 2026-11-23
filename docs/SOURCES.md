@@ -14,3 +14,7 @@
 - Claude `PreToolUse`는 제품 버전에 맞춘 `hookSpecificOutput` 블록 사용.
 
 사용하는 CLI 버전의 실제 `settings.json` 구성 및 JSON 이벤트를 확인하지 않고 Hook 예제를 자동 설치하지 마십시오. 별도 Plugin Store 확장과 AI Skill은 CLI 기능 이름이 같더라도 서로 호환된다는 보장은 없습니다.
+
+## DockerGuard 조사 기준
+
+DSG 읽기 전용 Provider를 구현할 때 `ddd-studio-dockerguard`의 `40dbd20`에서 `crates/guard-dedup/src/create.rs`, `tests/scenarios.rs`, `tests/no_false_block.rs`와 레코드 모델을 대조했다. Compose 인스턴스·설정 해시, 프로젝트 경계, 마운트·이미지 불일치 및 비정상 상태를 합성 fixture로 재작성했다. 원본 라이선스 선언은 `MIT OR Apache-2.0`이다. 실측과 재사용 조건은 [프로젝트 분석](draft/PROJECT-ANALYSIS.md)에서 확인할 수 있다.

@@ -3,8 +3,8 @@
   "created": "2026-11-19",
   "validation": {
     "python_tests": "14 passed",
-    "docker_runtime": "unavailable",
-    "rust_compiler": "macOS: 18 tests passed; Python/Rust GC parity passed",
+    "docker_runtime": "macOS: isolated engine read-only inventory passed",
+    "rust_compiler": "macOS: 34 tests and Python/Rust GC parity passed",
     "html_parse": "passed"
   },
   "files": [
@@ -45,8 +45,8 @@
     },
     {
       "path": "docs/API_SPEC.md",
-      "sha256": "b46056a5dbbdd354385aab4c1b13df81de3a2b574b1a2c4d1ca0e0035d722fc9",
-      "bytes": 2518
+      "sha256": "00891f69f2179384ec214d738e002fe5133b9dad292fd0ee1b649a481a02ae2a",
+      "bytes": 3491
     },
     {
       "path": "docs/ARCHITECTURE.md",
@@ -70,8 +70,8 @@
     },
     {
       "path": "docs/POC_SCOPE.md",
-      "sha256": "f34b0e5a2cd288560b79292eced5a02d790eabfd8ab8aa6f896906770bbf795f",
-      "bytes": 1147
+      "sha256": "a16521bc28f8b67064f57fec4fbb3d49df98647aa261ea7aafcc5fd5298116ea",
+      "bytes": 1185
     },
     {
       "path": "docs/PRD.md",
@@ -95,8 +95,8 @@
     },
     {
       "path": "docs/SOURCES.md",
-      "sha256": "5734ad3df5ddc2010dca484eb9156dbf804816a1910f902ca82df88530e5deee",
-      "bytes": 1147
+      "sha256": "37dfbf9936232bdf121a112a58ec12ec9a9a620dea45c738f9677caaa2303c19",
+      "bytes": 1699
     },
     {
       "path": "docs/TASK.md",
@@ -105,8 +105,8 @@
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "2bb5ac9aa24dd6ad3b6dcef4a5460517fb7556bb506c7fefe37b2bf566413e63",
-      "bytes": 1829
+      "sha256": "8c300ed1b6211b8b3b306668faa2e253d5042e7c7256f955c8122799f4f48a0d",
+      "bytes": 2246
     },
     {
       "path": "docs/WBS.md",
@@ -165,8 +165,8 @@
     },
     {
       "path": "rust-scaffold/Cargo.lock",
-      "sha256": "ac93dc1efd40744e178f6154e6343d28d4cf7d86bb15c275745cfe5778e4845a",
-      "bytes": 17371
+      "sha256": "ab06fc439a06c2565f1bad8584ac32618fd2dd1a0efe8eed40c55d7374c0cc43",
+      "bytes": 17387
     },
     {
       "path": "rust-scaffold/Cargo.toml",
@@ -180,18 +180,28 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/src/main.rs",
-      "sha256": "53dfc3cfd4866c17ba273c853960cdf137e76397e4ee759297b77e50e29c5086",
-      "bytes": 12315
+      "sha256": "b74b62ca9b82a0fd3a5d6500c177f6b8292f9ee7653780147fdddbff5bb48772",
+      "bytes": 13775
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/tests/cli.rs",
-      "sha256": "9329925980019999a52060d7559d7c95e4207c2a8a793194c80193bba6c77334",
-      "bytes": 2296
+      "sha256": "b8793dc5000226d15cb494b25e768a74088f593053ab89431dacfaa547bfcd71",
+      "bytes": 3817
     },
     {
       "path": "rust-scaffold/crates/dsg-core/Cargo.toml",
-      "sha256": "e318d1a106e06cacb93789b70d9131d8a55c0fb3e82fffe2d00acc1dff2b03b0",
-      "bytes": 287
+      "sha256": "550fdec1998319f7781e91a968f4fdc8ea7b8f73c6fdc99e6538cb049ddcf9fa",
+      "bytes": 415
+    },
+    {
+      "path": "rust-scaffold/crates/dsg-core/src/docker.rs",
+      "sha256": "580e9b065cf959d610af8f5170c37056161c8ce4716c311f03d6aa3d12128174",
+      "bytes": 37407
+    },
+    {
+      "path": "rust-scaffold/crates/dsg-core/src/docker_command.rs",
+      "sha256": "09a0ad83fd8fd65e255f9876896a9c8647331cfc15f3c2432fa59f00e7c72bc6",
+      "bytes": 15972
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/filesystem.rs",
@@ -200,8 +210,8 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/lib.rs",
-      "sha256": "0745ab5c1cbe5194d216c5a9255985c2b1f366b116bd667926a686efa25ef923",
-      "bytes": 5388
+      "sha256": "ea633e84670a2098105bfbcc6b26f11616fb1b26faf1840cefadd89fb86bdb62",
+      "bytes": 5428
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/policy.rs",
@@ -220,8 +230,8 @@
     },
     {
       "path": "scripts/test-rust.sh",
-      "sha256": "b2191fc7d275eeb8d26f4f811ef0f1dadd1925a9ad75918eebdba8f8d53980f2",
-      "bytes": 1508
+      "sha256": "ab93267bad930a9a66d4e3d72a744ffe5ac4b9fd4301121f28c67998aa3d68c0",
+      "bytes": 2705
     },
     {
       "path": "scripts/test.sh",
