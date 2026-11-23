@@ -73,6 +73,11 @@ dsg-current
 *.cer
 *.p12
 *.pfx
+*.p8
+*.pkcs12
+*.pvk
+*.keychain
+*.keychain-db
 *.jks
 credentials.json
 credentials.*.json

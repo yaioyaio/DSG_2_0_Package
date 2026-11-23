@@ -130,3 +130,11 @@ DSG-08의 `f6397b2`를 PR #15로 `develop`, PR #16으로 `main`에 반영했다.
 - 최종 macOS 통합에서 독립적으로 수집한 실제 Docker 건수가 API, WebKit 1060px·390px 화면에 모두 동일했다. 임시 관리형 감독자를 강제 종료한 시험에서 만료 전 lease를 보존하고 만료·자식 종료 확인 뒤 같은 프로젝트가 다시 실행됐다.
 - 전체 로컬 러너에서 Python 14개와 Rust 98개, Docker·Compose·Provider·TTL·MCP·launchd·WebKit 및 로컬 Ed25519 검증을 통과했다. 소스 트리 `35a30aa`로 만든 `0.1.1-rc.1` ARM64 후보와 SHA-256 파일을 `dist/`에 보존했다. macOS와 Windows용 아카이브는 각각 이름에 대상이 들어 있다.
 - 기존 Parallels Windows ARM64에서 같은 버전의 실제 설치·업그레이드·제거, 대시보드 HTTP 및 SCM 시작·정상/강제 종료 후 재시작을 통과했다. SCM 검증은 합성 파이프와 별도 SID 두 개를 사용했다. Windows 검증용 임시 자료와 등록 자원을 회수하고 게스트를 원래 일시정지 상태로 되돌렸다. 분리된 운영 계정, 실제 Windows Docker, 공인 게시자 서명은 각 전제 조건에서 확인한다.
+
+## 외부 서명 요청과 macOS 게시자 검증
+
+- `feature/20261124-release-signing`, 기준 `66bef38`. PLAN의 패키지 배포와 WBS 6.1의 서명 검증에 `ddd-studio-rsie` `718ca48`의 원문 분리 서명, `ddd-tools` `3e30ff9`의 플랫폼별 승인 게시자 확인 절차를 반영했다. `prepare-release-signature.py`는 원문 매니페스트를 내보내고 검증한 서명 응답을 조립한다. macOS에서는 승인된 Team ID를 지정해 최종 아카이브에 든 두 실행 파일을 점검한다. [릴리스 절차](RELEASE.md#오프라인-서명-요청과-조립)
+- 서명 작업 디렉터리 `dist/dsg-signing/`의 기존 제외 규칙을 확인하고 Apple `.p8` 및 추가 키 보관 파일 형식을 Git과 Docker 문맥에서 제외했다.
+- `python3 -B scripts/check-release-signature.py --openssl <OpenSSL 3 절대 경로>`에서 임시 키로 생성한 서명 두 개의 조립과 검증, 승인 해시·서명 오류 거부, 출력 충돌 보존을 확인했다. 두 번째 실행 파일의 서명 거부가 반영되는지는 `codesign` 응답을 대역한 회귀로 확인했다.
+- macOS ARM64의 실제 `0.1.1-rc.1` 아카이브와 임시 Ed25519 키로 준비·조립·검증, 두 실행 파일의 ad-hoc 검사 및 CLI 실행, 패키지 재생성과 설치·업그레이드·제거를 통과했다. Developer ID 검증을 요구하면 실제 ad-hoc 후보를 서명 파일 생성과 설치 전에 거부했고, 업그레이드에서는 기존 설치 상태를 보존했다. 후보 해시는 검증 전후에 일치했고 모든 시험 자료는 임시 경로에서 회수했다.
+- DSG용 Apple Developer ID와 공증, Windows 공인 Authenticode·타임스탬프는 승인된 환경에서의 성공 검증이 남아 있다. 이번 작업에서 Docker 데몬과 Parallels 게스트의 상태를 변경하지 않았다. [플랫폼별 공인 서명](RELEASE.md#플랫폼별-공인-서명)

@@ -686,11 +686,12 @@ def main():
             action.add_argument("--public-key", help="Ed25519 public key in SPKI DER encoding")
             action.add_argument("--public-key-sha256", help="independently approved public key SHA-256")
             action.add_argument("--openssl", help="absolute path to caller-trusted OpenSSL 3")
+            action.add_argument("--macos-team-id", help="require the pinned Apple Developer ID Application team")
     args = cli.parse_args()
     try:
         if args.command in ("install", "upgrade"):
             signature_options = (args.signatures, args.public_key, args.public_key_sha256, args.openssl)
-            if any(option is not None for option in signature_options):
+            if args.macos_team_id is not None or any(option is not None for option in signature_options):
                 require(all(signature_options), "provide all four detached signature verification options")
                 verifier = runpy.run_path(str(Path(__file__).with_name("verify-release-signature.py")))
                 verifier["verify"](args)
