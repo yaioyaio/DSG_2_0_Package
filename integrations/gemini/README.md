@@ -1,7 +1,7 @@
 # Gemini CLI 연동
 
-`BeforeTool` Hook은 차단 시 `{"decision":"deny","reason":"..."}` 응답을 사용합니다. 설정 파일은 일반적으로 `.gemini/settings.json`입니다.
+`dsg --root <프로젝트> agents install --agent gemini`는 `.gemini/settings.json`에 `BeforeTool`의 `run_shell_command` 훅을 추가한다. 설정에서 훅 실행이 허용되는지 확인한 뒤 신뢰한 프로젝트에서 사용한다. 차단 시 `decision: deny`와 `reason`을 반환한다. [Gemini CLI 훅 참조](https://geminicli.com/docs/hooks/reference/)
 
-공식: https://geminicli.com/docs/hooks/reference/
-
-Hook 설치/호환 검증 미수행. `run_shell_command` 도구 외 호출 및 여러 형태의 입력을 추가로 검증해야 합니다.
+```sh
+printf '%s\n' '{"hook_event_name":"BeforeTool","tool_name":"run_shell_command","tool_input":{"command":"docker volume prune"}}' | dsg hook --agent gemini
+```
