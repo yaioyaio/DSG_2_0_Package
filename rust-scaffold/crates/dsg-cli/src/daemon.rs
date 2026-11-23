@@ -1,6 +1,8 @@
 use clap::Parser;
 use std::{path::PathBuf, process::ExitCode};
 
+#[cfg(any(windows, test))]
+mod daemon_engine_info;
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
 mod daemon_http;
 #[cfg(any(target_os = "linux", target_os = "macos"))]

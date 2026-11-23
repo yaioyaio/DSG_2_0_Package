@@ -60,6 +60,11 @@ def verify(dsg, fixture):
             assert request(port, '/api/overview', **{'Sec-Fetch-Site': 'cross-site'})[0] == 403
             assert request(port, '/api/overview', 'POST')[0] == 405
             assert request(port, '/api/cleanup/apply')[0] == 404
+            renderer = os.environ.get('DSG_TEST_RENDERER')
+            if renderer:
+                if sys.platform != 'darwin':
+                    raise AssertionError('The WebKit rendering fixture requires macOS')
+                subprocess.run([renderer, url + '/'], timeout=20, check=True)
             assert not state.exists() and output.read_bytes() == b'local dashboard fixture\n'
         finally:
             if server.poll() is None:

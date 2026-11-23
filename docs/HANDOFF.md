@@ -96,3 +96,12 @@ DSG-07의 `6ffe700`을 PR #13으로 `develop`, PR #14로 `main`에 반영했다.
 - `dist/`에 macOS ARM64와 Linux ARM64 musl의 `0.1.0` 아카이브 및 SHA-256 파일을 보존했다. macOS는 ad-hoc 서명 검증, Linux는 해시 검증을 적용했다. Git과 Docker 문맥에서 해당 산출물을 제외한다.
 - 두 대상의 `dsg`·`dsgd`를 깨끗한 별도 Cargo 대상 디렉터리에서 다시 최적화 빌드했다. 처음 빌드한 각 바이너리와 바이트가 일치했다.
 - Windows ARM64·x64의 교차 빌드는 실제 SCM/파이프·설치 검증과 구분한다. OS 실행 환경, Windows 인벤토리 지원 및 승인된 공인 릴리스 서명과 브라우저 렌더링 확인은 전체 Goal의 남은 항목이다. [제품 운영](RELEASE.md)
+
+DSG-08의 `f6397b2`를 PR #15로 `develop`, PR #16으로 `main`에 반영했다. 여섯 Git 참조의 15개 파일 비교가 일치했고 등록된 정리 경로를 거쳐 `develop`으로 복귀했다.
+
+### Windows·브라우저 보완
+
+- 작업 브랜치 `feature/20261123-windows-qualification`, 기준 `79319fa`. Windows 브로커가 인증한 엔진의 컨테이너·이미지 건수를 제공하도록 했다. 볼륨·중복·개별 상세는 미확인이다. Windows용 로컬 패키지 설치 수명 주기와 SCM 검증 진입점을 도입했다. 설치 경로의 상태 파일·릴리스·스테이징 디렉터리를 Git과 Docker 문맥에서 제외했다. 보조 워크트리 생성·회수·잔여는 0개다.
+- Windows ARM64·x64 최적화 교차 빌드와 두 `0.1.0-rc.1` 후보 아카이브의 동일 입력 해시·PE 대상·파일 무결성 검증이 통과했다. 공식 PowerShell의 파서에서 SCM 검증 스크립트의 구문이 통과했다. 기존 Windows VM을 재개하거나 평가판을 설치하지 않았으므로 SCM·별도 계정·실제 엔진과 Windows 설치 수명 주기는 미실측이다.
+- `DSG_TEST_WEBKIT=1 DSG_TEST_LIVE_ENFORCEMENT=1 DSG_TEST_LAUNCHD=1 sh scripts/test-rust.sh`로 Rust 85개와 통합 검증이 통과했다. 비공개 WebKit 테스트 뷰에서 1060px·390px의 실제 문서 배치, 스타일과 조회 데이터를 검증했다. 사용자 브라우저는 열지 않았다.
+- 재개 시 사용 승인을 받은 Windows 게스트와 엔진을 확인한 뒤 SCM 및 패키지 수명 주기를 실행한다. macOS의 배포 계정 분리와 공인 서명은 각각 승인된 계정·서명 환경을 확인한 뒤 검증한다. [Windows 실측 진입점](TEST_PLAN.md#브로커와-서비스-검증) · [제품 운영](RELEASE.md)

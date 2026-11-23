@@ -6,7 +6,7 @@
 |---|---|
 | macOS ARM64 | 로컬 배포 아카이브 설치·실행·제거 및 ad-hoc 서명 확인 |
 | Linux ARM64 musl | Ubuntu 게스트 안에서 설치·업그레이드·실행·제거 및 SHA-256 확인 |
-| Windows ARM64·x64 | 교차 링크 확인. SCM 및 설치 수명 주기는 실제 Windows 검증 대기 |
+| Windows ARM64·x64 | 교차 링크 및 PE 아키텍처·아카이브 재현성 검사. SCM과 Windows에서의 설치 수명 주기는 네이티브 검증 대기 |
 
 ## 패키지 만들기
 
@@ -31,3 +31,5 @@ python3 -B scripts/release-package.py doctor --prefix "$DSG_PREFIX"
 ```
 
 `dsg-current` 경로나 설치 폴더에 생성된 사용자 파일이 있거나 매니페스트와 실물이 다르면 실패를 반환한다. 진단 후 사용자 자료를 보호한 상태에서 원인을 해결한다. 서비스의 계정과 엔진 연결은 [운영 매뉴얼](OPERATIONS.md#docker-조회-브로커)을 따른다.
+
+Windows 패키지는 `aarch64-pc-windows-msvc` 또는 `x86_64-pc-windows-msvc`의 `dsg.exe`와 `dsgd.exe`를 사용한다. `dsg-current`는 설치 상태 파일이다. `doctor`의 `path`가 바이너리 디렉터리다. 실행 중인 파일이 잠겨 정리를 완료하지 못하면 상태를 보존하고 `pending_cleanup`을 보고한다. 프로세스 종료 뒤 같은 명령으로 회수를 재시도한다. 외부 Authenticode 서명이 적용된 PE 입력은 바이트 그대로 보관하며 공식 배포 신뢰 검증은 승인된 환경에서 수행한다.

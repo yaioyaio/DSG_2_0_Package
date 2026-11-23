@@ -42,6 +42,9 @@ mysql-data/
 *.pid
 *.sock
 *.dsg-owner
+dsg-current
+.dsg-release-*/
+.dsg-stage-*/
 *.sqlite
 *.sqlite3
 *.sqlite-wal

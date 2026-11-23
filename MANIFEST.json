@@ -4,23 +4,24 @@
   "validation": {
     "python_tests": "14 passed",
     "docker_runtime": "macOS: isolated inventory and two managed reuse requests passed",
-    "rust_compiler": "82 macOS Rust tests and integrated fixtures; 14 Python tests; independent macOS and Linux ARM64 release builds matched.",
+    "rust_compiler": "macOS arm64: 85 Rust tests passed. Windows ARM64 and x64 binaries optimized and linked.",
     "html_parse": "passed",
     "agent_integration": "macOS arm64: Claude Code 2.1.330, Codex CLI 0.170.0 and Gemini CLI 0.70.0; 9 isolated native allow, deny and hook-error checks passed.",
     "dockerd_broker": "macOS arm64 live Docker via Seatbelt and launchd; Linux ARM64 Ubuntu systemd and separate UID against live isolated Docker; Windows ARM64/x64 cross-linked only.",
-    "dashboard": "Local API, read-only boundary, and JS rendering state fixture passed; connected browser was unavailable.",
-    "release_packages": "macOS and Linux ARM64 local 0.1.0 exact release archives were installed and run on each OS. Independent builds and archive hashes matched. macOS ad-hoc signature and Linux SHA256 verified."
+    "dashboard": "Local API, origin checks, and actual offscreen WebKit rendering of live fixture at 1060 and 390 px passed.",
+    "release_packages": "macOS and Linux ARM64 local 0.1.0 exact release archives were installed and run on each OS. Independent builds and archive hashes matched. macOS ad-hoc signature and Linux SHA256 verified.",
+    "windows_qualification": "Both cross-built Windows rc.1 archives passed reproducibility and PE/hash validation. PowerShell SCM fixture parsed successfully. Native and trusted signing gates outstanding."
   },
   "files": [
     {
       "path": ".dockerignore",
-      "sha256": "4079a781a7d309e0a3f8985cef27bb1f9baaa0766f7b54851a126f1de8e1c700",
-      "bytes": 1007
+      "sha256": "560efb57f8dafc2018c6ae28836b5699395d01a330f218a6107b577324be460f",
+      "bytes": 1056
     },
     {
       "path": ".gitignore",
-      "sha256": "1ca990cf7e42246f7fc8336f7c28a64adf961726bfcd5283ba9ce9ff9f66123d",
-      "bytes": 955
+      "sha256": "e976f2070a88c25cf0c03145043c889d922a2bb9db33b9da9100e497bc129735",
+      "bytes": 997
     },
     {
       "path": "AGENTS.md",
@@ -59,8 +60,8 @@
     },
     {
       "path": "docs/API_SPEC.md",
-      "sha256": "dc641b06ad5f8cc15c07f4b008a8f0e5924c806a829cf52196ae43530e0fda57",
-      "bytes": 10509
+      "sha256": "ff0dfcfbe28c88199eb96f977d7b5127d4db76247d5ff9acb20d7b1b662c6045",
+      "bytes": 10676
     },
     {
       "path": "docs/ARCHITECTURE.md",
@@ -99,13 +100,13 @@
     },
     {
       "path": "docs/RELEASE.md",
-      "sha256": "ba83ce5a7cc0d0b379deffa55a2f74072325a6aa1a5720b1bec1b648530f6265",
-      "bytes": 2555
+      "sha256": "bc7a7450d72bab7eac3ef37abbbd0f2a8b8376799b540fbf9a3bd763068afc43",
+      "bytes": 3181
     },
     {
       "path": "docs/REQUIREMENTS.md",
-      "sha256": "fdb2eda144dc71a0f949ab3688b0172912c577cd55a50ce3deb5d23e9adfc65b",
-      "bytes": 1896
+      "sha256": "fee1858ed1301971e952a87c41b6834d33cbe4e5cae887f66ede3d3e028d7cb5",
+      "bytes": 1919
     },
     {
       "path": "docs/SECURITY.md",
@@ -124,8 +125,8 @@
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "346611c20c3c0ffb6bca41972f4b627249b55e5267aac826d847946b506adba7",
-      "bytes": 6858
+      "sha256": "41bd1518c45b03fb084015d1bf1c647367398c56ffe5ee9a7621167b0136c44b",
+      "bytes": 7460
     },
     {
       "path": "docs/WBS.md",
@@ -229,8 +230,13 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/src/daemon.rs",
-      "sha256": "97255de7e941d648665bf04d59a95ba70c70d06d8b251886172726f6b53e3af7",
-      "bytes": 5649
+      "sha256": "c1571a2ac307fe2e83eeb0ecbe91832da9642064dbc5a478476fc27a51949743",
+      "bytes": 5700
+    },
+    {
+      "path": "rust-scaffold/crates/dsg-cli/src/daemon_engine_info.rs",
+      "sha256": "461f245b525064f4cdfce48c8fa6f75acaf0ce2be7d659d16455c855ad623597",
+      "bytes": 4693
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/src/daemon_http.rs",
@@ -254,8 +260,8 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/src/daemon_windows_upstream.rs",
-      "sha256": "8bd4e8a5539d86f7e72c1d4165184bf08ab4d4eb20442ca32dd8276fb230a27b",
-      "bytes": 11354
+      "sha256": "71acdcd6724eecf67aca38100e587b289aee77407e8426242f8783efb4710159",
+      "bytes": 9308
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/src/dashboard.rs",
@@ -358,9 +364,14 @@
       "bytes": 8019
     },
     {
+      "path": "scripts/check-dashboard-rendering.swift",
+      "sha256": "d169be343e6f2cb1ad8871d78c7faf2353861c0107df0d160534aab76cf467ca",
+      "bytes": 3690
+    },
+    {
       "path": "scripts/check-dashboard.py",
-      "sha256": "dfb55fb23aa6baeaad10be4c1b8652b9f6e4e3dfae3515fddc3210f6476c106b",
-      "bytes": 3919
+      "sha256": "9371d561b8b97e7398ef77b5f519840aeb90bbc33ed7009b9cc83845332b0008",
+      "bytes": 4214
     },
     {
       "path": "scripts/check-enforcement.py",
@@ -389,8 +400,13 @@
     },
     {
       "path": "scripts/check-release-package.py",
-      "sha256": "76ec12840bd22e5acc983a1b56da34e82e0f9dff448750c9ad19206aa03648e3",
-      "bytes": 5178
+      "sha256": "ddcbb0b34c06de9cbb8be3b48349fcdacc10e885ff96d02bb508802cc20b98bf",
+      "bytes": 8933
+    },
+    {
+      "path": "scripts/check-windows-service.ps1",
+      "sha256": "b7ff1493804f8da0d9973421669b495b81995f152e2f2112843f1998bd7f6254",
+      "bytes": 11287
     },
     {
       "path": "scripts/git-completion.sh",
@@ -399,13 +415,13 @@
     },
     {
       "path": "scripts/release-package.py",
-      "sha256": "fce4d12fd8c5b4576b38eeaa5977586fcecd1ff5d52dc85f71a7c2ebbe2f9322",
-      "bytes": 12676
+      "sha256": "d57f965847c4384d0e5cb0374db1bcee5caad18093363429e1308f149d382e8d",
+      "bytes": 31044
     },
     {
       "path": "scripts/test-rust.sh",
-      "sha256": "e137777b1ec23202e9cc73e34a0a2c69448852fe772df68df5479795e307969c",
-      "bytes": 4073
+      "sha256": "550d510a9c633f9e2b56dde8a3e8eb130303c35a20ddc94a6925ab07c561c81e",
+      "bytes": 4707
     },
     {
       "path": "scripts/test.sh",
