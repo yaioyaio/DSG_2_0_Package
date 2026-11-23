@@ -33,6 +33,14 @@ python3 -m dsg hook --agent codex
 
 `dsg docker-reuse --context <context> --expectation-json <JSON>`은 `engine_id`, `project`, `service`, `number`, `config_hash`, `image_id`, `image_digest`, `mounts`를 받는다. 같은 실행 중인 정상 컨테이너가 두 번 모두 유일한 후보면 `verified=true`와 `assessment.container_id`를 반환한다. 확인할 수 없으면 종료 코드 5와 판정 사유를 반환한다. 이미 실행 중인 컨테이너 식별자를 전달하는 경로다.
 
+### 승인 기반 정리
+
+등록된 프로젝트에서 `gc-own --candidate <이름> --confirm-generated`로 직접 하위의 생성 폴더에 소유권을 기록한다. `gc-plan` 결과에서 후보를 확인한 뒤 `gc-approve --plan <번호> --candidate <이름> --confirm`으로 한 후보에 대한 일회용 승인을 발급한다. 승인 유효 기간은 10분 이내이며 계획 만료 시각을 넘지 않는다.
+
+`gc-apply --plan <번호> --approval-stdin`에 승인값을 표준 입력으로 전달한다. 적용은 활성 lease, 소유권, 파일 식별자와 트리 메타데이터를 재확인하며, 입력 승인 원문은 감사 기록과 명령 인자로 보관하지 않는다. 결과는 `applied`, `preserved`, `recovery_required`로 구분한다. 복구가 필요하면 `gc-recover --plan <번호>`가 일치하는 격리 자료를 확인해 빈 원래 경로로 복원을 시도한다.
+
+`exec --auto-clean-cargo -- cargo check …`는 자동 회수 대상인 전용 Cargo 산출물 디렉터리를 만든다. 실행 결과의 `cleanup`에서 회수·보존 건수와 확인된 바이트를 읽는다. Git 완료는 `scripts/git-completion.sh`로 전달한다. 이 경로는 여섯 참조의 파일 일치 후 사용자 원본과 브랜치를 보존하면서 등록된 보조 워크트리만 검사한다.
+
 ## 계획 API (미구현)
 - `dsg inspect <resource-id>`
 - `dsg docker reuse --project <id>`

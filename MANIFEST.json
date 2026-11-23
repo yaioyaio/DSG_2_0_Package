@@ -4,7 +4,7 @@
   "validation": {
     "python_tests": "14 passed",
     "docker_runtime": "macOS: isolated inventory and two managed reuse requests passed",
-    "rust_compiler": "macOS: 46 tests, Python parity, managed Cargo, timeout and Compose isolation passed",
+    "rust_compiler": "macOS: 58 tests, parity, managed execution, approved GC and automatic cleanup integration passed",
     "html_parse": "passed"
   },
   "files": [
@@ -45,8 +45,8 @@
     },
     {
       "path": "docs/API_SPEC.md",
-      "sha256": "a9871a365dd38e0434e7d657cde2f9cbcb9092607a88ac7eed92f620e5dee12c",
-      "bytes": 4709
+      "sha256": "a5e1a3e686c86573c4541a9a80ca047ec860e38636969cfda255737c260cd7d7",
+      "bytes": 6037
     },
     {
       "path": "docs/ARCHITECTURE.md",
@@ -60,8 +60,8 @@
     },
     {
       "path": "docs/OPERATIONS.md",
-      "sha256": "61d196976f96d4ad65965786e4a59cef26c35b5099b3847a06e5e0e27f0a79e0",
-      "bytes": 2254
+      "sha256": "46836194d9d18a19244770608313cf3e77e68a17a76444b1ddbff0d44486a949",
+      "bytes": 3456
     },
     {
       "path": "docs/PLAN.md",
@@ -105,8 +105,8 @@
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "88580725160481f19695f301d11834e212f9a825a56349f51ca513d5a85f4249",
-      "bytes": 2834
+      "sha256": "95ce637e335e549717f78975926b2e2e84891dcf5836599166318bb1b7e8e0de",
+      "bytes": 3242
     },
     {
       "path": "docs/WBS.md",
@@ -165,28 +165,33 @@
     },
     {
       "path": "rust-scaffold/Cargo.lock",
-      "sha256": "970cb3459329d33fd6795774152861924a0e0256cb59a558a09ea750a0cf5cb0",
-      "bytes": 18989
+      "sha256": "0c33444b17e4cc3dbd62f6d51617f7e6627fb8375400984b6e2e27a2ba6afb3d",
+      "bytes": 19012
     },
     {
       "path": "rust-scaffold/Cargo.toml",
-      "sha256": "c08996b712be92e1a69af608ec8c16d085d5bc6abde4d70bf639804630b438c8",
-      "bytes": 466
+      "sha256": "e95c4734ef319849a5ff360be28061c93ea687cd226260b31d2085862526194e",
+      "bytes": 484
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/Cargo.toml",
-      "sha256": "ecd2ae7c55cdc069f235eb81cea0f121c304804a9e082c9a6b9ffabc10873d3a",
-      "bytes": 321
+      "sha256": "5842111a34aedc62695d0de752568ebb2931d43ce0f9e9ab25a6baa2ee912925",
+      "bytes": 348
+    },
+    {
+      "path": "rust-scaffold/crates/dsg-cli/src/cleanup_cli.rs",
+      "sha256": "4e2dc70fefb6350efe9b4adb8f07cd38657ec54d20983d90d9afaa951b397808",
+      "bytes": 8521
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/src/execution.rs",
-      "sha256": "80e491bb82f9012dd8446102fe07a3b8250c7cd9fdcb955763cec6b9c5c0a4e1",
-      "bytes": 8626
+      "sha256": "f70582df13e2840c7b16e6a83065ae91b0b63da8d02fa455e9debe324cd6dc7f",
+      "bytes": 11181
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/src/main.rs",
-      "sha256": "3a127eb1449adfb51e19af77ae2b779d5f093128cbd9bd0004bf3960cf43238a",
-      "bytes": 14669
+      "sha256": "76a41dcf7050e6101cdf3c3e1e4cdb735d9cba61e0467821fdbcc7c7f57b5be1",
+      "bytes": 17095
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/tests/cli.rs",
@@ -195,8 +200,13 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-core/Cargo.toml",
-      "sha256": "550fdec1998319f7781e91a968f4fdc8ea7b8f73c6fdc99e6538cb049ddcf9fa",
-      "bytes": 415
+      "sha256": "1ffea91fa1503bc3fbd2c97741fe731a6d7bd50bc945fab30e82de7afd8ddd75",
+      "bytes": 437
+    },
+    {
+      "path": "rust-scaffold/crates/dsg-core/src/cleanup.rs",
+      "sha256": "3966603016358525e439f61e0132e1e1809023c34c30488423199d6198652cc2",
+      "bytes": 45192
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/docker.rs",
@@ -210,23 +220,28 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/filesystem.rs",
-      "sha256": "a337c0b2bb5e076ca9d277c689dd26cb588b9562507f1db39a9c4417793aa5b2",
-      "bytes": 23640
+      "sha256": "5a91047b2b9b447d81f90b2dfbc16daa77ccb150b608cf8b1d647572b0eb2543",
+      "bytes": 34473
+    },
+    {
+      "path": "rust-scaffold/crates/dsg-core/src/gc.rs",
+      "sha256": "786feb09f8c8e2ce3f27bcc2c38ce1382d8d13cb5e6f789f742a4d6cfe07e09a",
+      "bytes": 25085
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/lib.rs",
-      "sha256": "fe055ef440ebd0af1634fd7cbce076b520ded6f522c57696351f4c0a0de21ce3",
-      "bytes": 5459
+      "sha256": "c9ac39a4fa42ba4131f4d4f7e87085386925e80a12dc18813996428260bff102",
+      "bytes": 5488
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/policy.rs",
-      "sha256": "46e88a880f13bd63c08957b2afcb1467b1889dc5cc7aac48608c643801ef8646",
-      "bytes": 13406
+      "sha256": "465fd03c7f8a0e15c4c8c8abc7b871ee49af9b9bf022f0eafee3b9a67d43bec4",
+      "bytes": 13418
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/registry.rs",
-      "sha256": "cd7692bbd718d769d92aa563c2f6d46b8ce1626f559f755e96435c1a41f61df4",
-      "bytes": 44711
+      "sha256": "996e96cfcb2c34e220e4ca4139cc2990bed0c58a584bffab078c5b65bb8195c0",
+      "bytes": 71501
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/reuse.rs",
@@ -235,8 +250,13 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/runner.rs",
-      "sha256": "9166d03879d1835d67822c968fbe9dd51954f90ccefcababa597ce8d2b69f687",
-      "bytes": 16095
+      "sha256": "2fdcc9c3bd003e582142ea9c3be976545e2448655ed5946ed648565d695d97fb",
+      "bytes": 16588
+    },
+    {
+      "path": "scripts/check-cleanup.py",
+      "sha256": "a2fb7b8aa23117f73982d97eb740784fe5beb3ca06c30173c51b39863b48316d",
+      "bytes": 8019
     },
     {
       "path": "scripts/check-foundation-parity.py",
@@ -249,9 +269,14 @@
       "bytes": 6757
     },
     {
+      "path": "scripts/git-completion.sh",
+      "sha256": "4c1307f79e528c02f93fbc3d8dd73606dcfa66b28cd03d503be7a4ff38af1ca1",
+      "bytes": 778
+    },
+    {
       "path": "scripts/test-rust.sh",
-      "sha256": "618889e0e340e91cb2606c8fca50c7dd7ca3c69be63f947822712a579ae2d22d",
-      "bytes": 3157
+      "sha256": "5ca249d75c63330999f3dd6530a8a1f6bc44d5dc7b97093c097ffde4ebd59790",
+      "bytes": 3261
     },
     {
       "path": "scripts/test.sh",

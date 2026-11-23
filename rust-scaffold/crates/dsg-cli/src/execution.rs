@@ -1,10 +1,12 @@
 use super::{check_budget, open_registry, read_scan, registry_error, Cli, CliError, Output};
+use crate::cleanup_cli;
+use dsg_core::cleanup::CleanupEvent;
 use dsg_core::docker::{Mount, ReuseRequest};
 use dsg_core::docker_command::DockerCli;
 use dsg_core::policy::Policy;
 use dsg_core::registry::{AuditAction, AuditOutcome, Registry, RegistryError};
 use dsg_core::reuse::verify_reuse;
-use dsg_core::runner::{process_group_gone, run_command, RunEvent, RunOutcome};
+use dsg_core::runner::{process_group_gone, run_with_target, RunEvent, RunOutcome};
 use dsg_core::{evaluate_command, Decision, Verdict};
 use serde::Deserialize;
 use serde_json::json;
@@ -22,6 +24,7 @@ pub fn exec(
     root: &Path,
     policy: &Policy,
     timeout: u16,
+    auto_clean_cargo: bool,
     argv: &[String],
 ) -> Result<Output, CliError> {
     if !cfg!(any(target_os = "macos", target_os = "linux")) {
@@ -42,6 +45,15 @@ pub fn exec(
     if let Some(verdict) = check_budget(policy, &read_scan(root, policy)?) {
         return rejected_exec(&mut registry, project_id, verdict);
     }
+    if auto_clean_cargo && !registered_cargo(argv) {
+        return Err(CliError::new(
+            "CLEANUP_PROVIDER_UNKNOWN",
+            "자동 정리는 등록된 Cargo build·check·test 대상에서만 사용할 수 있습니다",
+        ));
+    }
+    let queue = auto_clean_cargo
+        .then(|| cleanup_cli::queue(cli))
+        .transpose()?;
 
     let cancellation = Arc::new(AtomicBool::new(false));
     let signal_flag = Arc::clone(&cancellation);
@@ -54,12 +66,29 @@ pub fn exec(
     let lease = registry
         .acquire_lease(project_id, &scope_key(root), LEASE_TTL, process_group_gone)
         .map_err(lease_error)?;
-    let result = run_command(
+    let artifact = match queue
+        .as_ref()
+        .map(|queue| queue.prepare_cargo())
+        .transpose()
+    {
+        Ok(artifact) => artifact,
+        Err(_) => {
+            registry
+                .finish_lease(lease, AuditOutcome::Failure, "CLEANUP_PREPARE_FAILED")
+                .map_err(lease_error)?;
+            return Err(CliError::new(
+                "CLEANUP_QUEUE_UNAVAILABLE",
+                "등록된 산출물 위치를 만들 수 없습니다",
+            ));
+        }
+    };
+    let result = run_with_target(
         root,
         argv,
         Duration::from_secs(u64::from(timeout)),
         cli.json,
         &cancellation,
+        artifact.as_ref().map(|output| output.target.as_path()),
         |event| {
             match event {
                 RunEvent::Started(pid) => registry.attach_lease_process(&lease, pid),
@@ -71,6 +100,9 @@ pub fn exec(
     let report = match result {
         Ok(report) => report,
         Err(_) => {
+            if let (Some(queue), Some(artifact)) = (&queue, artifact) {
+                let _ = queue.complete_cargo(artifact, CleanupEvent::Failure);
+            }
             registry
                 .finish_lease(lease, AuditOutcome::Failure, "RUNNER_START_FAILED")
                 .map_err(lease_error)?;
@@ -95,6 +127,21 @@ pub fn exec(
         RunOutcome::Interrupted => (AuditOutcome::Failure, "RUN_INTERRUPTED", 130),
         RunOutcome::ControlFailure => (AuditOutcome::Incomplete, "RUN_CONTROL_UNVERIFIED", 5),
     };
+    let cleanup = match (&queue, artifact) {
+        (Some(queue), Some(artifact)) if report.tree_confirmed_gone => {
+            let event = match report.outcome {
+                RunOutcome::Success => CleanupEvent::Success,
+                RunOutcome::Interrupted => CleanupEvent::Interrupted,
+                _ => CleanupEvent::Failure,
+            };
+            queue.complete_cargo(artifact, event).map(|observed| json!(observed))
+                .unwrap_or_else(|_| json!({"removed":0,"preserved":1,"reclaimed_bytes":0,"reason":"cleanup_unverified"}))
+        }
+        (Some(_), Some(_)) => {
+            json!({"removed":0,"preserved":1,"reclaimed_bytes":0,"reason":"process_tree_unknown"})
+        }
+        _ => serde_json::Value::Null,
+    };
     if report.tree_confirmed_gone {
         registry
             .finish_lease(lease, outcome, code)
@@ -114,9 +161,23 @@ pub fn exec(
     Ok(Output {
         command: "exec",
         text: format!("관리형 실행 · {code}"),
-        data: json!({"run": report, "reason_code": code, "lease_released": report.tree_confirmed_gone}),
+        data: json!({"run": report, "reason_code": code, "lease_released": report.tree_confirmed_gone, "cleanup":cleanup}),
         exit,
     })
+}
+
+fn registered_cargo(argv: &[String]) -> bool {
+    argv.first()
+        .and_then(|program| program.rsplit(['/', '\\']).next())
+        .is_some_and(|name| name == "cargo" || name == "cargo.exe")
+        && argv
+            .get(1)
+            .is_some_and(|command| matches!(command.as_str(), "build" | "check" | "test"))
+        && !argv.iter().skip(2).any(|argument| {
+            argument.starts_with("--target-dir")
+                || argument.starts_with("--build-dir")
+                || argument.starts_with("--config")
+        })
 }
 
 fn rejected_exec(
@@ -224,7 +285,11 @@ pub fn reuse(
     })
 }
 
-fn project_id(registry: &Registry, root: &Path, policy: &Policy) -> Result<i64, CliError> {
+pub(super) fn project_id(
+    registry: &Registry,
+    root: &Path,
+    policy: &Policy,
+) -> Result<i64, CliError> {
     let project = registry
         .find_project(root)
         .map_err(registry_error)?
@@ -243,11 +308,11 @@ fn project_id(registry: &Registry, root: &Path, policy: &Policy) -> Result<i64, 
     Ok(project.id)
 }
 
-fn scope_key(root: &Path) -> String {
+pub(super) fn scope_key(root: &Path) -> String {
     format!("{:x}", Sha256::digest(root.as_os_str().as_encoded_bytes()))
 }
 
-fn lease_error(error: RegistryError) -> CliError {
+pub(super) fn lease_error(error: RegistryError) -> CliError {
     match error {
         RegistryError::LeaseConflict => CliError::new(
             "RESOURCE_ACTIVE",
