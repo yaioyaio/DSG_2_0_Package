@@ -3,6 +3,8 @@ pub mod docker_command;
 pub mod filesystem;
 pub mod policy;
 pub mod registry;
+pub mod reuse;
+pub mod runner;
 
 use serde::Serialize;
 
