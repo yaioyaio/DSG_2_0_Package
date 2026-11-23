@@ -4,7 +4,7 @@
   "validation": {
     "python_tests": "14 passed",
     "docker_runtime": "unavailable",
-    "rust_compiler": "unavailable",
+    "rust_compiler": "macOS: 18 tests passed; Python/Rust GC parity passed",
     "html_parse": "passed"
   },
   "files": [
@@ -25,8 +25,8 @@
     },
     {
       "path": "README.md",
-      "sha256": "75a1684c85596ab7c71a163152094a6006b2a2a30fd555f374dd6a747193d185",
-      "bytes": 2293
+      "sha256": "94310d443ce1e3df987aed890847ca27c8309f80bdc7729b8ebb96236b1e6354",
+      "bytes": 2576
     },
     {
       "path": "artifact/DSG_2_0_Interactive_Artifact.html",
@@ -45,8 +45,8 @@
     },
     {
       "path": "docs/API_SPEC.md",
-      "sha256": "68e0b66bf73ceb025fc5133c29d1e6f1196ce4b31331a2732b4426b80398096d",
-      "bytes": 1338
+      "sha256": "b46056a5dbbdd354385aab4c1b13df81de3a2b574b1a2c4d1ca0e0035d722fc9",
+      "bytes": 2518
     },
     {
       "path": "docs/ARCHITECTURE.md",
@@ -70,8 +70,8 @@
     },
     {
       "path": "docs/POC_SCOPE.md",
-      "sha256": "a0fbe761b39aa7b7219cb722b239b5e1ff7372c9daea81c99c734f484c9a8970",
-      "bytes": 1050
+      "sha256": "f34b0e5a2cd288560b79292eced5a02d790eabfd8ab8aa6f896906770bbf795f",
+      "bytes": 1147
     },
     {
       "path": "docs/PRD.md",
@@ -105,8 +105,8 @@
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "7b6d6fb08073adf084712cace2e4f2e8e58860f63136bf82a0c7daf58d415b99",
-      "bytes": 1213
+      "sha256": "2bb5ac9aa24dd6ad3b6dcef4a5460517fb7556bb506c7fefe37b2bf566413e63",
+      "bytes": 1829
     },
     {
       "path": "docs/WBS.md",
@@ -164,29 +164,64 @@
       "bytes": 5766
     },
     {
+      "path": "rust-scaffold/Cargo.lock",
+      "sha256": "ac93dc1efd40744e178f6154e6343d28d4cf7d86bb15c275745cfe5778e4845a",
+      "bytes": 17371
+    },
+    {
       "path": "rust-scaffold/Cargo.toml",
-      "sha256": "86d482a35700929384486f68d073a43a6a1ac28867e1b9e6c1b51ab2d84b7fe7",
-      "bytes": 75
+      "sha256": "84e66e4439da32dfe1f2fe620066be8544283f00dde82559cc14c58a4a6daa4e",
+      "bytes": 410
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/Cargo.toml",
-      "sha256": "8de4432f545ad62e9aa1961a87a5d62aa321fd53fb2e0dd7559a61fd1905a652",
-      "bytes": 113
+      "sha256": "0f8fab7461160ef58574ca24adb9dd2cf9e9e9072f277dfb4b5ed1f4420aac83",
+      "bytes": 298
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/src/main.rs",
-      "sha256": "625db8b2d162f7d95cb6845c2f6fd058d6737707c563a750fd57f35267d74723",
-      "bytes": 172
+      "sha256": "53dfc3cfd4866c17ba273c853960cdf137e76397e4ee759297b77e50e29c5086",
+      "bytes": 12315
+    },
+    {
+      "path": "rust-scaffold/crates/dsg-cli/tests/cli.rs",
+      "sha256": "9329925980019999a52060d7559d7c95e4207c2a8a793194c80193bba6c77334",
+      "bytes": 2296
     },
     {
       "path": "rust-scaffold/crates/dsg-core/Cargo.toml",
-      "sha256": "4b8965ada906ee2d6f6f4c052a87932593c679410d96465455622b47cc3e50db",
-      "bytes": 63
+      "sha256": "e318d1a106e06cacb93789b70d9131d8a55c0fb3e82fffe2d00acc1dff2b03b0",
+      "bytes": 287
+    },
+    {
+      "path": "rust-scaffold/crates/dsg-core/src/filesystem.rs",
+      "sha256": "a337c0b2bb5e076ca9d277c689dd26cb588b9562507f1db39a9c4417793aa5b2",
+      "bytes": 23640
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/lib.rs",
-      "sha256": "28bb9b5549a54c78a6880fe6a4607ea52a69b0c1d76c2e301e140e9c078205d1",
-      "bytes": 596
+      "sha256": "0745ab5c1cbe5194d216c5a9255985c2b1f366b116bd667926a686efa25ef923",
+      "bytes": 5388
+    },
+    {
+      "path": "rust-scaffold/crates/dsg-core/src/policy.rs",
+      "sha256": "46e88a880f13bd63c08957b2afcb1467b1889dc5cc7aac48608c643801ef8646",
+      "bytes": 13406
+    },
+    {
+      "path": "rust-scaffold/crates/dsg-core/src/registry.rs",
+      "sha256": "0e8640a6d74d6f97c5f39f5b63fda1ff62a06c275d1603cb0ee411f26ce50fbc",
+      "bytes": 24887
+    },
+    {
+      "path": "scripts/check-foundation-parity.py",
+      "sha256": "5e9bbfb19c6d5b6cac91caa72c07264fc0c120d8cf0749125957a7e3fcf3c558",
+      "bytes": 2283
+    },
+    {
+      "path": "scripts/test-rust.sh",
+      "sha256": "b2191fc7d275eeb8d26f4f811ef0f1dadd1925a9ad75918eebdba8f8d53980f2",
+      "bytes": 1508
     },
     {
       "path": "scripts/test.sh",
