@@ -1,0 +1,222 @@
+{
+  "package": "Dev Storage Guardian 2.0",
+  "created": "2026-11-19",
+  "validation": {
+    "python_tests": "14 passed",
+    "docker_runtime": "unavailable",
+    "rust_compiler": "unavailable",
+    "html_parse": "passed"
+  },
+  "files": [
+    {
+      "path": "AGENTS.md",
+      "sha256": "68ddde6f10ed9dd5f6c5edf1c1610a09cb6e6207d99a2436a34a43f62c1433e5",
+      "bytes": 4984
+    },
+    {
+      "path": "CLAUDE.md",
+      "sha256": "68ddde6f10ed9dd5f6c5edf1c1610a09cb6e6207d99a2436a34a43f62c1433e5",
+      "bytes": 4984
+    },
+    {
+      "path": "GEMINI.md",
+      "sha256": "68ddde6f10ed9dd5f6c5edf1c1610a09cb6e6207d99a2436a34a43f62c1433e5",
+      "bytes": 4984
+    },
+    {
+      "path": "README.md",
+      "sha256": "75a1684c85596ab7c71a163152094a6006b2a2a30fd555f374dd6a747193d185",
+      "bytes": 2293
+    },
+    {
+      "path": "artifact/DSG_2_0_Interactive_Artifact.html",
+      "sha256": "4c55eeb794054b13b1ecd2886a6d768d4de68ab83b89ef17ede28f5da2417523",
+      "bytes": 8550
+    },
+    {
+      "path": "docs/ADR.md",
+      "sha256": "4d372fc8c9458df42879da748ab8a5f9e60e2d00535aa3174606ea6eb0100fa6",
+      "bytes": 968
+    },
+    {
+      "path": "docs/AI_AGENT_GUIDE.md",
+      "sha256": "d374f9444306ec80b2089fef096422727f07bec020b1c0a6010ecf4641172a87",
+      "bytes": 1206
+    },
+    {
+      "path": "docs/API_SPEC.md",
+      "sha256": "68e0b66bf73ceb025fc5133c29d1e6f1196ce4b31331a2732b4426b80398096d",
+      "bytes": 1338
+    },
+    {
+      "path": "docs/ARCHITECTURE.md",
+      "sha256": "c90412ff0a1a7ffa2d7f983845bb5f8d0264a4c7587fac1f27fb6b6fe6c4135a",
+      "bytes": 1701
+    },
+    {
+      "path": "docs/ERD.md",
+      "sha256": "43b034e33f84a8261f7907978e5217f2bcf7ef24295c63adb0812fb0a72e9411",
+      "bytes": 1347
+    },
+    {
+      "path": "docs/OPERATIONS.md",
+      "sha256": "171e2a586048d0e15287d2ae1ea0b74b0541351023222ce184314e87e4c1352e",
+      "bytes": 1389
+    },
+    {
+      "path": "docs/PLAN.md",
+      "sha256": "0c85f41448a6f72e6a443632dcb1dc8b553375dc83f34fdd903f396c30aa57b5",
+      "bytes": 1196
+    },
+    {
+      "path": "docs/POC_SCOPE.md",
+      "sha256": "a0fbe761b39aa7b7219cb722b239b5e1ff7372c9daea81c99c734f484c9a8970",
+      "bytes": 1050
+    },
+    {
+      "path": "docs/PRD.md",
+      "sha256": "ce39f117a920a3a27f6a1e699c619f13bdb08bc5c6e0dbe9d4308c76c0bb8e88",
+      "bytes": 1705
+    },
+    {
+      "path": "docs/PROMPTS.md",
+      "sha256": "e6293996dd62ad995a1287b64cf0ba0ffb7e6660082f07b49d8cd2079716b1cf",
+      "bytes": 1361
+    },
+    {
+      "path": "docs/REQUIREMENTS.md",
+      "sha256": "08c47f89a9f74767d82bcaae7ba61a8cbf50ad15049c81fc3f5bfae02dc07f28",
+      "bytes": 1659
+    },
+    {
+      "path": "docs/SECURITY.md",
+      "sha256": "3c694e9bf8b8210e37e9039123c8278f820d813c8631d95a51b3b103d4702999",
+      "bytes": 1293
+    },
+    {
+      "path": "docs/SOURCES.md",
+      "sha256": "5734ad3df5ddc2010dca484eb9156dbf804816a1910f902ca82df88530e5deee",
+      "bytes": 1147
+    },
+    {
+      "path": "docs/TASK.md",
+      "sha256": "7fac701bcbf460f43e869f999101b97457c32fe7756d7271deaf2f8c6c552d62",
+      "bytes": 871
+    },
+    {
+      "path": "docs/TEST_PLAN.md",
+      "sha256": "7b6d6fb08073adf084712cace2e4f2e8e58860f63136bf82a0c7daf58d415b99",
+      "bytes": 1213
+    },
+    {
+      "path": "docs/WBS.md",
+      "sha256": "b2c00fbe2c9d967d248ef19300d27e5e68e0c4b99fadd9cf35fdfc3266a58c60",
+      "bytes": 1110
+    },
+    {
+      "path": "integrations/README.md",
+      "sha256": "3a2767e16cc682fed45c8649e2c247a65397476f17d8eae302f266f9c2e8540a",
+      "bytes": 910
+    },
+    {
+      "path": "integrations/claude/README.md",
+      "sha256": "e4b26304aee3cc1844d503106a3d1c7f288e4062ead3baad9e2a558d87169f0a",
+      "bytes": 620
+    },
+    {
+      "path": "integrations/codex/README.md",
+      "sha256": "e66b1df2cf6f56a0d558a6af4965b55c78d9a147efd8650362a38aa14b7de21f",
+      "bytes": 512
+    },
+    {
+      "path": "integrations/gemini/README.md",
+      "sha256": "9cf180a38d55fa33465a4295c584ba36dfeb0b9329fa564d031bbbf5e305f6c0",
+      "bytes": 378
+    },
+    {
+      "path": "original/DSG_2_0_ORIGINAL_REPORT.md",
+      "sha256": "44790a4dda9f6970f31b36fc5a63227df09ebcfa0bb91d155e1e26ea1212c4ac",
+      "bytes": 38643
+    },
+    {
+      "path": "poc/README.md",
+      "sha256": "842a738893f0faa033232c36ba077c62265818e624d91a6d8749537fa2ade37a",
+      "bytes": 1688
+    },
+    {
+      "path": "poc/dsg/__init__.py",
+      "sha256": "c58503bf97290baa686e82c69ac3fe9526413fa5828895973dcc782441f2ca69",
+      "bytes": 24
+    },
+    {
+      "path": "poc/dsg/__main__.py",
+      "sha256": "2a2da45942d252cb36f50f5ca5505803b0083c7598419a602494dd9773c63a88",
+      "bytes": 3383
+    },
+    {
+      "path": "poc/dsg/core.py",
+      "sha256": "efe80ed900803bc9a50d14a6d506a693c8aa9a5d290a4f599a2790e11f5ea301",
+      "bytes": 10897
+    },
+    {
+      "path": "poc/tests/test_core.py",
+      "sha256": "9239d48f3292abdf0b70edb8d24cc05734d0ca29f8cb5a2337b46c79d6331d39",
+      "bytes": 5766
+    },
+    {
+      "path": "rust-scaffold/Cargo.toml",
+      "sha256": "86d482a35700929384486f68d073a43a6a1ac28867e1b9e6c1b51ab2d84b7fe7",
+      "bytes": 75
+    },
+    {
+      "path": "rust-scaffold/crates/dsg-cli/Cargo.toml",
+      "sha256": "8de4432f545ad62e9aa1961a87a5d62aa321fd53fb2e0dd7559a61fd1905a652",
+      "bytes": 113
+    },
+    {
+      "path": "rust-scaffold/crates/dsg-cli/src/main.rs",
+      "sha256": "625db8b2d162f7d95cb6845c2f6fd058d6737707c563a750fd57f35267d74723",
+      "bytes": 172
+    },
+    {
+      "path": "rust-scaffold/crates/dsg-core/Cargo.toml",
+      "sha256": "4b8965ada906ee2d6f6f4c052a87932593c679410d96465455622b47cc3e50db",
+      "bytes": 63
+    },
+    {
+      "path": "rust-scaffold/crates/dsg-core/src/lib.rs",
+      "sha256": "28bb9b5549a54c78a6880fe6a4607ea52a69b0c1d76c2e301e140e9c078205d1",
+      "bytes": 596
+    },
+    {
+      "path": "scripts/test.sh",
+      "sha256": "49e94038f78eb15a4d287adfd3ce6c633c112d6ba2e3e8e9a28bc47a09e43627",
+      "bytes": 155
+    },
+    {
+      "path": "skills/build-guard/SKILL.md",
+      "sha256": "e8123b1352ea3a36e7edddbd4518b47cf8d95bddc39ec19f24a90720000fc43e",
+      "bytes": 924
+    },
+    {
+      "path": "skills/disk-health/SKILL.md",
+      "sha256": "6914e99ec967c723265497aa8a6f63d2fad4b10ba2ca0cce110a2099bdf1df9d",
+      "bytes": 924
+    },
+    {
+      "path": "skills/docker-reuse/SKILL.md",
+      "sha256": "23a37fa3dad8edcf6fcf4298467fcca506c8c9999f7dceff2f10f88fb5a9f2f2",
+      "bytes": 927
+    },
+    {
+      "path": "skills/safe-cleanup/SKILL.md",
+      "sha256": "a4602df4e69fa75b007e3c9b4b2dbb5a03aa788e61afcfd08baf87125f1854d1",
+      "bytes": 927
+    },
+    {
+      "path": "skills/test-guard/SKILL.md",
+      "sha256": "3ccd4075f925e00c7eef0023bcbf252bf05f63fe6630c5f0b4b23dc78bd65b4e",
+      "bytes": 921
+    }
+  ]
+}
