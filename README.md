@@ -4,7 +4,7 @@
 
 ## 가장 중요한 구분
 
-- `original/DSG_2_0_Original_Report.md`: 기존 대화의 설계 설명·표·코드·체크리스트를 Markdown으로 변환한 원문 보존용 문서입니다. 채팅 전용 UI는 HTML로 분리했으며, 일부 서식은 Markdown으로 바꾸었습니다.
+- `original/DSG_2_0_ORIGINAL_REPORT.md`: 기존 대화의 설계 설명·표·코드·체크리스트를 Markdown으로 변환한 원문 보존용 문서입니다. 채팅 전용 UI는 HTML로 분리했으며, 일부 서식은 Markdown으로 바꾸었습니다.
 - `artifact/DSG_2_0_Interactive_Artifact.html`: 브라우저에서 파일로 열어 사용할 수 있는 독립형 인터랙티브 시뮬레이션. **로컬 디스크 변경 없음**.
 - `poc/`: **실제 동작** 진단/스캔/Dry-run/정책 차단 예제/관리형 실행; Python 3.10+ 필요.
 - `rust-scaffold/`: Rust 최종 제품의 최소 예시 소스. **컴파일러 부재로 빌드 미검증**.
