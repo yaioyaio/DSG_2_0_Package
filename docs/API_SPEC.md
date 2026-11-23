@@ -47,6 +47,18 @@ python3 -m dsg hook --agent codex
 
 `dsg hook --agent <claude|codex|gemini>`는 해당 CLI의 셸 훅 JSON을 표준 입력으로 읽고 그 CLI에 맞는 JSON을 반환한다. 최대 입력은 64 KiB다. 보호 명령, 별도 승인이 필요한 명령, 셸 해석 결과를 확정하기 어려운 입력은 안정적인 사유 코드와 함께 거부한다. 허용 시 빈 객체를 반환해 CLI의 자체 권한 확인을 유지한다. [설치 및 운영 범위](../integrations/README.md)
 
+### 로컬 Docker 조회 브로커
+
+`dsgd`는 macOS·Linux용 Unix 소켓 서버다. `--listen`, `--upstream`, `--engine-id`, `--docker-executable`, `--empty-config-dir`, `--allow-uid`를 받아 대상을 고정한다. 연결 상대의 OS UID를 판별해 허용된 연결에서만 요청을 읽는다.
+
+| HTTP GET 경로 | 응답 |
+|---|---|
+| `/_ping` | 예상 Docker 엔진을 조회할 수 있을 때 `OK`. |
+| `/info`, `/v1.<버전>/info` | 고정한 엔진의 `ID`를 반환한다. 사용자 설정이나 엔진 상세 설정은 수집 범위에서 제외한다. |
+| `/dsg/v1/inventory` | 엔진과 관측 일관성이 확인된 인벤토리. `--max-resources`에 지정한 1~32개의 범위 내에서 조회한다. |
+
+브로커는 허용 경로 외 호출과 본문·업그레이드 요청을 거부한다. 요청 경로, 헤더, 본문을 엔진으로 전달하는 대신 미리 정의된 Docker 조회를 실행한다. 권한 또는 엔진 검증에 실패하면 연결을 닫거나 실패 응답을 반환한다. [서비스 권한과 복구](OPERATIONS.md#docker-조회-브로커)
+
 ## 계획 API (미구현)
 - `dsg inspect <resource-id>`
 - `dsg docker reuse --project <id>`

@@ -393,7 +393,7 @@ fn checked_query(
     Ok(response)
 }
 
-fn query_engine(query: &impl DockerRead) -> Result<String, QueryFailure> {
+pub fn query_engine(query: &impl DockerRead) -> Result<String, QueryFailure> {
     let response = checked_query(query, DockerOperation::Engine)?;
     let mut lines = response.lines();
     let id = lines.next().and_then(engine_id);

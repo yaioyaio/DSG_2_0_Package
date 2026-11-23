@@ -34,6 +34,14 @@ Docker 읽기 전용 단계에서는 Docker 명령 대역으로 컨텍스트 고
 
 macOS에서 실제 CLI를 검증할 때는 `DSG_TEST_AGENT_NATIVE=all`을 설정한다. Claude와 Codex 명령을 `PATH`에 두고 `DSG_TEST_NODE`와 `DSG_TEST_GEMINI_ENTRY`에 Node 실행 파일 및 Gemini CLI 번들의 절대 경로를 지정한다. 단일 CLI 검증은 `all` 대신 `claude`, `codex`, `gemini`를 지정한다. Claude와 Codex는 루프백 대역 응답을, Gemini는 합성 응답 재생을 사용한다. 쓰기와 네트워크를 임시 경계에 제한하고 CLI별로 허용, 정책 거부, 훅 실행 오류에서 대역 명령이 실행됐는지 확인한다.
 
+## 브로커와 서비스 검증
+
+macOS·Linux에서 Docker CLI를 사용할 수 있으면 `sh scripts/test-rust.sh`가 임시 Unix 소켓의 합성 엔진만 조회한다. 허용 UID만 응답을 받고, 미허용 UID와 변경·상세 조회 요청은 엔진에 전달되지 않아야 한다. 엔진이 중단되거나 ID가 바뀌면 `503`을 반환하고 같은 엔진을 복구한 뒤 다시 조회해야 한다. 충돌한 프로세스의 수신 소켓 처리와 종료 시 정리도 검사한다.
+
+Linux 검증용 소켓은 기본적으로 사용자 홈의 임시 디렉터리에 생성한다. `DSG_TEST_RUNTIME_DIR`로 상위 경로를 지정할 수 있다. Unix 소켓 경로 길이 제한을 고려해 그룹·기타 쓰기 권한이 없고 충분히 짧은 절대 경로를 사용한다.
+
+macOS는 샌드박스에서 원본 소켓 접근이 거부되고 브로커 조회는 성공해야 한다. `DSG_TEST_LAUNCHD=1`로 실행하면 현재 GUI 사용자 도메인에 임시 테스트 서비스를 등록하고 한 번 종료·재시작한 뒤 해제한다. 실제 엔진 또는 배포용 서비스 계정 경계 확인에는 운영 전용 격리 엔진과 제한 계정이 필요하다. Linux systemd와 Windows SCM은 각각 해당 호스트에서 확인한다.
+
 ## POC 제한
 - 정규식 명령 필터는 모든 셸 표현을 탐지하지 않음.
 - 파일/디렉터리 변경 간 TOCTOU 경합이 존재하므로 실제 프로젝트의 삭제 자동화 비권장.

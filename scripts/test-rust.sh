@@ -64,4 +64,6 @@ with tempfile.TemporaryDirectory(prefix='dsg-rust-test-') as fixture:
     subprocess.run(invocation, timeout=70, check=True)
     subprocess.run(['python3', '../scripts/check-cleanup.py', str(executable)], timeout=65, check=True)
     subprocess.run(['python3', '../scripts/check-agent-integration.py', str(executable)], timeout=155, check=True)
+    daemon = target / 'debug' / ('dsgd.exe' if os.name == 'nt' else 'dsgd')
+    subprocess.run(['python3', '../scripts/check-enforcement.py', str(daemon)], timeout=75, check=True)
 PY

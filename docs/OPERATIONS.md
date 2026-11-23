@@ -37,6 +37,14 @@ python3 -m dsg docker-scan
 
 CLI 훅 설치 후 신뢰 설정과 실행 파일 위치를 확인한다. CLI가 훅을 로드하지 못하면 해당 에이전트에서 보호 명령을 실행하지 않고 설치 상태부터 점검한다. Claude Code의 등록은 훅 실행 실패를 차단하도록 설정한다. Codex와 Gemini는 훅 실행 오류가 발생하면 자체 권한 처리로 진행할 수 있다. 통제된 Docker 접근이 필요한 운영 환경의 수용 기준은 별도의 OS 권한 경계다. [에이전트별 설정 및 검증](../integrations/README.md)
 
+## Docker 조회 브로커
+
+전용 서비스 계정과 제한된 클라이언트 UID를 구분한다. 서비스만 접근 가능한 Docker 소켓과 명시한 엔진 ID가 필요하다. 운영자가 서비스 소유의 비공개 `0700` 업스트림 디렉터리와 비어 있는 `0700` Docker 환경 디렉터리를 제공한다. 수신 소켓은 별도의 서비스 소유 디렉터리에 둔다. 서비스 실행 파일과 소켓 디렉터리의 모든 상위 경로에 대해 그룹·기타 쓰기 권한, 링크 및 부여된 ACL을 확인한다.
+
+엔진의 다른 Unix 소켓, TCP 포트, Docker 그룹이나 동등한 관리자 권한에서 같은 클라이언트가 직접 접근할 수 있는지 확인한다. 확인한 경계 안에서만 강제 통제라고 표시한다. 진단 시 허용 UID로 `GET /_ping`과 `GET /dsg/v1/inventory`를 호출한다. 엔진 장애나 예상 ID 불일치 시 브로커는 `503`을 반환한다. 확인되지 않은 다른 엔진으로 자동 전환하는 대신 같은 경계의 설정·접근을 복구한다.
+
+macOS LaunchDaemon 예시는 비정상 종료 상태를 보존하고 관리자가 확인한 뒤 수동으로 다시 시작하도록 설정한다. Linux systemd 예시는 60초에 두 번의 시작 시도까지만 허용한다. 예시의 계정·클라이언트 UID·엔진 ID와 경로를 검토한 뒤 대상 호스트에서 검증한다. 수신 경로에 외부 파일이나 소유 증거가 없는 소켓이 있으면 그대로 보존한다. [macOS 서비스 예시](../integrations/launchd/LOCAL.DSG.DSGD.plist) · [Linux 서비스 예시](../integrations/systemd/dsgd.service)
+
 ## 응급 정리 안내
 대규모 prune 대신 Docker의 `docker system df -v`, `docker buildx du`, `docker ps -a`, `docker volume ls`로 먼저 조사. 영속 데이터 보호 확인 후 대상 범위에 국한해 수동 정리.
 

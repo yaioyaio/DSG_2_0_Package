@@ -2,10 +2,15 @@
 name = "dsg-cli"
 version = "0.1.0"
 edition = "2021"
+default-run = "dsg"
 
 [[bin]]
 name = "dsg"
 path = "src/main.rs"
+
+[[bin]]
+name = "dsgd"
+path = "src/daemon.rs"
 
 [dependencies]
 clap.workspace = true
