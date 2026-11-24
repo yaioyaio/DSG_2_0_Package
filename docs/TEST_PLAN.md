@@ -24,6 +24,8 @@ Rust 의존성을 받은 뒤 저장소 루트에서 `sh scripts/test-rust.sh`를
 
 잘못된 필드 타입과 미정의 필드가 들어간 합성 정책은 `CONFIG_INVALID`로 거절해야 한다. 임시 희소 파일은 디스크 블록을 거의 사용하지 않으며 스캔에서 논리 크기 5 GiB를 반환해야 한다.
 
+Windows 스캔·계획은 로컬 NTFS에서 파일·볼륨 ID를 핸들로 확인한다. macOS에서 `cargo xwin test --manifest-path rust-scaffold/Cargo.toml -p dsg-core --lib --target aarch64-pc-windows-msvc --no-run --locked --offline --jobs 1`로 시험 실행 파일을 빌드하고, 전달 시 해시를 대조한 뒤 기존 Parallels Windows ARM64에서 해당 파일에 `filesystem::tests --test-threads=1`을 전달한다. 검사 중 디렉터리 교체 차단과 검사 종료 후 정상 교체, 동일 시간·크기의 하위 파일 교체 감지, 하드 링크·junction·공유 위반 경로 제외와 원본 보존을 확인한다. 이 시험의 정리 경로는 dry-run이다.
+
 Docker 읽기 전용 단계에서는 Docker 명령 대역으로 컨텍스트 고정, 빈 목록과 미확인 상태의 구분, 중복 후보 및 변경 상황을 검증한다. 격리 엔진이 이미 동작 중이면 `DSG_TEST_DOCKER_CONTEXT=dockerguard-test sh scripts/test-rust.sh`로 실제 조회를 추가 검증한다. 엔진 시작·리소스 생성·삭제는 이 조회 검증에서 수행하지 않는다.
 
 관리형 실행 검증에는 임시 프로젝트의 작은 Cargo 빌드와 시간 초과 뒤 재실행, lease 경합·회수 및 등록부 마이그레이션이 포함된다. 사전에 digest가 있는 공개 fixture 이미지를 보유한 격리 엔진에서 `DSG_TEST_DOCKER_CONTEXT=dockerguard-test DSG_TEST_COMPOSE_FIXTURE=1 sh scripts/test-rust.sh`로 건강한 컨테이너 하나를 확인한다. 검증하는 동안 동일 재사용 요청과 설정 해시 변경 결과, 추가 컨테이너 0개를 확인하고 fixture 라벨로 오늘 생성한 컨테이너만 회수한다.
