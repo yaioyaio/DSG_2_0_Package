@@ -6,14 +6,14 @@
 | REQ-002 | 기술/폴더 탐색 | P0 | 관리 대상만 스캔, 링크 회피 | 일부 구현 | 정책에 지정된 경로를 검사하고 보호·미확인 경로를 보존. |
 | REQ-003 | 호스트/프로젝트 예산 | P0 | 실행 전 최소 여유 공간 검증 | 구현(스캔 대상 기준) | 호스트 여유 공간과 프로젝트 예산 검사, 불완전한 계측의 미확인 상태 표시. |
 | REQ-004 | Docker Inventory | P0 | Docker CLI 읽기 전용 결과 | 구현(도구 설치 시) | 지정 컨텍스트의 인벤토리, 내장 빌더의 총량·활성 집계, 기본 Buildx 빌더와 Linux ARM64 전용 소켓의 별도 BuildKit 상태별 집계. Windows 브로커는 확인된 컨테이너·이미지 건수 범위. |
-| REQ-005 | Docker 재사용 | P1 | Compose+config+health 동일성 | 미구현 | 기존 컨테이너를 두 번 관측하고 재사용 가능한 동일 ID를 반환한다. 격리 엔진에서 구성, 동일 컨테이너 health, 실제 이미지, `tmpfs`, 명명 볼륨 변경을 각각 거절했다. 명명 볼륨의 종류·이름·대상 경로·읽기 전용 여부를 대조하며, 시험에서 같은 볼륨은 재사용하고 교체 전 이름은 거절했다. [실측](HANDOFF.md#명명-볼륨과-ubuntu-parallels-실측) |
+| REQ-005 | Docker 재사용 | P1 | Compose+config+health 동일성 | 미구현 | 호출자가 준 기대 구성으로 기존 컨테이너를 두 번 관측하고 재사용 가능한 동일 ID를 반환한다. 공식 PLAN의 Compose 구성 자체 정규화와 재빌드 필요 판정은 잔여 검증 범위다. 격리 엔진에서 구성, 동일 컨테이너 health, 실제 이미지, `tmpfs`, 명명 볼륨 변경을 각각 거절했다. 명명 볼륨의 종류·이름·대상 경로·읽기 전용 여부를 대조하며, 시험에서 같은 볼륨은 재사용하고 교체 전 이름은 거절했다. [실측](HANDOFF.md#명명-볼륨과-ubuntu-parallels-실측) |
 | REQ-006 | 실행 전 정책 검증 | P0 | allow/warn/deny 응답 | 정규식 기반 POC | `check`와 관리형 실행에서 정책 적용. 승인 필요 및 미확인 경로도 구분. |
 | REQ-007 | GC Plan | P0 | 만료/용량/보호 상태 판단 | 일부 구현 | 계획·제외 이유를 SQLite에 저장. Docker 이미지 계획과 재검증 제공. |
 | REQ-008 | GC Apply | P0 | 재검증 및 명시적 승인 필수 | 제한 구현 | macOS·Linux의 승인 기반 파일 정리와 등록된 완료 이벤트의 자동 회수. macOS 임시 프로젝트에서 격리 직후 프로세스 강제 종료 뒤 파일·감사 복구 통과. Docker 이미지 삭제는 미구현. |
-| REQ-009 | 세션 Lease | P1 | 동시 실행 소유권 관리 | 미구현 | 관리형 실행에서 프로젝트별 lease와 전역 두 슬롯을 사용한다. macOS에서 비정상 종료 뒤 만료 lease 재획득을, 격리 Linux ARM64와 기존 Ubuntu Parallels에서 관리형 프로세스 타임아웃 124 및 같은 프로젝트의 lease 재획득을 검증했다. Windows 관리형 `exec`는 미지원이다. [실측](HANDOFF.md#명명-볼륨과-ubuntu-parallels-실측) |
+| REQ-009 | 세션 Lease | P1 | 동시 실행 소유권 관리 | 미구현 | 관리형 실행에서 프로젝트별 lease와 전역 두 슬롯을 사용한다. macOS에서 비정상 종료 뒤 만료 lease 재획득을 확인했다. Linux ARM64 `681be1e`는 격리 컨테이너와 기존 Ubuntu Parallels에서, 현재 `ada5a09`는 기존 Ubuntu Parallels에서 관리형 타임아웃 124와 lease 재획득을 검증했다. Windows 관리형 `exec`는 미지원이다. [실측](HANDOFF.md#명명-볼륨과-ubuntu-parallels-실측) |
 | REQ-010 | AI Hook | P1 | CLI별 정확한 JSON 입출력 | 세 CLI의 차단 응답 예제 | 3개 CLI의 셸 훅과 프로젝트 설치·제거. macOS와 Ubuntu Parallels에서 실제 CLI의 허용·거부·오류 경로를 합성 모델 응답으로 검증했다. Windows 설치는 미지원. |
 | REQ-011 | MCP | P2 | 읽기 전용 도구와 승인 상태 검증 | 미구현 | stdio 조회 도구 8개. macOS에서 실행·승인 기록을 세션에 고정한 프로젝트 범위에서 조회한다. 승인 발급과 적용은 운영자가 관리형 CLI에서 수행한다. |
-| REQ-012 | Docker Proxy | P2 | 직접 소켓 우회 제한 | 미구현 | macOS의 실제 엔진 직접 접근 차단과 임시 launchd 수명 주기, Linux의 실제 엔진·제한 UID·systemd를 검증했다. Windows ARM64는 실제 SCM에서 계정별 파이프 경계와 재시작을 합성 상류로 검증했다. Windows 실제 엔진 및 macOS 운영 배포 계정 분리는 별도 실측 항목이다. |
+| REQ-012 | Docker Proxy | P2 | 직접 소켓 우회 제한 | 미구현 | macOS의 실제 엔진 직접 접근 차단과 임시 launchd 수명 주기, 별도 QEMU의 Linux에서 실제 엔진·제한 UID·systemd를 검증했다. Windows ARM64는 실제 SCM에서 계정별 파이프 경계와 재시작을 합성 상류로 검증했다. Windows 실제 엔진 및 macOS 운영 배포 계정 분리는 별도 실측 항목이다. |
 | REQ-013 | 확장 Provider | P2 | SDK/서명/격리 | 미구현 | 내장 관리형 Provider 7종 제공. 외부 확장 SDK, 플러그인 서명 검증과 격리는 미구현. |
 
 제품 현황은 구현된 범위와 기존 검증 기록을 요약합니다. 남은 수용 기준과 단계별 근거는 백로그와 작업 대조표를 따릅니다. [개발 백로그](BACKLOG.md) · [작업 대조표](TASK.md) · [검증 기록](HANDOFF.md)
