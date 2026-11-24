@@ -12,6 +12,9 @@ import tempfile
 import time
 
 
+HEALTH_MARKER = '/dev/shm/dsg-fixture-unhealthy'
+
+
 def call(arguments, timeout=8):
     return subprocess.run(arguments, capture_output=True, text=True, timeout=timeout, check=False)
 
@@ -77,6 +80,7 @@ def write_compose_fixture(path, image_id, tag, lifetime):
     cpus: 0.25
     pids_limit: 16
     network_mode: none
+    ipc: private
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
@@ -84,7 +88,7 @@ def write_compose_fixture(path, image_id, tag, lifetime):
     logging:
       driver: none
     healthcheck:
-      test: [CMD, /bin/true]
+      test: [CMD, /bin/sh, -c, "test ! -e {HEALTH_MARKER}"]
       interval: 1s
       timeout: 1s
       retries: 3
@@ -144,14 +148,17 @@ def verify_reuse(cli, context, project, runner_deadline):
             raise RuntimeError('The isolated Compose project has an unexpected container count or ID.')
         return project_ids or None
 
-    def remove_owned(container, remaining):
+    def confirm_owned(container, remaining):
         if owned_container(remaining) != container:
-            raise RuntimeError('The observed isolated fixture ID changed before removal.')
+            raise RuntimeError('The observed isolated fixture ID changed.')
         fixture_label = docker_field(docker + ['container', 'inspect', '--format',
                                                '{{index .Config.Labels "dsg.fixture"}}',
                                                '--', container], remaining(3))
         if fixture_label != tag:
-            raise RuntimeError('The fixture label could not be confirmed before removal.')
+            raise RuntimeError('The isolated fixture label could not be confirmed.')
+
+    def remove_owned(container, remaining):
+        confirm_owned(container, remaining)
         removed = subprocess.run(docker + ['container', 'rm', '--force', '--', container],
                                  stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                  stderr=subprocess.DEVNULL, timeout=remaining(3), check=False)
@@ -184,6 +191,24 @@ def verify_reuse(cli, context, project, runner_deadline):
         args = cli + ['docker-reuse', '--context', context, '--expectation-json', json.dumps(expectation)]
         return result(args, expected=exit_code, timeout=budget(22))
 
+    def trigger_unhealthy(container_id):
+        # The marker lives in this container's private shared memory and is removed with it.
+        confirm_owned(container_id, budget)
+        marked = docker_field(docker + ['container', 'exec', '--', container_id, '/bin/sh', '-c',
+                                        f': > {HEALTH_MARKER}'], budget(3))
+        if marked != '':
+            raise RuntimeError('The isolated fixture health marker could not be written.')
+        health_deadline = time.monotonic() + 6
+        while time.monotonic() < health_deadline:
+            status = docker_field(docker + ['container', 'inspect', '--format', '{{.State.Health.Status}}',
+                                            '--', container_id], budget(1))
+            if status == 'unhealthy':
+                return
+            if status != 'healthy':
+                raise RuntimeError('The isolated fixture health could not be checked.')
+            time.sleep(0.25)
+        raise RuntimeError('The isolated fixture did not become unhealthy within its time limit.')
+
     container = None
     start_attempted = False
     try:
@@ -198,6 +223,11 @@ def verify_reuse(cli, context, project, runner_deadline):
         assert repeated == container and read_config_hash(repeated) == config_hash
         observed = verify(expectation, 0)
         assert observed['verified'] and observed['assessment']['container_id'] == container
+
+        trigger_unhealthy(container)
+        confirm_owned(container, budget)
+        unhealthy = verify(expectation, 5)
+        assert not unhealthy['verified'] and unhealthy['assessment']['reason'] == 'not_healthy'
 
         # Remove the verified first instance before applying the changed configuration.
         original = container
@@ -221,7 +251,7 @@ def verify_reuse(cli, context, project, runner_deadline):
             current = owned_container(cleanup_budget)
             if current is not None:
                 remove_owned(container or current, cleanup_budget)
-    print('Isolated Compose reuse: repeated up retained one container and the original configuration expectation was then rejected.')
+    print('Isolated Compose reuse: repeated up retained one container; health and configuration changes were rejected.')
 
 
 if __name__ == '__main__':

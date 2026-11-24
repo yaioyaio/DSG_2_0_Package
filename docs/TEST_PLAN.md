@@ -32,7 +32,11 @@ Docker 읽기 전용 단계에서는 Docker 명령 대역으로 컨텍스트 고
 
 관리형 실행 검증에는 임시 프로젝트의 작은 Cargo 빌드와 시간 초과 뒤 재실행, lease 경합·회수 및 등록부 마이그레이션이 포함된다. 사전에 digest가 있는 공개 fixture 이미지를 보유한 격리 엔진에서 `DSG_TEST_DOCKER_CONTEXT=dockerguard-test DSG_TEST_COMPOSE_FIXTURE=1 sh scripts/test-rust.sh`로 건강한 컨테이너 하나를 확인한다. 검증하는 동안 동일 재사용 요청과 설정 해시 변경 결과, 추가 컨테이너 0개를 확인하고 fixture 라벨로 오늘 생성한 컨테이너만 회수한다.
 
+같은 Compose 시험에서 엔진 ID와 단일 시험 컨테이너의 ID·라벨을 대조한 뒤 컨테이너의 `/dev/shm`에 상태 표식을 쓴다. 구성·이미지·마운트가 같은 컨테이너가 `unhealthy`가 된 경우 재사용은 `not_healthy`와 종료 코드 5를 반환해야 한다. 시험은 기존의 격리 컨테이너 회수 경로를 사용한다.
+
 `DSG_TEST_BUILD_PROVIDERS=1 sh scripts/test-rust.sh`는 로컬 도구와 의존성 없는 임시 프로젝트로 등록된 빌드·테스트 작업을 실행한다. `DSG_TEST_PLAYWRIGHT_MODULES`에 준비한 공식 Playwright의 `node_modules` 경로를 추가하면 실제 성공·실패 추적 파일의 존재와 길이, 서로 다른 출력 경로, 기본 프로젝트 출력 보존도 확인한다. 감사 검증에는 실행 결과 코드와 해당 lease 참조만 사용한다.
+
+`DSG_TEST_NEXT_MODULES`에 Next.js 16.4.6, React·React DOM 19.3.1과 실행 환경의 SWC가 준비된 `node_modules` 절대 경로를 지정하면 같은 러너가 실제 Next.js 앱도 검증한다. 의존성은 크기와 파일 수를 제한한 임시 복사본을 사용한다. `PATH`에는 임시 홈에서 바로 실행할 수 있는 Node와 pnpm을 둔다. 단독 검증은 `python3 -IB scripts/check-build-providers.py <dsg> --next-only`로 실행한다. 실제 `next build --webpack`, `BUILD_ID`, 사전 렌더 HTML, `127.0.0.1` 응답, 종료와 해당 프로젝트의 독립된 두 lease 감사 기록을 확인한다.
 
 정리 회귀는 자체 생성한 임시 프로젝트만 대상으로 한다. 보호 디렉터리 보존, 기존 계획 이후 내부 파일 변경 감지, 틀린 승인 보존·일회용 승인 재실행 거절, 감사 기록과 회수량을 확인한다. 등록된 Cargo 대역의 성공·실패·중단 이벤트와 격리 Git 원격의 여섯 참조를 사용하는 워크트리 회수도 검사한다.
 
@@ -79,5 +83,5 @@ macOS에서 `DSG_TEST_WEBKIT=1 sh scripts/test-rust.sh`는 임시 WebKit 뷰를 
 WBS마다 구현과 검증 기록을 [작업 대조표](TASK.md)에서 대조한다. 성공 여부는 실행한 OS, 후보 버전, 실환경·시험 대역, 입출력 범위를 근거로 판정한다. 교차 링크는 컴파일·링크 증거이며, 합성 Docker 파이프는 해당 OS 서비스와 파이프 권한의 증거다. 대상 환경에서 실행하지 못한 항목은 별도의 검증으로 남긴다.
 
 - Docker 내장 빌더 집계와 기존 이미지 보존은 조회·계획 검증에 해당한다. WBS 2.3은 별도 Buildx 빌더, 캐시 소유권, 안전한 정리 범위의 증거가 필요하다. 이미지 적용 검증에는 승인된 적용 경로와 단독 제어를 확인한 격리 엔진이 필요하다.
-- macOS Compose 실험은 동일 컨테이너 재사용과 구성 해시 변경 거절을 실측했다. 이미지·마운트·health 차이는 합성 입력으로 대조했다. pnpm 시험은 일반 프로젝트 스크립트 실행을 검증하며 Next.js 프로젝트 시험을 별도로 추적한다.
+- macOS Compose 실험은 동일 컨테이너 재사용, 구성 해시 변경과 동일 컨테이너의 health 변화 거절을 실측했다. 이미지·마운트 차이는 합성 입력으로 대조했으며 실제 엔진 변경별 검증을 추적한다. pnpm 시험에는 일반 프로젝트 스크립트와 실제 Next.js 앱 빌드·루프백 응답을 포함한다.
 - 프로세스 강제 종료와 재시작 근거는 [핸드오프](HANDOFF.md)에 기록한다. 전원 장애 복구와 전체 플랫폼의 감사 무손실은 독립된 출시 검증으로 추적한다.

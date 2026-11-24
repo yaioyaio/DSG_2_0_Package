@@ -157,3 +157,9 @@ DSG-08의 `f6397b2`를 PR #15로 `develop`, PR #16으로 `main`에 반영했다.
 - `feature/20261124-buildx-observation`, 기준 `c3707b0`. WBS 2.3의 기본 Buildx 조회를 `docker-buildx-cache`로 추가했다. 빈 전용 Buildx 설정과 명시 컨텍스트, 조회 전후 엔진 ID 대조, 수치 범위 검증, 하위 프로세스 정리를 적용했다. 조회가 실패하면 수치를 미확인으로 남기고 보존한다. [명령과 결과](API_SPEC.md#docker-읽기-전용-인벤토리)
 - `DSG_TEST_DOCKER_CONTEXT=dockerguard-test DSG_TEST_BUILDX=1 sh scripts/test-rust.sh`에서 Rust 102개와 통합 검증을 통과했다. 실제 기본 Buildx 캐시는 총 208개, 회수 가능 표시 208개, 공유 8개, 변경 가능 167개다. 각 수치는 해당 플래그의 집계로 일부 항목은 둘 이상의 상태에 해당한다. 실제 Docker 자원과 캐시는 변경하지 않았다.
 - 첫 통합 시 기존 워크트리 정리 fixture가 실패했다. 보존한 배포 바이너리의 같은 fixture를 단독으로 실행해 통과했고 후속 전체 검증도 통과했다. 현재 격리 컨텍스트에서는 실행 중인 별도 BuildKit 빌더를 확인하지 못했다. 별도 빌더의 조회, 소유권과 GC 수용 기준은 남아 있다. 이번 검증에서 VM 실행과 보조 워크트리 생성은 0회다.
+
+## DSG-04 Next.js 앱과 Compose health 실측
+
+- `feature/20261124-nextjs-provider-proof`, 기준 `4c33e8a`. WBS 3.1의 Next.js 16.4.6을 실제 `pnpm` Provider로 빌드했다. `BUILD_ID`, 임의 표식이 들어간 사전 렌더 HTML, 루프백 `next start` 응답, 종료와 해당 프로젝트의 서로 다른 빌드·실행 lease 두 건 및 감사 기록을 확인했다.
+- WBS 2.2의 실제 Compose fixture에서 반복 실행 뒤 확인한 동일 컨테이너에 전용 `/dev/shm` 표식을 썼다. 같은 ID·구성·이미지·마운트에서 health가 `unhealthy`로 바뀌면 재사용을 `not_healthy`로 거절했다. 기존 구성 변경 거절과 라벨·ID로 확인한 시험 컨테이너 회수도 통과했다. 실제 이미지·마운트 변경 실측은 남아 있다.
+- macOS `DSG_TEST_DOCKER_CONTEXT=dockerguard-test DSG_TEST_COMPOSE_FIXTURE=1 DSG_TEST_BUILD_PROVIDERS=1` 및 `DSG_TEST_NEXT_MODULES`를 지정한 `sh scripts/test-rust.sh`에서 Rust 102개와 통합 검증을 통과했다. 첫 시험에서 임시 홈의 pnpm 버전 관리자 shim과 공유 의존성 갱신 문제가 확인됐다. 독립 실행 pnpm, 파일 수·크기를 제한한 임시 복사본, 오프라인 설정으로 재검증했고 의존성 스테이지와 fixture를 회수했다. Docker Engine과 VM을 새로 시작하지 않았다. 보조 워크트리 생성 0개다. [검증 절차](TEST_PLAN.md#rust-foundation-검증)
