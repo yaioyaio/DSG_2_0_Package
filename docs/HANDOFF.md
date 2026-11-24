@@ -215,3 +215,9 @@ DSG-08의 `f6397b2`를 PR #15로 `develop`, PR #16으로 `main`에 반영했다.
 - Windows ARM64·x64는 `cargo xwin`으로 `--release --locked --offline --jobs 1` 교차 링크했다. 각 대상의 동일 입력 두 번 패키징, PE 대상 및 호스트 패키지 회귀를 통과했다. 기존 Parallels Windows ARM64의 로컬 NTFS에서 `scripts/check-windows-arm64-release.py`와 기존 패키지·대시보드 시험을 실행했다. 이전 `681be1e` 실물에서 같은 `0.1.1-rc.1` 표기의 현재 ARM64 후보로 교체해 두 실행 파일의 SHA-256·실행, 진단, 대시보드 HTTP, 제거 후 사용자 시험 파일 보존을 확인했다. x64 실행 파일 두 개와 대시보드 HTTP를 에뮬레이션으로 확인했다. 설치기는 ARM64에서 x64 패키지의 새 설치와 기존 ARM64 설치의 업그레이드를 거절했고, 설치 파일과 사용자 파일을 보존했다. 게스트 임시 자료를 회수하고 VM을 원래 일시정지 상태로 복귀시켰다.
 - macOS의 `sh scripts/test.sh`와 `sh scripts/test-rust.sh`는 각각 종료 코드 0이었다. Python 14개와 Rust 103개 및 기본 등록 통합 시험을 통과했다.
 - 현재 후보와 이전 실물, SHA-256 및 검증 요약은 릴리스 문서에 연결했다. Linux ARM64는 같은 Rust 트리의 기존 Ubuntu 실측을 인용했다. 다음 검증은 Windows x64 호스트에서 `0.1.0-rc.3` 실물 설치부터 현재 후보 업그레이드·진단·대시보드·제거까지 진행한다. 기존 Windows SCM 및 실제 Docker의 수용 조건은 WBS 5.1에서, 공인 서명은 릴리스 문서에서 추적한다. 승인형 MCP와 Provider SDK는 사용 사례 확정 후 진행한다. [후보와 해시](RELEASE.md) · [Linux 실측](#별도-buildkit-읽기-전용-실측) · [남은 수용 조건](BACKLOG.md#환경승인-조건이-남은-항목)
+
+## Parallels x64 설치기 경계 재검증
+
+- 2026-11-24, DSG-08·WBS 6.1. 브랜치 `feature/20261124-parallels-x64-boundary`, 기준 HEAD `26eba10`. Rust 트리 `ada5a09`의 `0.1.1-rc.1` 후보와 패키지 SHA-256을 그대로 사용했다. 제품과 계획 변경은 0건이다.
+- 로컬 Parallels Desktop 27.1.0의 등록 VM은 `win-11`, `ubuntu`, `macOS` 세 개였다. 기존 `win-11` ARM64 게스트에서 공식 포터블 Python 3.13.9의 ARM64판과 에뮬레이션 x64판을 사용했다. 두 프로세스에서 공식 설치기의 x64 새 설치·업그레이드는 각각 종료 코드 1이었다. 새 설치 시 설치 경로에 사용자 시험 파일만 남았고, 업그레이드 거절 뒤 기존 ARM64 설치 포인터와 실행 파일 SHA-256, 사용자 시험 파일이 일치했다.
+- ARM64 설치 수명 주기와 x64 설치기 경계 E2E는 종료 코드 0이었다. 시험용 임시 자료를 회수하고 `win-11`을 원래의 일시정지 상태로 복귀시켰다. 신규 VM과 게스트 시험 자료 잔여는 0개다. Windows x64 OS의 설치 수명 주기는 AMD64 게스트 또는 호스트를 확보한 뒤 검증한다. [시험 방법](TEST_PLAN.md#대시보드와-릴리스-검증) · [환경 조건](BACKLOG.md#환경승인-조건이-남은-항목)

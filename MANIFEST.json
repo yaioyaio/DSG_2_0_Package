@@ -22,7 +22,8 @@
     "compose_live_changes": "Existing isolated engine preserved one ID on repeat. Configuration, health, image and tmpfs changes rejected. Matching tmpfs remained unknown. Named volume replacement is covered by synthetic fixtures.",
     "linux_arm64_qualification": "Current 681be1e static musl passed previous archive upgrade, managed success, timeout 124 and lease reacquisition, dashboard and removal in an isolated ARM64 Linux container. Existing Ubuntu Parallels lacked a verified transfer path.",
     "standalone_buildkit": "Linux ARM64 on existing Ubuntu Parallels: product and official BuildKit v0.35.1 matched counts 0 and 4. Wrong PID, wrong client digest and socket symlink were rejected; all cache preserved.",
-    "named_volume_reuse": "Real isolated Compose reused identical named volume A and one ID. Replacing A with B rejected the old name and accepted the expected new mount. Read-only, nocopy and both volumes preserved verified."
+    "named_volume_reuse": "Real isolated Compose reused identical named volume A and one ID. Replacing A with B rejected the old name and accepted the expected new mount. Read-only, nocopy and both volumes preserved verified.",
+    "windows_installer_process_architecture": "Current ada5a09 package: on the existing ARM64 Windows Parallels guest, native ARM64 and emulated x64 portable CPython 3.13.9 each returned exit 1 with the expected host mismatch for x64 install and upgrade. Prefix, existing pointer, installed hashes and fixture user file were preserved. Guest was restored to suspended. x64 operating-system lifecycle awaits a separate environment."
   },
   "files": [
     {
@@ -112,8 +113,8 @@
     },
     {
       "path": "docs/RELEASE.md",
-      "sha256": "43cf4e387bad9a577967d0ac0d6d3a4ccc61729376d92a87a9c85a8a738d2f11",
-      "bytes": 13029
+      "sha256": "cbd20bd4c471afbdb915b444069674552ee1ee916845bcf26fac3bda676cb21e",
+      "bytes": 13329
     },
     {
       "path": "docs/REQUIREMENTS.md",
@@ -132,13 +133,13 @@
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "c17fbc4b54377ffcdd509a2604ed034979291a01766043890e901db64ac9deeb",
-      "bytes": 16697
+      "sha256": "8eea4285dbe6e4edc3ad51ee9615e7d9c03e9100e03b50d4e8a0a038756aef29",
+      "bytes": 17006
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "8f8e2987942686f59934aeb5047f9ad5523a1f1588d174dea6c2f679a44ea6e8",
-      "bytes": 19864
+      "sha256": "1f890b8e685f1c5772f98a8161328405c385764310fc46b773564391125a8c17",
+      "bytes": 20277
     },
     {
       "path": "docs/WBS.md",
@@ -472,8 +473,8 @@
     },
     {
       "path": "scripts/check-windows-arm64-release.py",
-      "sha256": "865b19d20551b1b5d5030b174afaebf8773fa4e9948bb1db2a00301899e4c245",
-      "bytes": 9341
+      "sha256": "755bd8b4b6897befe73bfe1b72782fc65f47fe4a214e95b912539a9aeb0dadc3",
+      "bytes": 10460
     },
     {
       "path": "scripts/check-windows-fixture.ps1",
