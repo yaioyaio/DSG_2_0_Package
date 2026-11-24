@@ -216,6 +216,8 @@ pub enum RegistryError {
     GcApprovalInvalid,
     #[error("정리 계획의 현재 상태에서는 이 작업을 할 수 없습니다")]
     GcStateConflict,
+    #[error("같은 Docker 대상에 확인이 끝나지 않은 적용 의도가 있습니다")]
+    DockerGcRecoveryPending,
     #[error("정리 승인 유효 기간이 지원되는 범위를 벗어났습니다")]
     InvalidGcApprovalTtl,
     #[error("적용 바이트 수를 기록할 수 없습니다")]
@@ -662,6 +664,33 @@ impl Registry {
         payload: &Value,
         ttl: Duration,
     ) -> Result<StoredPlan, RegistryError> {
+        self.save_gc_plan(project_id, policy_digest, payload, ttl, GcPurpose::File)
+    }
+
+    pub(crate) fn save_managed_docker_gc_plan(
+        &mut self,
+        project_id: i64,
+        policy_digest: &str,
+        payload: &Value,
+        ttl: Duration,
+    ) -> Result<StoredPlan, RegistryError> {
+        self.save_gc_plan(
+            project_id,
+            policy_digest,
+            payload,
+            ttl,
+            GcPurpose::ManagedDocker,
+        )
+    }
+
+    fn save_gc_plan(
+        &mut self,
+        project_id: i64,
+        policy_digest: &str,
+        payload: &Value,
+        ttl: Duration,
+        purpose: GcPurpose,
+    ) -> Result<StoredPlan, RegistryError> {
         if policy_digest.len() != 64 || !policy_digest.bytes().all(|byte| byte.is_ascii_hexdigit())
         {
             return Err(RegistryError::InvalidPolicyDigest);
@@ -691,6 +720,9 @@ impl Registry {
         )?;
         if !project_exists {
             return Err(RegistryError::ProjectNotFound);
+        }
+        if purpose == GcPurpose::ManagedDocker {
+            require_docker_gc_target_idle(&tx, payload)?;
         }
         tx.execute(
             "INSERT INTO gc_plan (project_id, policy_digest, payload_json, created_at, expires_at)
@@ -893,14 +925,11 @@ impl Registry {
         if plan.status != "planned" {
             return Err(RegistryError::GcStateConflict);
         }
-        require_gc_subject(
-            &tx,
-            project_id,
-            &plan.payload()?,
-            relative,
-            identity,
-            purpose,
-        )?;
+        let payload = plan.payload()?;
+        require_gc_subject(&tx, project_id, &payload, relative, identity, purpose)?;
+        if purpose == GcPurpose::ManagedDocker {
+            require_docker_gc_target_idle(&tx, &payload)?;
+        }
         let duplicate_token: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM gc_application WHERE token_digest = ?1)",
             [&token_digest],
@@ -1021,6 +1050,9 @@ impl Registry {
         )?;
         if identity.is_some_and(|expected| claim.identity != expected) {
             return Err(RegistryError::GcCandidateMismatch);
+        }
+        if purpose == GcPurpose::ManagedDocker {
+            require_docker_gc_target_idle(&tx, &claim.payload)?;
         }
         let claimed = tx.execute(
             "UPDATE gc_application SET claimed_at_ms = ?1
@@ -1934,6 +1966,36 @@ pub(crate) fn managed_docker_identity(payload: &Value) -> Result<String, Registr
         .ok_or(RegistryError::GcCandidateMismatch)?;
     let encoded = serde_json::to_vec(target).map_err(|_| RegistryError::GcCandidateMismatch)?;
     Ok(format!("{:x}", Sha256::digest(encoded)))
+}
+
+fn require_docker_gc_target_idle(
+    connection: &Connection,
+    payload: &Value,
+) -> Result<(), RegistryError> {
+    let binding = &payload[MANAGED_DOCKER_TARGET]["binding"];
+    let [Some(endpoint), Some(kind), Some(id)] =
+        ["endpoint", "kind", "id"].map(|key| binding[key].as_str())
+    else {
+        return Err(RegistryError::GcCandidateMismatch);
+    };
+    // A different project, generation or snapshot cannot settle an earlier intent.
+    let pending: bool = connection.query_row(
+        "SELECT EXISTS (
+            SELECT 1 FROM gc_plan AS plan
+            JOIN gc_application AS application ON application.plan_id = plan.id
+            WHERE plan.status IN ('applying', 'recovery_required')
+              AND application.relative_path = '' AND application.claimed_at_ms IS NOT NULL
+              AND json_extract(plan.payload_json, '$.managed_docker_target.binding.endpoint') = ?1
+              AND json_extract(plan.payload_json, '$.managed_docker_target.binding.kind') = ?2
+              AND json_extract(plan.payload_json, '$.managed_docker_target.binding.id') = ?3
+        )",
+        params![endpoint, kind, id],
+        |row| row.get(0),
+    )?;
+    if pending {
+        return Err(RegistryError::DockerGcRecoveryPending);
+    }
+    Ok(())
 }
 
 fn require_gc_candidate(

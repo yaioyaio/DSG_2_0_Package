@@ -237,18 +237,18 @@ impl Scenario {
     }
 
     fn plan(&mut self) -> i64 {
-        let kind = self.backend.observation.binding.kind;
-        self.backend
-            .service()
-            .plan(
-                &mut self.registry,
-                self.project,
-                POLICY,
-                kind,
-                target_id(kind),
-            )
-            .unwrap()
-            .plan_id
+        self.try_plan().unwrap().plan_id
+    }
+
+    fn try_plan(&mut self) -> Result<StoredPlan, DockerGcError> {
+        let binding = self.backend.observation.binding.clone();
+        self.backend.service().plan(
+            &mut self.registry,
+            self.project,
+            POLICY,
+            binding.kind,
+            &binding.id,
+        )
     }
 
     fn approve(&mut self, plan: i64) -> String {
@@ -633,4 +633,161 @@ fn interruption_recovers_from_bound_receipt_and_missing_receipt_stays_unknown() 
             ["PLAN_SAVED", "GC_APPROVED", "GC_APPLY_INTENT", last]
         );
     }
+}
+
+#[test]
+fn unresolved_intent_blocks_another_plan_until_receipt_settles_it() {
+    let mut scenario = Scenario::new(DockerGcKind::BuildCache);
+    let pending = scenario.plan();
+    let next = scenario.plan();
+    let awaiting_approval = scenario.plan();
+    let approval = scenario.approve(pending);
+    let next_approval = scenario.approve(next);
+    let lease = scenario.lease();
+    scenario.backend.change_after_preflight = true;
+    scenario.backend.interrupt_after_commit = true;
+    scenario.backend.lose_receipt = true;
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        scenario.apply(&lease, pending, &approval)
+    }))
+    .is_err());
+    assert!(scenario.backend.contains(CACHE));
+    scenario.backend.change_after_preflight = false;
+    scenario.backend.interrupt_after_commit = false;
+    scenario.backend.observation.unreferenced = Some(true);
+
+    assert!(matches!(
+        scenario.apply(&lease, next, &next_approval),
+        Err(DockerGcError::Registry(
+            RegistryError::DockerGcRecoveryPending
+        ))
+    ));
+    assert_eq!(
+        scenario.recover(&lease, pending).unwrap().status,
+        GcApplyStatus::RecoveryRequired
+    );
+    assert!(matches!(
+        scenario.apply(&lease, next, &next_approval),
+        Err(DockerGcError::Registry(
+            RegistryError::DockerGcRecoveryPending
+        ))
+    ));
+    assert_eq!(scenario.audit(next), ["PLAN_SAVED", "GC_APPROVED"]);
+    assert_eq!(scenario.backend.attempts, 1);
+    scenario
+        .registry
+        .finish_lease(lease, AuditOutcome::Success, "FIXTURE_LEASE_CLOSED")
+        .unwrap();
+    scenario.registry = Registry::open(&scenario.temp.path().join("state")).unwrap();
+
+    assert!(matches!(
+        scenario.backend.service().approve(
+            &mut scenario.registry,
+            scenario.project,
+            awaiting_approval,
+            POLICY,
+        ),
+        Err(DockerGcError::Registry(
+            RegistryError::DockerGcRecoveryPending
+        ))
+    ));
+    assert_eq!(scenario.audit(awaiting_approval), ["PLAN_SAVED"]);
+    let original = scenario.backend.observation.binding.clone();
+    scenario.backend.observation.binding.generation = hash(b"new generation");
+    scenario.backend.observation.binding.snapshot = hash(b"new snapshot");
+    assert!(matches!(
+        scenario.try_plan(),
+        Err(DockerGcError::Registry(
+            RegistryError::DockerGcRecoveryPending
+        ))
+    ));
+
+    scenario.backend.observation.binding.endpoint = hash(b"other endpoint");
+    assert!(scenario.try_plan().is_ok());
+    scenario.backend.observation.binding.endpoint = original.endpoint.clone();
+    scenario.backend.observation.binding.id = "untouched".into();
+    assert!(scenario.try_plan().is_ok());
+    let mut image = TestBackend::new(
+        &scenario.temp.path().join("image-resources.sqlite3"),
+        scenario.backend.registry_path.clone(),
+        scenario.project,
+        original.owner.clone(),
+        DockerGcKind::Image,
+    );
+    assert!(image
+        .service()
+        .plan(
+            &mut scenario.registry,
+            scenario.project,
+            POLICY,
+            DockerGcKind::Image,
+            IMAGE
+        )
+        .is_ok());
+
+    let file_identity = crate::filesystem::FileIdentity {
+        device: 1,
+        inode: 2,
+    };
+    let file_fingerprint = hash(&serde_json::to_vec(&file_identity).unwrap());
+    scenario
+        .registry
+        .register_gc_output(scenario.project, "build", &file_fingerprint)
+        .unwrap();
+    let file = scenario
+        .registry
+        .save_plan(
+            scenario.project,
+            POLICY,
+            &json!({"dry_run": true, "candidates": [{"relative_path": "build", "identity": file_identity}]}),
+            PLAN_TTL,
+        )
+        .unwrap();
+    scenario
+        .registry
+        .approve_gc(
+            scenario.project,
+            file.plan_id,
+            "build",
+            POLICY,
+            &file_fingerprint,
+            OTHER_POLICY,
+            APPROVAL_TTL,
+        )
+        .unwrap();
+    let lease = scenario.lease();
+    scenario
+        .registry
+        .claim_gc(&lease, file.plan_id, POLICY, OTHER_POLICY)
+        .unwrap();
+    scenario
+        .registry
+        .finish_gc(&lease, file.plan_id, GcApplyStatus::Preserved, 0)
+        .unwrap();
+
+    let payload = scenario
+        .registry
+        .read_gc_plan(scenario.project, pending)
+        .unwrap();
+    let intent = Intent::load(&payload, scenario.project, &original.owner).unwrap();
+    scenario
+        .backend
+        .state
+        .execute(
+            "INSERT INTO receipts (operation, intent, bytes) VALUES (?1, ?2, NULL)",
+            params![intent.operation, serde_json::to_string(&intent).unwrap()],
+        )
+        .unwrap();
+    assert_eq!(
+        scenario.recover(&lease, pending).unwrap().status,
+        GcApplyStatus::Preserved
+    );
+    assert_eq!(scenario.backend.attempts, 1);
+    scenario.backend.observation.binding = original;
+    scenario.backend.lose_receipt = false;
+    assert_eq!(
+        scenario.apply(&lease, next, &next_approval).unwrap().status,
+        GcApplyStatus::Applied
+    );
+    assert_eq!(scenario.backend.attempts, 2);
 }
