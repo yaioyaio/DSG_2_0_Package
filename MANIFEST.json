@@ -138,13 +138,13 @@
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "85f693fa695696dd47372ee85fab2fa9bd9aeecaa3cedf6c5e2da3aef6172673",
-      "bytes": 21519
+      "sha256": "054a63d3400c4a67b0fbb06aae3bb640c605f9653ba22f214c0a13d1221e5185",
+      "bytes": 21761
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "1786e5167df33d3ea8dd78a94e7c47a8a07c7817027dd0d1362a70f54e03ff28",
-      "bytes": 32175
+      "sha256": "f41c6441bb4f7af71f5027e45d6866e4c458282dbd7e0a780643124a5c6f1a0c",
+      "bytes": 32581
     },
     {
       "path": "docs/WBS.md",
