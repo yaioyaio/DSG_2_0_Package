@@ -106,7 +106,7 @@ fn open_socket(path: &Path) -> Result<File> {
     open_protected(path, true)
 }
 
-fn open_protected(path: &Path, private_parent: bool) -> Result<File> {
+pub(crate) fn open_protected(path: &Path, private_parent: bool) -> Result<File> {
     if !path.is_absolute()
         || path.as_os_str().as_bytes().len() > MAX_SOCKET_PATH_BYTES
         || path.as_os_str() != path.components().collect::<PathBuf>().as_os_str()

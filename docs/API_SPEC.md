@@ -51,6 +51,8 @@ Linux ARM64의 `dsg --json docker-controller-admission --policy <절대 경로>/
 
 디스패치에 전달하는 값은 보호 정책 지문, 제어기·엔진·요청 역할의 세대, 정확한 요청에 묶인다. 후속 어댑터는 같은 배타 변경 경계에서 승인과 의도를 재검증하고, 정책·역할 교체 뒤에도 미확정 의도의 잠금을 같은 엔진에 유지해야 한다. 공개 CLI와 `dsgd`는 이 진입점에 운영 쓰기 요청을 전달하지 않는다. [코어 구현](../rust-scaffold/crates/dsg-core/src/docker_control_local/admission/write_request.rs)
 
+`DockerGcDispatch`는 배타 변경 경계를 소유한 제어기에 연결하는 코어 어댑터다. 커널 검증을 통과한 요청, root의 보호된 등록부, 같은 프로젝트의 활성 lease를 요구한다. 배타 슬롯 아래 대상 상태, 현재 프로젝트 정책, 네 배포 피어의 세대를 확인한다. 보호된 승인 행을 한 번 소비하면서 적용 의도와 감사를 커밋한 뒤에만 백엔드에 대상 변경을 요청한다. 복구는 같은 프로젝트의 전체 의도 ID와 안정적인 엔진 자원 범위를 대조하고 영수증만 조회한다. 활성 정책·프로세스 세대가 바뀌어도 이전 의도는 같은 자원 범위에 남는다. 실제 삭제는 소유권과 영속 영수증을 갖춘 전용 백엔드를 조립한 운영 제어기만 연결할 수 있다. [어댑터 구현](../rust-scaffold/crates/dsg-core/src/docker_gc_apply/dispatch.rs)
+
 Unix 피어 자격증명, pidfd, 프로세스 시작 시각, 실행 파일 식별자와 해시, 소켓 식별자를 대조하고 읽기 프로브는 제어기에만 보낸다. 성공 시 `status=verified`, 제어기와 엔진의 `endpoint`·`generation`, `role_separation=verified`, `engine_boundary=protected_unix_socket`과 종료 코드 0을 반환한다. 불일치는 `status=unknown`, `failure`와 종료 코드 5를 반환한다. 두 경우 모두 `mutation_authorized=false`, `apply_gate=preserve_unverified_control`을 유지한다. 운영 쓰기에는 제어기 배포 출처·신뢰, 프로젝트 자원 출처·소유권, 요청별 승인, 배타 변경 경계와 공개 운영 어댑터 검증이 필요하다. [구현](../rust-scaffold/crates/dsg-core/src/docker_control_local/admission.rs)
 
 ### 관리형 실행과 Compose 재사용
