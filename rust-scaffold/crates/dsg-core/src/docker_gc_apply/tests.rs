@@ -835,6 +835,172 @@ fn abrupt_worker_exit_reopens_durable_intent_and_reclaims_lease() {
 }
 
 #[test]
+fn approval_and_apply_intent_replay_atomically_from_wal() {
+    use std::fs;
+    use std::process::{Command, Stdio};
+    use std::thread;
+    use std::time::Instant;
+
+    const WAL_HEADER: usize = 32;
+    const FRAME_HEADER: usize = 24;
+
+    let mut scenario = Scenario::new(DockerGcKind::BuildCache);
+    let plan = scenario.plan();
+    let approval = scenario.approve(plan);
+    let competing = scenario.plan();
+    let competing_approval = scenario.approve(competing);
+    let mut exited = Command::new(std::env::current_exe().unwrap())
+        .arg("--list")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let previous_pid = exited.id();
+    assert!(exited.wait().unwrap().success());
+    let lease = scenario
+        .registry
+        .acquire_lease(scenario.project, POLICY, Duration::from_secs(1), |_| false)
+        .unwrap();
+    scenario
+        .registry
+        .attach_lease_process(&lease, previous_pid)
+        .unwrap();
+    let digest = hash(approval.as_bytes());
+    let approved = scenario
+        .registry
+        .check_managed_docker_gc_approval(&lease, plan, POLICY, &digest)
+        .unwrap();
+
+    let checkpoint: (i64, i64, i64) = scenario
+        .ledger()
+        .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })
+        .unwrap();
+    assert_eq!(checkpoint, (0, 0, 0));
+    let database = &scenario.backend.registry_path;
+    let baseline = fs::read(database).unwrap();
+    scenario
+        .registry
+        .claim_managed_docker_gc(&lease, plan, POLICY, &digest, &approved.identity)
+        .unwrap();
+    assert!(fs::read(database).unwrap() == baseline);
+    let wal = fs::read(database.with_file_name("registry.sqlite3-wal")).unwrap();
+
+    // SQLite stores the page size in the WAL header and a nonzero database
+    // size in the frame that commits a transaction. The earlier frames here
+    // belong to that same transaction and must not be recovered on their own.
+    let page_size = u32::from_be_bytes(wal[8..12].try_into().unwrap()) as usize;
+    assert!(page_size.is_power_of_two() && (512..=65_536).contains(&page_size));
+    let mut frames = wal[WAL_HEADER..].chunks_exact(FRAME_HEADER + page_size);
+    assert!(frames.remainder().is_empty());
+    assert!(frames.len() > 1);
+    let commit = frames.next_back().unwrap();
+    assert_ne!(commit[4..8], [0; 4]);
+    assert!(frames.all(|frame| frame[4..8] == [0; 4]));
+
+    // Replay synthetic disk images with the WAL absent, its commit frame cut
+    // short, or the complete transaction present. This models lost bytes in
+    // the log without relying on an actual power interruption or disk cache.
+    for (case, replay) in [
+        ("missing", &wal[..0]),
+        ("torn", &wal[..wal.len() - page_size / 2]),
+        ("complete", wal.as_slice()),
+    ] {
+        let replica = tempfile::tempdir_in(scenario.temp.path()).unwrap();
+        let database = replica.path().join("registry.sqlite3");
+        fs::write(&database, &baseline).unwrap();
+        if !replay.is_empty() {
+            fs::write(replica.path().join("registry.sqlite3-wal"), replay).unwrap();
+        }
+        let mut registry = Registry::open(replica.path()).unwrap();
+        // The replica must reacquire its own lease after the prior supervisor
+        // exits. A lease from the original registry cannot authorize recovery.
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let lease = loop {
+            match registry.acquire_lease(scenario.project, POLICY, Duration::from_secs(30), |pid| {
+                pid == previous_pid
+            }) {
+                Ok(lease) => break lease,
+                Err(RegistryError::LeaseConflict) if Instant::now() < deadline => {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) => panic!("{case} lease recovery failed: {error}"),
+            }
+        };
+
+        let ledger = Connection::open(&database).unwrap();
+        let integrity: String = ledger
+            .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(integrity, "ok", "{case}");
+        let events = || {
+            ledger
+                .prepare("SELECT reason_code FROM audit_event WHERE plan_id = ?1 ORDER BY id")
+                .unwrap()
+                .query_map([plan], |row| row.get::<_, String>(0))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        let claimed: bool = ledger
+            .query_row(
+                "SELECT claimed_at_ms IS NOT NULL FROM gc_application WHERE plan_id = ?1",
+                [plan],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(claimed, case == "complete", "{case}");
+
+        let mut service = scenario.backend.service();
+        if claimed {
+            assert_eq!(events(), ["PLAN_SAVED", "GC_APPROVED", "GC_APPLY_INTENT"]);
+            assert!(registry.pending_managed_docker_gc(&lease, plan).is_ok());
+            assert!(service
+                .apply(&mut registry, &lease, plan, POLICY, &approval)
+                .is_err());
+            assert!(matches!(
+                service.apply(
+                    &mut registry,
+                    &lease,
+                    competing,
+                    POLICY,
+                    &competing_approval
+                ),
+                Err(DockerGcError::Registry(
+                    RegistryError::DockerGcRecoveryPending
+                ))
+            ));
+            assert_eq!(
+                service.recover(&mut registry, &lease, plan).unwrap(),
+                DockerGcResult {
+                    status: GcApplyStatus::RecoveryRequired,
+                    reclaimed_bytes: 0,
+                },
+            );
+            assert_eq!(
+                events(),
+                [
+                    "PLAN_SAVED",
+                    "GC_APPROVED",
+                    "GC_APPLY_INTENT",
+                    "GC_RECOVERY_REQUIRED"
+                ]
+            );
+        } else {
+            assert_eq!(events(), ["PLAN_SAVED", "GC_APPROVED"], "{case}");
+            assert!(registry
+                .check_managed_docker_gc_approval(&lease, plan, POLICY, &digest)
+                .is_ok());
+            assert!(service.recover(&mut registry, &lease, plan).is_err());
+        }
+    }
+    assert_eq!(scenario.backend.attempts, 0);
+    assert!(scenario.backend.contains(CACHE));
+    assert!(scenario.backend.contains("untouched"));
+}
+
+#[test]
 fn unresolved_intent_blocks_another_plan_until_receipt_settles_it() {
     let mut scenario = Scenario::new(DockerGcKind::BuildCache);
     let pending = scenario.plan();

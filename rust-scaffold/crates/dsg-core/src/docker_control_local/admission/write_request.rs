@@ -86,10 +86,13 @@ impl WriteRequest {
 /// Authority for one request in the current dispatch, issued only by the local admission gate.
 pub struct AuthorizedWriteRequest<'a> {
     request: &'a WriteRequest,
-    policy_digest: &'a str,
+    policy: &'a ProtectedPolicy<'a>,
+    peers: &'a PinnedPeers<'a>,
+    sender: &'a Sender,
     controller: &'a ControllerEvidence,
     engine: &'a ControllerEvidence,
-    role: &'a ControllerEvidence,
+    approver: &'a ControllerEvidence,
+    executor: &'a ControllerEvidence,
 }
 
 impl AuthorizedWriteRequest<'_> {
@@ -98,7 +101,7 @@ impl AuthorizedWriteRequest<'_> {
     }
 
     pub fn policy_digest(&self) -> &str {
-        self.policy_digest
+        &self.policy.digest
     }
 
     pub fn controller(&self) -> &ControllerEvidence {
@@ -110,7 +113,27 @@ impl AuthorizedWriteRequest<'_> {
     }
 
     pub fn role(&self) -> &ControllerEvidence {
-        self.role
+        match self.request.role() {
+            Role::Approver => self.approver,
+            Role::Executor => self.executor,
+        }
+    }
+
+    pub(crate) fn approver(&self) -> &ControllerEvidence {
+        self.approver
+    }
+
+    pub(crate) fn executor(&self) -> &ControllerEvidence {
+        self.executor
+    }
+
+    pub(crate) fn check_current(&self) -> Result<()> {
+        let deadline = Instant::now() + ADMISSION_TIMEOUT;
+        self.peers.check_current(deadline)?;
+        self.policy.check_current()?;
+        check_alive(&self.sender.process)?;
+        remaining(deadline)?;
+        Ok(())
     }
 }
 
@@ -166,13 +189,14 @@ pub fn with_authorized_write_request<T>(
     let peers = PinnedPeers::open(&policy.value, deadline)?;
     // The pinned path and the actual upstream socket must identify the same engine process.
     peers.engine.connect()?;
-    let role_peer = match role {
-        Role::Approver => &peers.approver,
-        Role::Executor => &peers.executor,
-    };
     let controller = peers.controller.evidence(b"controller", &policy.boot_id);
     let engine = peers.engine.evidence(b"engine", &policy.boot_id);
-    let role = role_peer.evidence(role.name(), &policy.boot_id);
+    let approver = peers
+        .approver
+        .evidence(Role::Approver.name(), &policy.boot_id);
+    let executor = peers
+        .executor
+        .evidence(Role::Executor.name(), &policy.boot_id);
 
     peers.check_current(deadline)?;
     policy.check_current()?;
@@ -181,10 +205,13 @@ pub fn with_authorized_write_request<T>(
     Ok(dispatch(
         AuthorizedWriteRequest {
             request: &request,
-            policy_digest: &policy.digest,
+            policy: &policy,
+            peers: &peers,
+            sender: &sender,
             controller: &controller,
             engine: &engine,
-            role: &role,
+            approver: &approver,
+            executor: &executor,
         },
         socket.as_fd(),
     ))
