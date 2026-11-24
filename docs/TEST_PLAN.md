@@ -73,6 +73,12 @@ macOS는 샌드박스에서 원본 소켓 접근이 거부되고 브로커 조�
 
 macOS에서 `DSG_TEST_WEBKIT=1 sh scripts/test-rust.sh`는 임시 WebKit 뷰를 띄워 1060px·390px 레이아웃, 스타일 적용, 실측 정리 후보와 Docker 미확인 상태를 확인한다. 사용자 브라우저 프로필과 저장소는 사용 범위에서 제외한다.
 
+배포 후보는 임시 경로에 이전 실물을 설치하고 업그레이드한 뒤 진단 결과, 매니페스트와 설치 파일의 SHA-256, `dsg --version`과 `dsgd --help`, 대시보드, 제거 후 사용자 시험 파일 보존을 대조한다. macOS에서는 `0.1.0` 실물로 롤백한 뒤 현재 후보로 재업그레이드하는 경로도 확인한다.
+
+macOS 설치본의 Docker 대시보드는 `scripts/check-dashboard.py <설치된-dsg>`로 확인한다. `DSG_TEST_DOCKER_CONTEXT=dockerguard-test`를 지정하고, `DSG_TEST_RENDERER`에는 `scripts/check-dashboard-rendering.swift`를 빌드한 시험 실행 파일의 경로를 지정한다. 독립 Docker CLI 조회와 제품 스캔으로 확인한 컨테이너·고유 이미지 ID·명명 볼륨·중복 그룹 수를 `DSG_TEST_DASHBOARD_COUNTS`의 `container_count`, `image_count`, `volume_count`, `duplicate_groups` JSON 필드로 전달한다. 시험은 이 수치를 API 및 WebKit 1060px·390px 화면과 대조한다. [현재 후보 검증](HANDOFF.md#8단계-현재-후보-제품화-검증)
+
+Windows ARM64의 로컬 NTFS에서는 `python.exe -B scripts/check-windows-arm64-release.py --legacy-arm64 <이전-ARM64-아카이브> --current-arm64 <현재-ARM64-아카이브> --x64 <현재-x64-아카이브>`를 실행한다. 각 아카이브 옆에 대응하는 `.sha256` 파일을 두고 시험기와 같은 디렉터리에 `release-package.py`와 `check-dashboard.py`를 둔다. 시험은 ARM64 수명 주기와 x64 바이너리의 에뮬레이션 실행·대시보드 HTTP를 확인한다. x64 패키지의 새 설치와 기존 ARM64 설치에서의 업그레이드가 거절되고 설치 파일과 사용자 파일이 보존돼야 한다. Windows x64 호스트에서의 네이티브 설치 수명 주기는 별도로 검증한다.
+
 `python3 -B scripts/check-release-signature.py --openssl <절대경로>`는 임시 Ed25519 키로 아카이브와 매니페스트의 서명을 검증한다. 키 핀 불일치, 서명 누락·변조, 패키지 파일 변조를 거부해야 한다. macOS·Linux에서는 불완전한 서명 옵션을 사용한 설치의 변경 0건, 틀린 서명의 업그레이드에서 기존 버전 보존, 올바른 서명의 설치·업그레이드 및 제거를 추가로 확인한다.
 
 같은 러너에서 서명자에게 전달할 매니페스트가 내부 원문과 일치하는지, 원문 두 개의 서명을 조립한 JSON이 기존 검증기를 통과하는지 확인한다. 승인 해시 불일치, 잘못된 서명 파일 또는 길이, 이미 존재하는 다른 출력은 거부해야 한다. macOS 게시자 핀을 요청하면 macOS 대상과 두 실행 파일의 Developer ID 서명이 필요하며, 검증 실패 시 설치 경로가 변경되지 않아야 한다. 실제 공인 서명·공증의 성공 검증에는 DSG용 승인된 게시자와 서명 환경이 필요하다.
@@ -90,7 +96,7 @@ macOS에서 `DSG_TEST_WEBKIT=1 sh scripts/test-rust.sh`는 임시 WebKit 뷰를 
 
 WBS마다 구현과 검증 기록을 [작업 대조표](TASK.md)에서 대조한다. 성공 여부는 실행한 OS, 후보 버전, 실환경·시험 대역, 입출력 범위를 근거로 판정한다. 교차 링크는 컴파일·링크 증거이며, 합성 Docker 파이프는 해당 OS 서비스와 파이프 권한의 증거다. 대상 환경에서 실행하지 못한 항목은 별도의 검증으로 남긴다.
 
-- 현재 `681be1e`의 Windows ARM64 패키지는 기존 Parallels의 로컬 NTFS에서 실제 이전 후보를 새 후보로 교체하고 설치 파일별 해시, 진단·대시보드·제거를 검증했다. 현재 Linux ARM64 `ada5a09` 패키지는 기존 Ubuntu Parallels에서 이전 `0.1.0` 설치 후 `0.1.1-rc.1`로 업그레이드하고, 두 바이너리 실행·대시보드 HTTP·제거와 관리형 타임아웃 124 및 lease 재획득을 확인했다. Ubuntu 게스트에서 제거 후 사용자 시험 파일을 보존했다. Windows x64 네이티브 환경 실측은 남아 있다. [패키지 근거](RELEASE.md) · [Ubuntu 실측](HANDOFF.md#명명-볼륨과-ubuntu-parallels-실측)
+- Rust 트리 `ada5a09`의 `0.1.1-rc.1` 후보는 macOS ARM64와 기존 Parallels Windows ARM64에서 설치 수명 주기와 대시보드를 검증했다. Linux ARM64 후보는 앞선 Ubuntu Parallels 시험에서 이전 `0.1.0` 실물 업그레이드, 두 바이너리 실행, 대시보드 HTTP, 제거 후 사용자 시험 파일 보존, 관리형 타임아웃 124와 lease 재획득을 통과했다. Windows x64 후보는 ARM64 게스트 에뮬레이션과 설치기 대상 판정을 검증했다. 다음 시험은 Windows x64 호스트에서 이전 `0.1.0-rc.3` 실물 설치, 현재 후보 업그레이드, 진단·대시보드·제거 순이다. [패키지 근거](RELEASE.md) · [macOS·Windows 실측](HANDOFF.md#8단계-현재-후보-제품화-검증) · [Ubuntu 실측](HANDOFF.md#별도-buildkit-읽기-전용-실측)
 
 - Docker 내장 빌더 총량·활성 집계, 기본 Buildx 빌더의 상태별 조회, 기존 이미지 보존은 조회·계획 검증에 해당한다. Buildx 상태별 항목은 서로 겹칠 수 있다. WBS 2.3의 별도 BuildKit는 실제 4개를 조회하고 전부 보존했다. 프로젝트 캐시 소유권과 안전한 승인 회수의 증거가 필요하다. 이미지 적용 검증에는 승인된 적용 경로와 단독 제어를 확인한 격리 엔진이 필요하다.
 - macOS에서 격리 엔진·Buildx·Compose 이미지 옵션을 포함한 `sh scripts/test-rust.sh`는 종료 코드 0으로 완료됐고 Rust 시험 103개를 통과했다. Compose는 반복 실행 후 동일 ID 1개, 구성·health·실제 이미지·64 KiB `tmpfs` 변경 거절, 일치하는 `tmpfs`의 `unknown/unverified_mount` 판정, 소유 컨테이너 회수를 확인했다. 명명 볼륨 옵션으로 실행한 별도 전체 시험도 종료 코드 0과 Rust 시험 103개 통과를 확인했다. 볼륨 A의 재사용, B로 교체한 뒤 A 기대값의 거절과 B 기대값의 통과, 소유 컨테이너 회수 및 외부 볼륨 두 개 보존을 확인했다. 종료 후 인벤토리는 컨테이너 7개, 이미지 7개, 볼륨 2개, 중복 0건이었다. pnpm 시험에는 일반 프로젝트 스크립트와 실제 Next.js 앱 빌드·루프백 응답을 포함한다. [명명 볼륨 실측](HANDOFF.md#명명-볼륨과-ubuntu-parallels-실측)

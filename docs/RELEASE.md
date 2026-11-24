@@ -4,16 +4,18 @@
 
 | 대상 | 검증한 후보 | 검증 결과 |
 |---|---|---|
-| macOS ARM64 | `0.1.1-rc.1`, Rust 트리 `681be1e` | 독립 빌드 두 번의 아카이브 SHA-256 일치, 로컬 서명, 실제 `0.1.0`에서의 업그레이드·실행·제거 확인 |
+| macOS ARM64 | 최신 `0.1.1-rc.1`, Rust 트리 `ada5a09` | 독립 빌드 두 번의 아카이브 SHA-256 일치. 실제 `0.1.0`에서 업그레이드·롤백·재업그레이드·제거, 설치본 진단과 대시보드 API·WebKit 확인 |
 | Linux ARM64 musl | 최신 `0.1.1-rc.1`, Rust 트리 `ada5a09` | 기존 Ubuntu Parallels에서 이전 `0.1.0` 실물을 업그레이드했다. 두 실행 파일, 관리형 타임아웃 124와 lease 재획득, 대시보드 HTTP, 제거와 시험 파일 보존 및 별도 BuildKit 조회를 통과했다. `681be1e` 후보는 격리 Linux 엔진과 기존 Ubuntu VM에서도 검증했다. |
-| Windows ARM64 | 현재 `0.1.1-rc.1`, Rust 트리 `681be1e` | 기존 Parallels의 로컬 NTFS에서 이전 `35a30aa` 실물 설치와 현재 후보로 교체, 두 실행 파일의 해시·실행, 대시보드 HTTP·제거 확인. 이전 후보의 합성 상류 SCM 시험은 별도 검증 기록에 있다. |
-| Windows x64 | 이전 `0.1.0-rc.3` | 교차 링크·PE·아카이브 검증 통과. x64 호스트에서 설치·업그레이드·제거 실측 대기 |
+| Windows ARM64 | 최신 `0.1.1-rc.1`, Rust 트리 `ada5a09` | 기존 Parallels의 로컬 NTFS에서 이전 `681be1e` 실물 설치와 교체, 설치 파일의 해시·실행, 대시보드 HTTP·제거와 사용자 파일 보존 확인 |
+| Windows x64 | 최신 `0.1.1-rc.1`, Rust 트리 `ada5a09` | 교차 링크·PE·아카이브 검증과 ARM64 게스트의 x64 에뮬레이션 실행·대시보드 HTTP 확인. ARM64에서 x64 패키지 설치·업그레이드는 거절됐다. x64 호스트의 설치 수명 주기 실측 대기 |
 
-Rust 소스 트리 `681be1e`의 최신 macOS ARM64 검증 후보는 `dist/dsg-macos-qualification-681be1e/`에 있다. 이 후보는 독립 빌드 두 번의 아카이브 SHA-256 일치, 이전 `0.1.0`에서의 실제 업그레이드·제거, 격리 Docker 조회와 두 화면 폭의 WebKit 검증을 통과했다. 대상·소스·해시는 같은 디렉터리의 `QUALIFICATION.json`에 기록했다. [검증 기록](HANDOFF.md#dsg-0608-현재-소스의-macos-자격-검증)
+현재 후보의 Rust 소스 트리는 `ada5a09f9d59e00b8c2aa70a5143464d01450f2c`다. 아래 후보별 디렉터리에 아카이브, SHA-256 파일과 `QUALIFICATION.json` 검증 요약을 보존한다.
+
+macOS ARM64 후보는 `dist/dsg-macos-qualification-ada5a09/`에 있다. 두 독립 빌드에서 SHA-256 `a367fc58fb16bf209dd4ec8259d83a0877de89a2eca33e9b2d32e626ce682730`이 일치했다. 설치본의 대시보드 API와 WebKit 1060px·390px 화면은 격리 Docker의 컨테이너 7개, 고유 이미지 ID 8개, 명명 볼륨 2개, 중복 그룹 0개와 일치했다. 기존 `681be1e` 후보와 당시 검증 근거는 `dist/dsg-macos-qualification-681be1e/`에 보존한다. [현재 후보 검증](HANDOFF.md#8단계-현재-후보-제품화-검증) · [이전 후보 검증](HANDOFF.md#dsg-0608-현재-소스의-macos-자격-검증)
 
 Windows ARM64 로컬 NTFS의 파일시스템 시험 9개는 WBS 1.3의 별도 실측 기록이다. 패키지 수명 주기와 비교할 때는 위 표의 후보·소스 범위를 적용한다. [Windows NTFS 검증](HANDOFF.md#dsg-02-windows-ntfs-파일-식별-보완)
 
-현재 Windows ARM64 후보와 SHA-256 파일은 `dist/dsg-windows-arm64-qualification-681be1e/`에 보존한다. 동일한 교차 링크 입력으로 두 번 패키징해 같은 아카이브를 얻었다. 아카이브 SHA-256은 `1f3c9cb3370522a07121ec23d0520fc20ddf1df3fd2968afc96b92d2e0d3f23f`다. 이전 후보와 버전 문자열이 같으므로 네이티브 시험에서는 각 아카이브·실행 파일 해시, 설치 경로 교체, 이전 릴리스 회수로 업그레이드를 확인했다. [Windows 네이티브 시험](HANDOFF.md#macos-및-기존-parallels-잔여-수용-기준-재검증)
+현재 Windows ARM64 후보는 `dist/dsg-windows-arm64-qualification-ada5a09/`에 보존하며, 아카이브 SHA-256은 `19ee6712ddbcfa0e7bc1f1da59ce39a4e5cad613f3a14fec4d6371d73dea6596`이다. 현재 Windows x64 후보는 `dist/dsg-windows-x64-qualification-ada5a09/`에 보존하며, 아카이브 SHA-256은 `667bd3ab4979f571c0b2e5293434026e0735786723f099e1f0a8333255b80470`이다. 두 대상 각각 동일한 교차 링크 입력으로 두 번 패키징한 아카이브의 해시가 일치했다. Windows ARM64의 이전 `681be1e` 후보와 현재 후보는 버전 문자열이 같으므로 아카이브·실행 파일의 해시, 설치 경로 교체와 이전 릴리스 회수로 업그레이드를 확인했다. 이전 ARM64 `681be1e` 후보와 x64 `0.1.0-rc.3` 실물도 보존한다. [현재 Windows 실측](HANDOFF.md#8단계-현재-후보-제품화-검증) · [이전 ARM64 실측](HANDOFF.md#macos-및-기존-parallels-잔여-수용-기준-재검증)
 
 기존 Linux ARM64 후보와 SHA-256 파일은 `dist/dsg-linux-arm64-qualification-681be1e/`에 보존한다. 두 정적 musl ELF 바이너리로 두 번 패키징해 SHA-256 `4847b388b8d2d97bb2e8f44dfe364d5f9c5cda0eb563f2fa862fb657fbf03e65`가 일치했다. 읽기 전용 Linux ARM64 시험 컨테이너와 기존 Ubuntu Parallels에서 같은 후보를 검증했다. Ubuntu 게스트는 표준 입력으로 전달한 시험 코드와 아카이브의 SHA-256을 각각 대조한 뒤 설치 수명 주기와 관리형 실행을 확인했다. 게스트 시험 전용 임시 자료를 회수하고 일시 중단 상태로 복귀했으며 VM 설정 변경은 없었다. [Ubuntu Parallels 실측](HANDOFF.md#명명-볼륨과-ubuntu-parallels-실측)
 
@@ -26,16 +28,10 @@ Windows ARM64 로컬 NTFS의 파일시스템 시험 9개는 WBS 1.3의 별도 �
 macOS 후보는 `scripts/build-macos-release.py`로 임시 빌드 대상을 사용해 만든다. 빌드 작업은 한 개씩 실행하고 Cargo 의존성은 lock 파일과 로컬 캐시를 사용한다. CLI의 컴파일 버전과 지정한 아카이브 버전이 일치해야 하며 아카이브와 SHA-256 파일은 새 이름을 사용한다.
 
 ```sh
-python3 -B scripts/build-macos-release.py --version 0.1.1-rc.1 \
-  --output dist/dsg-0.1.1-rc.1-aarch64-apple-darwin.tar.gz
-```
-
-```sh
-cargo build --manifest-path rust-scaffold/Cargo.toml --bins --release --locked --offline --jobs 1
 mkdir -p dist
-python3 -B scripts/release-package.py build --bin-dir rust-scaffold/target/release \
-  --target aarch64-apple-darwin --version 0.1.0 \
-  --output dist/dsg-0.1.0-aarch64-apple-darwin.tar.gz --adhoc
+DSG_MACOS_BUILD_DIR=$(mktemp -d dist/dsg-macos-local.XXXXXXXX)
+python3 -B scripts/build-macos-release.py --version 0.1.1-rc.1 \
+  --output "$DSG_MACOS_BUILD_DIR/dsg-0.1.1-rc.1-aarch64-apple-darwin.tar.gz"
 ```
 
 ## 설치와 롤백
