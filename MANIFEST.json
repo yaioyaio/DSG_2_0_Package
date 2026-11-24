@@ -12,7 +12,8 @@
     "release_packages": "macOS ARM64 0.1.1-rc.1: two clean builds matched archive SHA-256; upgrade from 0.1.0, runtime, removal, and ad-hoc signature verification passed.",
     "windows_qualification": "Windows ARM64 0.1.1-rc.1 passed Parallels native package, dashboard and SCM with assigned fixture pipe. Guest restored suspended. Windows x64 native and live Windows Docker remain separate.",
     "release_signature": "macOS ARM64 offline signer handoff, exact archive and manifest verification, rejected responses, publisher-gated local package rejection, and package lifecycle passed. Official signer qualification remains separate.",
-    "build_providers": "Cargo, Node, pnpm, Gradle, uv, Go and Playwright ran on macOS. Playwright retained success and failure traces, opt-in TTL reclaimed one expired success and preserved expected failure."
+    "build_providers": "Cargo, Node, pnpm, Gradle, uv, Go and Playwright ran on macOS. Playwright retained success and failure traces, opt-in TTL reclaimed one expired success and preserved expected failure.",
+    "documentation_traceability": "WBS 14 rows, DSG 8 stages and 13 unchanged requirements reconciled. macOS Python 14 and Rust 98 tests passed, including isolated Docker reads and WebKit dashboard comparison; four preserved release candidates matched their inventories."
   },
   "files": [
     {
@@ -42,8 +43,8 @@
     },
     {
       "path": "README.md",
-      "sha256": "6c64c362bb9ba4247171b90e490ed3677173b1ba2737e2288882abf8d2f30212",
-      "bytes": 3011
+      "sha256": "68fdf0e5ff807c4664b1033134d155c769677cc76dbf77fa567dcbf0405eceb9",
+      "bytes": 3762
     },
     {
       "path": "artifact/DSG_2_0_Interactive_Artifact.html",
@@ -52,8 +53,8 @@
     },
     {
       "path": "docs/ADR.md",
-      "sha256": "4d372fc8c9458df42879da748ab8a5f9e60e2d00535aa3174606ea6eb0100fa6",
-      "bytes": 968
+      "sha256": "5115beb38afdbe2732fa43ac487843436ac5db3aef9bdfa5192e89ac951f322b",
+      "bytes": 2513
     },
     {
       "path": "docs/AI_AGENT_GUIDE.md",
@@ -82,13 +83,13 @@
     },
     {
       "path": "docs/PLAN.md",
-      "sha256": "0c85f41448a6f72e6a443632dcb1dc8b553375dc83f34fdd903f396c30aa57b5",
-      "bytes": 1196
+      "sha256": "e34e3bd5b62ae3087753283497ad2818537be1845e11c641532b75cf4ad684d9",
+      "bytes": 1614
     },
     {
       "path": "docs/POC_SCOPE.md",
-      "sha256": "7024e0cd044c08adf0f93a186642e65f83e26d4108a1303f72b3bc77a5f394c7",
-      "bytes": 1201
+      "sha256": "6d6acd5cb8dfe4c83fa06af2957ef9f304a7cf8086ab1bfc3e9341388866928e",
+      "bytes": 2287
     },
     {
       "path": "docs/PRD.md",
@@ -107,8 +108,8 @@
     },
     {
       "path": "docs/REQUIREMENTS.md",
-      "sha256": "724d662079feb5eb1a37e931859699aae750ec6a4290313fd687a6b066b2fe9c",
-      "bytes": 2160
+      "sha256": "89f241095af0228d3caf315896b08ce2316ed26296b5e17ee205c190c6dded74",
+      "bytes": 3861
     },
     {
       "path": "docs/SECURITY.md",
@@ -122,18 +123,18 @@
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "7fac701bcbf460f43e869f999101b97457c32fe7756d7271deaf2f8c6c552d62",
-      "bytes": 871
+      "sha256": "b00c564517ac2712589ac12db089922977d86cc852900b1b75e1d1f01ffff248",
+      "bytes": 11847
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "4a9c8a3e1756a492ee56474cf46fd599024ebee8b1081694a10203cd352831f4",
-      "bytes": 9617
+      "sha256": "3a6272984cd5df879edd213ee874e5ff9b03d6a24773479b5094e71950a000cc",
+      "bytes": 10857
     },
     {
       "path": "docs/WBS.md",
-      "sha256": "b2c00fbe2c9d967d248ef19300d27e5e68e0c4b99fadd9cf35fdfc3266a58c60",
-      "bytes": 1110
+      "sha256": "81f782484e9d3934aa2f5d1d9153c0cdc7d4c48be3a4dbcaaa67118ad5e11c3e",
+      "bytes": 1352
     },
     {
       "path": "integrations/README.md",
