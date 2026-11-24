@@ -296,7 +296,10 @@ fn spawn_query(command: &mut Command, deadline: Instant) -> Result<Child, QueryF
 }
 
 #[cfg(unix)]
-fn capture_buildx_output(mut command: Command, deadline: Instant) -> Result<String, QueryFailure> {
+pub(crate) fn capture_buildx_output(
+    mut command: Command,
+    deadline: Instant,
+) -> Result<String, QueryFailure> {
     let mut child = spawn_query(&mut command, deadline)?;
     let pid = child.id() as libc::pid_t;
     let output = child

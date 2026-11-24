@@ -127,6 +127,19 @@ enum Command {
         #[arg(long)]
         context: String,
     },
+    /// 운영자가 지정한 Linux ARM64 로컬 BuildKit 데몬의 캐시 상태를 조회합니다.
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    BuildkitLocalCache {
+        /// 권한 0700인 전용 디렉터리 안의 절대 Unix 소켓 경로
+        #[arg(long)]
+        socket: PathBuf,
+        /// 같은 PID 네임스페이스에 있는 데몬의 프로세스 ID
+        #[arg(long, value_parser = clap::value_parser!(i32).range(1..))]
+        expected_pid: i32,
+        /// 공식 BuildKit v0.35.1 Linux ARM64 buildctl 실행 파일의 절대 경로
+        #[arg(long)]
+        buildctl: PathBuf,
+    },
     /// 지정된 Docker 컨텍스트의 리소스와 중복 후보를 조회합니다.
     DockerScan {
         #[arg(long)]
@@ -309,6 +322,39 @@ fn run(cli: &Cli) -> Result<Output, CliError> {
             exit,
         });
     }
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    if let Command::BuildkitLocalCache {
+        socket,
+        expected_pid,
+        buildctl,
+    } = &cli.command
+    {
+        let result = dsg_core::docker_buildkit_local::observe(socket, *expected_pid, buildctl);
+        let (data, text, exit) = match result {
+            Ok(usage) => {
+                let text = format!(
+                    "로컬 BuildKit 캐시 {}개 · 소유권 미확인으로 보존",
+                    usage.total
+                );
+                (
+                    json!({"status":"complete", "counts":usage, "disposition":"preserve", "reason":"unknown_ownership"}),
+                    text,
+                    0,
+                )
+            }
+            Err(failure) => (
+                json!({"status":"unknown", "counts":null, "disposition":"preserve", "reason":"incomplete_inventory", "failure":failure}),
+                "로컬 BuildKit 캐시 집계 미확인 · 보존".to_owned(),
+                5,
+            ),
+        };
+        return Ok(Output {
+            command: "buildkit-local-cache",
+            data,
+            text,
+            exit,
+        });
+    }
     if let Command::DockerBuildxCache { context } = &cli.command {
         let backend = DockerCli::new(context)
             .map_err(|_| CliError::new("CONFIG_INVALID", "Docker 컨텍스트 이름을 확인하세요"))?;
@@ -356,6 +402,8 @@ fn run(cli: &Cli) -> Result<Output, CliError> {
                 ),
             ))
         }
+        #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+        Command::BuildkitLocalCache { .. } => unreachable!(),
         Command::Hook { .. }
         | Command::Agents { .. }
         | Command::Mcp

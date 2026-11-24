@@ -5,7 +5,7 @@
 | 대상 | 검증한 후보 | 검증 결과 |
 |---|---|---|
 | macOS ARM64 | `0.1.1-rc.1`, Rust 트리 `681be1e` | 독립 빌드 두 번의 아카이브 SHA-256 일치, 로컬 서명, 실제 `0.1.0`에서의 업그레이드·실행·제거 확인 |
-| Linux ARM64 musl | 현재 `0.1.1-rc.1`, Rust 트리 `681be1e` | 기존 격리 Docker 엔진의 Linux ARM64에서 이전 `0.1.0` 실물 설치, 현재 후보 업그레이드, 실행·관리형 타임아웃·대시보드·제거 확인. 앞선 `0.1.0`의 Ubuntu 게스트 자격 검증은 별도 기록에 있다. |
+| Linux ARM64 musl | 최신 `0.1.1-rc.1`, Rust 트리 `ada5a09` | 기존 Ubuntu Parallels에서 이전 `0.1.0` 실물을 업그레이드했다. 두 실행 파일, 관리형 타임아웃 124와 lease 재획득, 대시보드 HTTP, 제거와 시험 파일 보존 및 별도 BuildKit 조회를 통과했다. `681be1e` 후보는 격리 Linux 엔진과 기존 Ubuntu VM에서도 검증했다. |
 | Windows ARM64 | 현재 `0.1.1-rc.1`, Rust 트리 `681be1e` | 기존 Parallels의 로컬 NTFS에서 이전 `35a30aa` 실물 설치와 현재 후보로 교체, 두 실행 파일의 해시·실행, 대시보드 HTTP·제거 확인. 이전 후보의 합성 상류 SCM 시험은 별도 검증 기록에 있다. |
 | Windows x64 | 이전 `0.1.0-rc.3` | 교차 링크·PE·아카이브 검증 통과. x64 호스트에서 설치·업그레이드·제거 실측 대기 |
 
@@ -15,7 +15,9 @@ Windows ARM64 로컬 NTFS의 파일시스템 시험 9개는 WBS 1.3의 별도 �
 
 현재 Windows ARM64 후보와 SHA-256 파일은 `dist/dsg-windows-arm64-qualification-681be1e/`에 보존한다. 동일한 교차 링크 입력으로 두 번 패키징해 같은 아카이브를 얻었다. 아카이브 SHA-256은 `1f3c9cb3370522a07121ec23d0520fc20ddf1df3fd2968afc96b92d2e0d3f23f`다. 이전 후보와 버전 문자열이 같으므로 네이티브 시험에서는 각 아카이브·실행 파일 해시, 설치 경로 교체, 이전 릴리스 회수로 업그레이드를 확인했다. [Windows 네이티브 시험](HANDOFF.md#macos-및-기존-parallels-잔여-수용-기준-재검증)
 
-현재 Linux ARM64 후보와 SHA-256 파일은 `dist/dsg-linux-arm64-qualification-681be1e/`에 보존한다. 두 정적 musl ELF 바이너리로 두 번 패키징해 SHA-256 `4847b388b8d2d97bb2e8f44dfe364d5f9c5cda0eb563f2fa862fb657fbf03e65`가 일치했다. 현재 후보의 시험 환경은 네트워크가 차단된 Linux ARM64 컨테이너다. 기존 Ubuntu Parallels 게스트에 이 후보를 전달해 실행하는 검증은 전송 경로 확보가 선행된다. [플랫폼별 시험 범위](HANDOFF.md#macos-및-기존-parallels-잔여-수용-기준-재검증)
+기존 Linux ARM64 후보와 SHA-256 파일은 `dist/dsg-linux-arm64-qualification-681be1e/`에 보존한다. 두 정적 musl ELF 바이너리로 두 번 패키징해 SHA-256 `4847b388b8d2d97bb2e8f44dfe364d5f9c5cda0eb563f2fa862fb657fbf03e65`가 일치했다. 읽기 전용 Linux ARM64 시험 컨테이너와 기존 Ubuntu Parallels에서 같은 후보를 검증했다. Ubuntu 게스트는 표준 입력으로 전달한 시험 코드와 아카이브의 SHA-256을 각각 대조한 뒤 설치 수명 주기와 관리형 실행을 확인했다. 게스트 시험 전용 임시 자료를 회수하고 일시 중단 상태로 복귀했으며 VM 설정 변경은 없었다. [Ubuntu Parallels 실측](HANDOFF.md#명명-볼륨과-ubuntu-parallels-실측)
+
+최신 Linux ARM64 후보는 `dist/dsg-linux-arm64-qualification-ada5a09/`에 보존한다. 아카이브 SHA-256 `c8bea5e9d37927679a9a57812781a322a0d180abd937487fbadc09f9748202a8`가 동일 입력 두 번의 패키징에서 일치했다. Ubuntu Parallels에서 설치·업그레이드·제거와 제품 명령 `buildkit-local-cache`를 검증했다. [최신 Linux 실측](HANDOFF.md#별도-buildkit-읽기-전용-실측)
 
 ## 패키지 만들기
 
