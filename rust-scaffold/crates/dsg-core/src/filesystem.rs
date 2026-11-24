@@ -7,6 +7,18 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+#[cfg(windows)]
+mod windows;
+#[cfg(windows)]
+use windows::{open_metadata, resolve_inspection_root, ObservedMetadata};
+
+#[cfg(not(windows))]
+type ObservedMetadata = Metadata;
+#[cfg(not(windows))]
+use fs::symlink_metadata as open_metadata;
+#[cfg(not(windows))]
+use resolve_root as resolve_inspection_root;
+
 pub(crate) const MAX_DIRECTORY_DEPTH: usize = 64;
 pub(crate) type EntryProof = HashMap<FileIdentity, [u8; 32]>;
 
@@ -88,7 +100,7 @@ pub fn canonical_root(path: &Path) -> io::Result<PathBuf> {
 }
 
 pub fn scan(root: &Path, policy: &Policy) -> io::Result<ScanReport> {
-    let (root, root_metadata) = resolve_root(root)?;
+    let (root, root_metadata) = resolve_inspection_root(root)?;
     let observed_at_unix = observed_time()?.1;
     let disk_free_bytes = fs2::available_space(&root).ok();
     let disk_total_bytes = fs2::total_space(&root).ok();
@@ -140,7 +152,7 @@ pub fn scan(root: &Path, policy: &Policy) -> io::Result<ScanReport> {
 }
 
 pub fn plan(root: &Path, policy: &Policy) -> io::Result<GcPlan> {
-    let (root, root_metadata) = resolve_root(root)?;
+    let (root, root_metadata) = resolve_inspection_root(root)?;
     let (now, observed_at_unix) = observed_time()?;
     let mut plan = GcPlan {
         project_id: policy.project_id.clone(),
@@ -212,7 +224,7 @@ struct DirectorySnapshot {
 }
 
 impl DirectorySnapshot {
-    fn from_metadata(metadata: &Metadata) -> Result<Self, InspectionIssue> {
+    fn from_metadata(metadata: &ObservedMetadata) -> Result<Self, InspectionIssue> {
         Ok(Self {
             identity: identity(metadata),
             modified: metadata
@@ -224,6 +236,8 @@ impl DirectorySnapshot {
 
 #[derive(Clone)]
 struct Directory {
+    #[cfg(windows)]
+    _pin: std::sync::Arc<fs::File>,
     path: PathBuf,
     snapshot: DirectorySnapshot,
     entry_digest: Option<[u8; 32]>,
@@ -247,18 +261,13 @@ impl Directory {
         self.verified_metadata().map(|_| ())
     }
 
-    fn verified_metadata(&self) -> Result<Metadata, InspectionIssue> {
+    fn verified_metadata(&self) -> Result<ObservedMetadata, InspectionIssue> {
         let metadata =
-            fs::symlink_metadata(&self.path).map_err(|_| InspectionIssue::MetadataUnavailable)?;
+            open_metadata(&self.path).map_err(|_| InspectionIssue::MetadataUnavailable)?;
         if is_link_or_reparse_point(&metadata) {
             return Err(InspectionIssue::LinkOrReparsePoint);
         }
         if !metadata.is_dir() || DirectorySnapshot::from_metadata(&metadata)? != self.snapshot {
-            return Err(InspectionIssue::ChangedDuringInspection);
-        }
-        // Windows does not provide a stable directory identity through std metadata.
-        #[cfg(windows)]
-        if fs::canonicalize(&self.path).ok().as_ref() != Some(&self.path) {
             return Err(InspectionIssue::ChangedDuringInspection);
         }
         Ok(metadata)
@@ -331,7 +340,7 @@ struct OpenDirectory {
 
 fn inspect_output(
     root: &Path,
-    root_metadata: &Metadata,
+    root_metadata: &ObservedMetadata,
     name: &str,
     policy: &Policy,
 ) -> Result<Option<Directory>, InspectionIssue> {
@@ -342,7 +351,7 @@ fn inspect_output(
         return Err(InspectionIssue::ProtectedName);
     }
     let path = root.join(name);
-    let metadata = match fs::symlink_metadata(&path) {
+    let metadata = match open_metadata(&path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(_) => return Err(InspectionIssue::MetadataUnavailable),
@@ -363,6 +372,8 @@ fn inspect_output(
         return Err(InspectionIssue::ProtectedName);
     }
     Ok(Some(Directory {
+        #[cfg(windows)]
+        _pin: metadata.pin.clone(),
         path: canonical,
         snapshot: DirectorySnapshot::from_metadata(&metadata)?,
         entry_digest: None,
@@ -372,7 +383,7 @@ fn inspect_output(
 fn candidate(
     name: &str,
     mut output: Directory,
-    root_metadata: &Metadata,
+    root_metadata: &ObservedMetadata,
     policy: &Policy,
     remaining: &mut usize,
     now: SystemTime,
@@ -468,7 +479,7 @@ impl Inspection {
 
 fn inspect_tree(
     output: &Directory,
-    root_metadata: &Metadata,
+    root_metadata: &ObservedMetadata,
     policy: &Policy,
     remaining: &mut usize,
     mut options: InspectionOptions<'_>,
@@ -587,7 +598,7 @@ enum Child {
 fn inspect_child(
     entry: DirEntry,
     parent: &Directory,
-    root_metadata: &Metadata,
+    root_metadata: &ObservedMetadata,
     policy: &Policy,
     options: &InspectionOptions<'_>,
 ) -> Result<Child, InspectionIssue> {
@@ -596,6 +607,10 @@ fn inspect_child(
     if protected_entry(policy, name) {
         return Err(InspectionIssue::ProtectedName);
     }
+    #[cfg(windows)]
+    let metadata =
+        open_metadata(&entry.path()).map_err(|_| InspectionIssue::MetadataUnavailable)?;
+    #[cfg(not(windows))]
     let metadata = entry
         .metadata()
         .map_err(|_| InspectionIssue::MetadataUnavailable)?;
@@ -624,6 +639,8 @@ fn inspect_child(
     }
     if metadata.is_dir() {
         return Ok(Child::Directory(Directory {
+            #[cfg(windows)]
+            _pin: metadata.pin.clone(),
             path: entry.path(),
             snapshot: DirectorySnapshot::from_metadata(&metadata)?,
             entry_digest: (options.mode == Mode::Candidate)
@@ -636,7 +653,7 @@ fn inspect_child(
 
 pub(crate) fn entry_digest(
     name: &str,
-    metadata: &Metadata,
+    metadata: &ObservedMetadata,
     root: bool,
 ) -> Result<[u8; 32], InspectionIssue> {
     let mut hash = Sha256::new();
@@ -671,6 +688,12 @@ pub(crate) fn entry_digest(
             hash.update(metadata.ctime_nsec().to_le_bytes());
         }
     }
+    #[cfg(windows)]
+    {
+        hash.update(metadata.id.device.to_le_bytes());
+        hash.update(metadata.id.inode.to_le_bytes());
+        hash.update(metadata.links.to_le_bytes());
+    }
     #[cfg(not(unix))]
     let _ = root;
     Ok(hash.finalize().into())
@@ -694,7 +717,12 @@ pub(crate) fn shared_file(metadata: &Metadata) -> bool {
     metadata.nlink() != 1
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn shared_file(metadata: &ObservedMetadata) -> bool {
+    metadata.links != 1
+}
+
+#[cfg(not(any(unix, windows)))]
 fn shared_file(_: &Metadata) -> bool {
     false
 }
@@ -787,8 +815,8 @@ impl MountId {
 }
 
 fn check_boundary(
-    metadata: &Metadata,
-    root_metadata: &Metadata,
+    metadata: &ObservedMetadata,
+    root_metadata: &ObservedMetadata,
     parent_identity: Option<FileIdentity>,
 ) -> Result<(), InspectionIssue> {
     if is_link_or_reparse_point(metadata) {
@@ -816,7 +844,12 @@ pub(crate) fn identity(metadata: &Metadata) -> Option<FileIdentity> {
     })
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn identity(metadata: &ObservedMetadata) -> Option<FileIdentity> {
+    Some(metadata.id)
+}
+
+#[cfg(not(any(unix, windows)))]
 fn identity(_: &Metadata) -> Option<FileIdentity> {
     None
 }
@@ -894,7 +927,7 @@ mod tests {
         assert_eq!(report.candidates[0].relative_path, "dist");
         assert_eq!(report.candidates[0].bytes, 9);
         assert!(report.candidates[0].modified_at_unix > 0);
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         assert!(report.candidates[0].identity.is_some());
         for path in [configured, nested, project_protected, eligible] {
             assert!(path.is_file());
@@ -1047,5 +1080,136 @@ mod tests {
             InspectionIssue::UnsupportedType
         );
         assert!(original.is_file());
+    }
+    #[test]
+    #[cfg(windows)]
+    fn windows_directory_is_pinned_until_inspection_finishes() {
+        let root = tempdir().unwrap();
+        let file = artifact(root.path(), "build/report.txt");
+        let (path, root_metadata) = resolve_inspection_root(root.path()).unwrap();
+        let policy = policy(&["build"]);
+        let directory = inspect_output(&path, &root_metadata, "build", &policy)
+            .unwrap()
+            .unwrap();
+        let before = directory.snapshot.identity.unwrap();
+        let opened = directory.read().unwrap();
+        let moved = path.join("saved");
+        let build = path.join("build");
+        assert!(fs::rename(&build, &moved).is_err());
+        assert!(!moved.exists());
+        assert!(file.is_file());
+        assert_eq!(opened.directory.verified_metadata().unwrap().id, before);
+        drop(opened);
+        drop(root_metadata);
+        fs::rename(&build, &moved).unwrap();
+        fs::create_dir(&build).unwrap();
+        let replacement = open_metadata(&build).unwrap();
+        assert_ne!(replacement.id, before);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn windows_subtree_digest_identifies_equal_metadata_file_replacement() {
+        use std::fs::FileTimes;
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_FLAG_BACKUP_SEMANTICS, FILE_WRITE_ATTRIBUTES,
+        };
+
+        fn restore_time(path: &Path, modified: SystemTime) {
+            fs::OpenOptions::new()
+                .access_mode(FILE_WRITE_ATTRIBUTES)
+                .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+                .open(path)
+                .unwrap()
+                .set_times(FileTimes::new().set_modified(modified))
+                .unwrap();
+        }
+        let root = tempdir().unwrap();
+        let file = artifact(root.path(), "build/report.txt");
+        let build = file.parent().unwrap();
+        let file_time = fs::metadata(&file).unwrap().modified().unwrap();
+        let dir_time = fs::metadata(build).unwrap().modified().unwrap();
+        let policy = policy(&["build"]);
+        let before = plan(root.path(), &policy).unwrap().candidates.remove(0);
+        fs::rename(&file, root.path().join("old.txt")).unwrap();
+        fs::write(&file, b"generated").unwrap();
+        restore_time(&file, file_time);
+        restore_time(build, dir_time);
+        let after = plan(root.path(), &policy).unwrap().candidates.remove(0);
+        assert_eq!(before.identity, after.identity);
+        assert_eq!(before.bytes, after.bytes);
+        assert_eq!(
+            before.modified_at_subsec_nanos,
+            after.modified_at_subsec_nanos
+        );
+        assert_eq!(before.modified_at_unix, after.modified_at_unix);
+        assert_ne!(before.subtree_digest, after.subtree_digest);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn windows_plan_excludes_hard_linked_file() {
+        let root = tempdir().unwrap();
+        let file = artifact(root.path(), "build/report.txt");
+        let original = root.path().join("original.txt");
+        fs::hard_link(&file, &original).unwrap();
+        let proposed = plan(root.path(), &policy(&["build"])).unwrap();
+        assert!(proposed.candidates.is_empty());
+        assert_eq!(proposed.excluded[0].reason, InspectionIssue::SharedFile);
+        assert!(original.is_file() && file.is_file());
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn windows_scan_and_plan_preserve_junction_targets() {
+        let root = tempdir().unwrap();
+        let external = tempdir().unwrap();
+        let sentinel = artifact(external.path(), "outside.txt");
+        let junction = root.path().join("build");
+        let result = std::process::Command::new("cmd.exe")
+            .args(["/d", "/c", "mklink", "/j"])
+            .arg(&junction)
+            .arg(external.path())
+            .output()
+            .unwrap();
+        assert!(result.status.success());
+        let policy = policy(&["build"]);
+        let observed = scan(root.path(), &policy).unwrap();
+        let proposed = plan(root.path(), &policy).unwrap();
+        assert!(!observed.complete);
+        assert_eq!(observed.total_bytes, 0);
+        assert!(proposed.candidates.is_empty());
+        assert_eq!(
+            proposed.excluded[0].reason,
+            InspectionIssue::LinkOrReparsePoint
+        );
+        fs::remove_dir(junction).unwrap();
+        assert!(sentinel.is_file());
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn windows_scan_and_plan_fail_closed_on_sharing_conflicts() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let root = tempdir().unwrap();
+        let output = artifact(root.path(), "build/report.txt");
+        let _exclusive = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&output)
+            .unwrap();
+        let policy = policy(&["build"]);
+        let observed = scan(root.path(), &policy).unwrap();
+        let proposed = plan(root.path(), &policy).unwrap();
+        assert!(!observed.complete);
+        assert_eq!(observed.total_bytes, 0);
+        assert!(proposed.candidates.is_empty());
+        assert_eq!(
+            proposed.excluded[0].reason,
+            InspectionIssue::MetadataUnavailable
+        );
+        assert!(output.is_file());
     }
 }

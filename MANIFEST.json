@@ -13,7 +13,8 @@
     "windows_qualification": "Windows ARM64 0.1.1-rc.1 passed Parallels native package, dashboard and SCM with assigned fixture pipe. Guest restored suspended. Windows x64 native and live Windows Docker remain separate.",
     "release_signature": "macOS ARM64 offline signer handoff, exact archive and manifest verification, rejected responses, publisher-gated local package rejection, and package lifecycle passed. Official signer qualification remains separate.",
     "build_providers": "Cargo, Node, pnpm, Gradle, uv, Go and Playwright ran on macOS. Playwright retained success and failure traces, opt-in TTL reclaimed one expired success and preserved expected failure.",
-    "documentation_traceability": "WBS 14 rows, DSG 8 stages and 13 unchanged requirements reconciled. macOS Python 14 and Rust 98 tests passed, including isolated Docker reads and WebKit dashboard comparison; four preserved release candidates matched their inventories."
+    "documentation_traceability": "WBS 14 rows, DSG 8 stages and 13 unchanged requirements reconciled. macOS Python 14 and Rust 98 tests passed, including isolated Docker reads and WebKit dashboard comparison; four preserved release candidates matched their inventories.",
+    "windows_foundation": "Windows ARM64 MSVC cross-link and nine native NTFS filesystem tests passed on the existing Parallels guest. macOS Python 14 and Rust 98 plus registered integration passed."
   },
   "files": [
     {
@@ -123,13 +124,13 @@
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "b00c564517ac2712589ac12db089922977d86cc852900b1b75e1d1f01ffff248",
-      "bytes": 11847
+      "sha256": "036d11f73754b7d9598461d594301e690b41a9d40714c117f0579cce43c402c3",
+      "bytes": 12107
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "3a6272984cd5df879edd213ee874e5ff9b03d6a24773479b5094e71950a000cc",
-      "bytes": 10857
+      "sha256": "89302e234c7422308482d1802e3b27a0fe9186dbf051d68186f039766da79781",
+      "bytes": 11551
     },
     {
       "path": "docs/WBS.md",
@@ -318,8 +319,8 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-core/Cargo.toml",
-      "sha256": "bea1da5430f13726ae7b40a3197789819c2060270f549608fc32ed37e5d339d1",
-      "bytes": 442
+      "sha256": "21416753970667c14e818e98e5643da846f46cb9925bba6da1bdf291ea02e7e5",
+      "bytes": 470
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/cleanup.rs",
@@ -353,8 +354,13 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/filesystem.rs",
-      "sha256": "5a91047b2b9b447d81f90b2dfbc16daa77ccb150b608cf8b1d647572b0eb2543",
-      "bytes": 34473
+      "sha256": "dbbb313d4ae6fbe9de13122bf1cfb443b46dc24acc8123d780e71788c6cfbee4",
+      "bytes": 40629
+    },
+    {
+      "path": "rust-scaffold/crates/dsg-core/src/filesystem/windows.rs",
+      "sha256": "a3a96d9e18d0373d739f7bbf204595560e1567079f633f4fcbe21c9f2f5e713e",
+      "bytes": 5009
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/gc.rs",
