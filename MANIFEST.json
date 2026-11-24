@@ -8,17 +8,17 @@
     "html_parse": "passed",
     "agent_integration": "Mac and native Ubuntu Parallels: nine actual CLI cases each using synthetic model replies and a tool stub. On hook error Claude kept the stub from running; Codex and Gemini ran it. Read-only MCP preserved project state.",
     "dockerd_broker": "Rust tree 681be1e passed the macOS isolated live Docker boundary and temporary GUI launchd. Earlier Linux restricted UID/systemd ran with real Docker. Earlier Windows ARM64 native SCM and SID boundary used a fixture pipe.",
-    "dashboard": "Rust tree 681be1e release API and both WebKit layouts matched isolated Docker counts. The latest source regression repeated the live inventory and WebKit integration.",
-    "release_packages": "Linux ARM64 current Rust tree ada5a09 verified native in Ubuntu Parallels with archive SHA, live upgrade, successful and timed-out managed execution, reacquisition, dashboard and removal. Prior qualified macOS and Windows ARM64 are recorded by tree in RELEASE.md.",
-    "windows_qualification": "Current 681be1e ARM64 passed same-version real upgrade, installed hashes, both executables, dashboard and removal in existing Parallels. Earlier SCM used a fixture pipe. Windows x64 native and live Windows Docker remain open.",
+    "dashboard": "Current ada5a09: installed macOS API and WebKit at 1060/390 px matched independent Docker counts (7 containers, 8 image IDs, 2 volumes, 0 duplicate groups). Linux and Windows ARM64 and x64 emulation passed loopback dashboard coverage.",
+    "release_packages": "Current Rust tree ada5a09 for four local 0.1.1-rc.1 targets. macOS ARM64 matched two independent builds and prior package upgrade, rollback and re-upgrade. Native Linux and Windows ARM64 passed lifecycle. Windows x64 passed cross-link, repeat packaging and Windows ARM64 emulated execution and wrong-host rejection; native x64 remains pending.",
+    "windows_qualification": "Current Windows ARM64 and x64 artifacts had matching repeat packages and passed host PE and package checks. Existing Windows ARM64 NTFS passed the actual same-version ARM64 upgrade, dashboard and removal. x64 binaries and dashboard ran emulated, with install and upgrade rejected and ARM64 installation preserved.",
     "release_signature": "macOS ARM64 offline signer handoff, exact archive and manifest verification, rejected responses, publisher-gated local package rejection, and package lifecycle passed. Official signer qualification remains separate.",
     "build_providers": "macOS Cargo, Node, pnpm, Gradle, uv, Go and Playwright ran. Real Next.js 16.4.6 build and loopback response passed with two audited leases. Playwright success/failure and TTL retention were qualified separately.",
-    "documentation_traceability": "14 WBS rows, 8 DSG stages, 13 requirement IDs, local evidence and package inventory verified.",
+    "documentation_traceability": "14 WBS rows, 8 DSG stages, 13 requirement IDs, current four package hashes and local evidence matched. Python 14 and Rust 103 plus registered integration passed.",
     "windows_foundation": "Windows ARM64 MSVC cross-link and nine native NTFS filesystem tests passed on the existing Parallels guest. macOS Python 14 and Rust 98 plus registered integration passed.",
     "buildx_cache": "macOS Rust 102 and live isolated Buildx integration passed. Engine default Buildx totals 208 records, 208 reclaimable, 8 shared, 167 mutable; all preserved. Separate builder qualification remains open.",
     "next_and_compose_health": "macOS Rust 102 and integration passed with the real Next.js 16.4.6 pnpm build, loopback runtime and leases, plus real same-container Compose health rejection and bounded cleanup.",
     "gc_crash_recovery": "macOS Rust 103 and integration passed. Committed GC intent and staged artifact survived an owned child SIGKILL, restored identical identity/SHA-256 with zero deletion and retained exact audit events.",
-    "current_macos_qualification": "Rust tree 681be1e: all nine local agent CLI fixtures, temporary launchd and isolated Docker boundary, paired independent release archive builds, prior 0.1.0 upgrade, and live WebKit/API comparisons passed.",
+    "current_macos_qualification": "Rust tree ada5a09: two independent archive builds matched. Installed candidate passed upgrade, rollback, re-upgrade, diagnosis, read-only MCP, WebKit/API with live Docker counts and removal preserving user fixture files.",
     "compose_live_changes": "Existing isolated engine preserved one ID on repeat. Configuration, health, image and tmpfs changes rejected. Matching tmpfs remained unknown. Named volume replacement is covered by synthetic fixtures.",
     "linux_arm64_qualification": "Current 681be1e static musl passed previous archive upgrade, managed success, timeout 124 and lease reacquisition, dashboard and removal in an isolated ARM64 Linux container. Existing Ubuntu Parallels lacked a verified transfer path.",
     "standalone_buildkit": "Linux ARM64 on existing Ubuntu Parallels: product and official BuildKit v0.35.1 matched counts 0 and 4. Wrong PID, wrong client digest and socket symlink were rejected; all cache preserved.",
@@ -112,8 +112,8 @@
     },
     {
       "path": "docs/RELEASE.md",
-      "sha256": "99217efe0471e01a7a7190631b3431767b3edb5fb64f401eaa8d9c418451a95d",
-      "bytes": 12404
+      "sha256": "43cf4e387bad9a577967d0ac0d6d3a4ccc61729376d92a87a9c85a8a738d2f11",
+      "bytes": 13029
     },
     {
       "path": "docs/REQUIREMENTS.md",
@@ -132,13 +132,13 @@
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "28e8081b28edf76c911d8928bbfdf34a6a5204cbee985203a6adf1fa1a9c5070",
-      "bytes": 16643
+      "sha256": "c17fbc4b54377ffcdd509a2604ed034979291a01766043890e901db64ac9deeb",
+      "bytes": 16697
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "91099319ef548b1a4c7505df84e75fdd5bb9c69e4a8c5ef4f89d5f6eabde82f7",
-      "bytes": 17922
+      "sha256": "8f8e2987942686f59934aeb5047f9ad5523a1f1588d174dea6c2f679a44ea6e8",
+      "bytes": 19864
     },
     {
       "path": "docs/WBS.md",
@@ -469,6 +469,11 @@
       "path": "scripts/check-release-signature.py",
       "sha256": "4963db34bdcd7bc178be3bd1bc1955a6ad2a68ab8754434ff2e9acd29e50db78",
       "bytes": 13113
+    },
+    {
+      "path": "scripts/check-windows-arm64-release.py",
+      "sha256": "865b19d20551b1b5d5030b174afaebf8773fa4e9948bb1db2a00301899e4c245",
+      "bytes": 9341
     },
     {
       "path": "scripts/check-windows-fixture.ps1",
