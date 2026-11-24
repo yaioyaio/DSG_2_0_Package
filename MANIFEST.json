@@ -13,14 +13,14 @@
     "windows_qualification": "Current Windows ARM64 and x64 artifacts had matching repeat packages and passed host PE and package checks. Existing Windows ARM64 NTFS passed the actual same-version ARM64 upgrade, dashboard and removal. x64 binaries and dashboard ran emulated, with install and upgrade rejected and ARM64 installation preserved.",
     "release_signature": "macOS ARM64 offline signer handoff, exact archive and manifest verification, rejected responses, publisher-gated local package rejection, and package lifecycle passed. Official signer qualification remains separate.",
     "build_providers": "macOS Cargo, Node, pnpm, Gradle, uv, Go and Playwright ran. Real Next.js 16.4.6 build and loopback response passed with two audited leases. Playwright success/failure and TTL retention were qualified separately.",
-    "documentation_traceability": "14 WBS rows, 8 DSG stages, 13 requirement IDs, current four package hashes and local evidence matched. Python 14 and Rust 103 plus registered integration passed.",
+    "documentation_traceability": "Rust source tree ada5a09. Matched 14 WBS rows, eight DSG stages and 13 requirement IDs to artifact and test evidence. Fresh macOS Python 14 and Rust 103 plus isolated Docker, read-only Buildx and WebKit passed. Four 0.1.1-rc.1 archives and their member hashes matched.",
     "windows_foundation": "Windows ARM64 MSVC cross-link and nine native NTFS filesystem tests passed on the existing Parallels guest. macOS Python 14 and Rust 98 plus registered integration passed.",
-    "buildx_cache": "macOS Rust 102 and live isolated Buildx integration passed. Engine default Buildx totals 208 records, 208 reclaimable, 8 shared, 167 mutable; all preserved. Separate builder qualification remains open.",
+    "buildx_cache": "Current macOS Rust 103 and live isolated Buildx integration passed. Default Buildx totals: 208 records, 208 reclaimable, 8 shared and 167 mutable, all preserved. A separate Ubuntu ARM64 BuildKit instance passed read-only qualification. Ownership and approved recovery remain open.",
     "next_and_compose_health": "macOS Rust 102 and integration passed with the real Next.js 16.4.6 pnpm build, loopback runtime and leases, plus real same-container Compose health rejection and bounded cleanup.",
     "gc_crash_recovery": "macOS Rust 103 and integration passed. Committed GC intent and staged artifact survived an owned child SIGKILL, restored identical identity/SHA-256 with zero deletion and retained exact audit events.",
     "current_macos_qualification": "Rust tree ada5a09: two independent archive builds matched. Installed candidate passed upgrade, rollback, re-upgrade, diagnosis, read-only MCP, WebKit/API with live Docker counts and removal preserving user fixture files.",
-    "compose_live_changes": "Existing isolated engine preserved one ID on repeat. Configuration, health, image and tmpfs changes rejected. Matching tmpfs remained unknown. Named volume replacement is covered by synthetic fixtures.",
-    "linux_arm64_qualification": "Current 681be1e static musl passed previous archive upgrade, managed success, timeout 124 and lease reacquisition, dashboard and removal in an isolated ARM64 Linux container. Existing Ubuntu Parallels lacked a verified transfer path.",
+    "compose_live_changes": "The fixture reran Compose and kept one ID. The read-only reuse check matched supplied expectations against the real container and rejected configuration, health, image and tmpfs changes. Matching tmpfs was unknown. Real named volume replacement is recorded separately.",
+    "linux_arm64_qualification": "Current ada5a09 static musl on existing Ubuntu ARM64 Parallels passed a previous-package upgrade, managed success, timeout 124 and lease reacquisition, dashboard and removal. Earlier 681be1e also passed the isolated Linux container and Ubuntu Parallels.",
     "standalone_buildkit": "Linux ARM64 on existing Ubuntu Parallels: product and official BuildKit v0.35.1 matched counts 0 and 4. Wrong PID, wrong client digest and socket symlink were rejected; all cache preserved.",
     "named_volume_reuse": "Real isolated Compose reused identical named volume A and one ID. Replacing A with B rejected the old name and accepted the expected new mount. Read-only, nocopy and both volumes preserved verified.",
     "windows_installer_process_architecture": "Current ada5a09 package: on the existing ARM64 Windows Parallels guest, native ARM64 and emulated x64 portable CPython 3.13.9 each returned exit 1 with the expected host mismatch for x64 install and upgrade. Prefix, existing pointer, installed hashes and fixture user file were preserved. Guest was restored to suspended. Current existing Mac/Parallels scope is complete. Windows x64 OS lifecycle is excluded because the registered Windows guest is ARM64."
@@ -118,8 +118,8 @@
     },
     {
       "path": "docs/REQUIREMENTS.md",
-      "sha256": "659d9a56771700b55a20210dd94d7c06334aeb703a28f8e4478d03ff705d367e",
-      "bytes": 4589
+      "sha256": "69d7942e11ab8102caae64ebbf6da2ee4a2ac6d86a61ab08390d15805e169748",
+      "bytes": 4799
     },
     {
       "path": "docs/SECURITY.md",
@@ -133,13 +133,13 @@
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "df4897ce28b89c3120c4bf34f74defe8b2ee90c23dd32e8f9a57c02775ab7c83",
-      "bytes": 17047
+      "sha256": "5ea7afe3397bbcab3516dada4377f2365c8d0e927392d1c0039fa6e6039303e7",
+      "bytes": 17700
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "63bda345805b67edd1ebfc90bcc6a78b0155b462cb4bc8cdb7fb218ab6735a2e",
-      "bytes": 20366
+      "sha256": "42242ba9247786771b75d349560eea506db49bc1fb65664ff6f0094b03804ce3",
+      "bytes": 20722
     },
     {
       "path": "docs/WBS.md",
