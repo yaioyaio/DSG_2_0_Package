@@ -72,6 +72,16 @@ enum Command {
         #[arg(long)]
         plan: i64,
     },
+    /// Linux ARM64의 전용 Docker 제어 서비스 연결을 읽기 전용으로 확인합니다.
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    DockerControllerProbe {
+        /// root 소유 0700 디렉터리에 있는 root 소유 0600 Unix 소켓의 절대 경로
+        #[arg(long)]
+        socket: PathBuf,
+        /// 같은 PID 네임스페이스의 전용 서비스 프로세스 ID
+        #[arg(long)]
+        expected_pid: u32,
+    },
     /// 소유권을 확인한 생성 폴더를 정리 대상으로 등록합니다.
     GcOwn {
         #[arg(long)]
@@ -294,6 +304,33 @@ fn main() -> ExitCode {
 }
 
 fn run(cli: &Cli) -> Result<Output, CliError> {
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    if let Command::DockerControllerProbe {
+        socket,
+        expected_pid,
+    } = &cli.command
+    {
+        let apply_gate = dsg_core::docker_gc_apply::DockerGcService::external().apply_gate();
+        let (data, text, exit) = match dsg_core::docker_control_local::probe(socket, *expected_pid)
+        {
+            Ok(evidence) => (
+                json!({"status":"verified", "protocol_version":1, "declared_boundary":"dedicated", "endpoint":evidence.endpoint, "generation":evidence.generation, "mutation_authorized":false, "apply_gate":apply_gate}),
+                "전용 Docker 제어 서비스의 읽기 전용 연결 확인".to_owned(),
+                0,
+            ),
+            Err(failure) => (
+                json!({"status":"unknown", "mutation_authorized":false, "apply_gate":apply_gate, "failure":failure}),
+                "전용 Docker 제어 서비스 연결 미확인 · 보존".to_owned(),
+                5,
+            ),
+        };
+        return Ok(Output {
+            command: "docker-controller-probe",
+            data,
+            text,
+            exit,
+        });
+    }
     if let Command::DockerContexts { max_contexts } = &cli.command {
         let inventory = discover_contexts(*max_contexts);
         let (text, exit) = match &inventory.contexts {
@@ -406,7 +443,9 @@ fn run(cli: &Cli) -> Result<Output, CliError> {
             ))
         }
         #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
-        Command::BuildkitLocalCache { .. } => unreachable!(),
+        Command::BuildkitLocalCache { .. } | Command::DockerControllerProbe { .. } => {
+            unreachable!()
+        }
         Command::Hook { .. }
         | Command::Agents { .. }
         | Command::Mcp

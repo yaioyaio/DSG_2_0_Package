@@ -260,3 +260,18 @@ DSG-08의 `f6397b2`를 PR #15로 `develop`, PR #16으로 `main`에 반영했다.
 - 정산 전 중단은 Rust 시험 코드에서 모사했다. SQLite 등록부 재열기 후 보존 영수증으로 정산해 `GC_APPLY_INTENT`·`GC_APPLIED` 각 1건, 재적용·재정산 거절, 열린 lease 0건 및 `quick_check=ok`를 확인했다. 호스트 등록부의 합성 소유자와 실제 게스트 검증 소유자 지문의 대응은 시험 전용이다. [Rust 시험](../rust-scaffold/crates/dsg-core/src/docker_gc_apply/live_fixture.rs) · [실측 집계](../dist/dsg-dedicated-engine-cf83a703d2fd/LIVE_RESULT.json)
 - 재개 시 운영 프로젝트 소유권과 독점 제어를 확인하고 공개 운영 어댑터 연결과 별도 대상 승인을 검증한다. 일반 공유 Docker 영역과 실제 캐시 적용, 삭제 응답 유실과 전원 장애 복구는 각각 별도 범위다. 동일 시험을 다시 수행할 때 유효 기간이 끝났거나 세대가 바뀌면 재실측과 새 승인이 필요하다. [시험 계약](TEST_PLAN.md#전용-docker-엔진-단일-이미지-적용-사전-계약) · [현재 백로그](BACKLOG.md#환경승인-조건이-남은-항목)
 - 같은 수정에서 자동 회귀 Python 14건, Rust 118건과 기본 통합 검증을 통과했다. 실제 삭제 시험은 자동 회귀에서 제외된 1건으로, 승인 대상의 수동 지정 실행에서 한 번 통과했다. 의도 없이 적용 모드를 호출한 오프라인 게이트는 게스트 접근 전에 거절했다. [테스트 계획](TEST_PLAN.md#전용-docker-엔진-단일-이미지-적용-사전-계약)
+
+## 2026-11-24 · 전용 Docker 영수증 유실과 BuildKit 네이티브 조회
+
+- DSG-03·05·07 및 WBS 1.4·2.3·5.1. 작업 브랜치는 `feature/20261124-docker-receipt-loss-buildkit`, 기준 HEAD는 `e8b0e84`다. [작업 대조표](TASK.md) · [환경과 승인 조건](BACKLOG.md#환경승인-조건이-남은-항목)
+- WBS 1.4는 실제 전용 Moby의 단일 DELETE 성공 응답 확인과 관측 기록 동기화 뒤, 영수증 기록 전 중단을 주입하는 시험을 추가했다. 기존 Ubuntu Parallels에서 독립 저장소·전용 소켓과 제한 계정의 접근 거부를 검증했다. 초기 무자원 엔진에 합성 이미지 1개를 준비하고 전체 이미지 ID와 증거 해시, 삭제 요청 0건을 확인했다. VM은 원래 일시정지 상태로 복귀했고 당시 승인 대기 중에는 120초 상한이 있는 격리 시험만 보존했다. 증거 불일치·승인 부재는 게스트 접근 전 거절했다. [유실 시험 계약](TEST_PLAN.md#전용-docker-엔진-삭제-응답-확인-후-영수증-유실-시험) · [사전 증거](../dist/dsg-dedicated-engine-93292d9f465f/PREAPPROVAL.json)
+- WBS 2.3의 전용 BuildKit v0.35.1을 기존 Ubuntu Parallels ARM64에서 실제 실행했다. 현재 제품과 독립 공식 조회의 빈 집계 0개 및 시험 빌드 후 집계 4개가 일치했다. 4개는 모두 변경 가능이며 보존했고 회수 후보는 0개다. 잘못된 PID·공식 도구 해시·소켓 링크는 거절했고 별도 prune은 0회다. 읽기 전용 게스트 제약 아래 BuildKit 추적 소켓과 제품 임시 HOME의 경로를 전용 tmpfs에 배치해 재실행했다. 데몬·시험 저장소와 임시 경로 회수 및 VM의 일시정지 복귀를 확인했다. [네이티브 시험 계약](TEST_PLAN.md#현재-제품의-linux-arm64-별도-buildkit-네이티브-조회) · [실측 집계](../dist/dsg-buildkit-native-1a31748b483d/QUALIFICATION.json)
+- WBS 5.1 연결은 현재 Linux ARM64 제품과 임시 root Unix 프로토콜 대역으로 검증했다. 전용 선언 1건은 통과했고 공유 선언과 다른 PID 2건은 거절했다. 변경 요청은 0건이었다. 운영 적용에는 권한 제어기의 신뢰, 요청별 승인, 프로젝트 자원의 출처·소유권, 배타 변경 경계와 프로젝트 소유 캐시의 실제 적용 증거가 필요하다. [프로브 계약](API_SPEC.md#로컬-docker-제어-서비스-읽기-확인) · [실측 집계](../dist/dsg-buildkit-native-1a31748b483d/QUALIFICATION.json)
+- macOS에서 Python 14건, Rust 118건 및 통합 회귀가 통과했다. 새 영수증 유실 시험을 포함한 전용 엔진 수동 시험 2건은 자동 회귀에서 제외했다. 보조 워크트리 생성·회수·잔여는 각각 0개다.
+
+## 승인 후 전용 Docker 엔진 영수증 기록 전 중단 검증
+
+- DSG-05·WBS 1.4, 브랜치 `feature/20261124-docker-receipt-loss-buildkit`, 기준 HEAD `8a2ecfa`. 승인된 사전 증거 해시와 엔진·세대·스냅샷·전체 이미지 ID를 독립 관측으로 재확인했다. 적용 직전 삭제 요청은 0건이었다. [사전 증거](../dist/dsg-dedicated-engine-93292d9f465f/PREAPPROVAL.json)
+- 실제 전용 Moby에 요청 1건을 보내 HTTP 200과 합성 이미지 1→0을 확인했다. Rust 시험에서 응답 관측 기록을 동기화한 후 영수증 기록 직전 중단을 주입했다. 등록부 재열기 후 `recovery_required`, 회수량 0 B, 영수증 부재를 확인했다. 복구 중 로컬 영수증 조회 1건과 추가 게스트 관측·변경 각 0건을 검증했고, 기존 승인 재사용과 경쟁 승인 적용을 거절했다. 지정 실측 1건과 Docker GC 적용 회귀 8건이 통과했다. [Rust 시험](../rust-scaffold/crates/dsg-core/src/docker_gc_apply/live_fixture.rs) · [실측 집계](../dist/dsg-dedicated-engine-93292d9f465f/RECEIPT_LOSS_RESULT.json)
+- 실행기가 표준출력의 결과 표식을 수집하지 못해 보존한 응답 관측 기록과 SQLite 등록부를 읽기 전용으로 재검증했다. `quick_check=ok`, 열린 lease 0건, `GC_APPLY_INTENT`·`GC_RECOVERY_REQUIRED` 각 1건과 `GC_APPLIED` 0건이었다. 결과를 수집하는 동안 Docker 호출은 없었다. 전용 시험 서비스 정지, 전용 임시 디렉터리 회수 및 VM의 일시정지 복귀를 확인했다. 보조 워크트리 생성·회수·잔여는 각각 0개다.
+- 다음은 운영 제어기의 배포 출처와 승인·실행 권한을 기록한 뒤 전용 엔진 및 프로젝트 소유 캐시에서 읽기 전용 소유권·독점 변경 경계를 확인하는 작업이다. 캐시의 실제 회수는 대상 증거와 별도 승인이 필요하다. DELETE 응답 미수신과 전원 장애 시나리오도 별도 검증으로 남는다. [백로그](BACKLOG.md#환경승인-조건이-남은-항목)

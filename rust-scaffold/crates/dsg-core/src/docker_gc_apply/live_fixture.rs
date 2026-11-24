@@ -5,7 +5,7 @@ use rusqlite::{params, Connection, OpenFlags};
 use std::env;
 use std::fs::{self, DirBuilder, File, OpenOptions};
 use std::io::{Read, Write};
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -22,6 +22,43 @@ const GUEST_OWNER: &str = "2a35531c6dc5407c1208ac8639a77b7898ef739ea29e821705b5a
 const ARTIFACT_LIMIT: u64 = 4096;
 const DISPATCH_FILE: &str = "DISPATCH.json";
 const RECEIPT_FILE: &str = "RECEIPT.json";
+const WITNESS_FILE: &str = "DELETE_RESPONSE_WITNESS.json";
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum TrialMode {
+    RetainReceipt,
+    LoseReceipt,
+}
+
+#[derive(Deserialize)]
+struct TrialIdentity {
+    trial: String,
+    engine_id: String,
+    endpoint: String,
+    generation: String,
+    image_id: String,
+    snapshot: String,
+    author_fingerprint: String,
+}
+
+struct Trial {
+    mode: TrialMode,
+    source: PathBuf,
+    identity: TrialIdentity,
+    digest: String,
+    wire: Value,
+}
+
+impl Trial {
+    fn guest_command(&self, applying: bool) -> &'static str {
+        match (self.mode, applying) {
+            (TrialMode::RetainReceipt, false) => "observe",
+            (TrialMode::RetainReceipt, true) => "apply",
+            (TrialMode::LoseReceipt, false) => "observe-receipt-loss",
+            (TrialMode::LoseReceipt, true) => "apply-receipt-loss",
+        }
+    }
+}
 
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -35,16 +72,21 @@ struct GuestProof {
     delete_requests: u64,
     after_images: Option<u64>,
     effect: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    delete_http_status: Option<u16>,
 }
 
 impl GuestProof {
-    fn matches(&self, applied: bool) -> bool {
+    fn matches(&self, trial: &Trial, applied: bool) -> bool {
+        let identity = &trial.identity;
         self.verified
-            && self.engine_id == ENGINE
-            && self.generation == GENERATION
-            && self.image_id == IMAGE
-            && self.snapshot == SNAPSHOT
-            && self.author_fingerprint == GUEST_OWNER
+            && self.engine_id == identity.engine_id
+            && self.generation == identity.generation
+            && self.image_id == identity.image_id
+            && self.snapshot == identity.snapshot
+            && self.author_fingerprint == identity.author_fingerprint
+            && self.delete_http_status
+                == (trial.mode == TrialMode::LoseReceipt && applied).then_some(200)
             && if applied {
                 self.delete_requests == 1
                     && self.after_images == Some(0)
@@ -64,17 +106,17 @@ struct Dispatch {
 }
 
 impl Dispatch {
-    fn new(intent: &Intent) -> Option<Self> {
+    fn new(intent: &Intent, proof_digest: &str) -> Option<Self> {
         Some(Self {
             intent: intent.clone(),
             intent_digest: hash(&serde_json::to_vec(intent).ok()?),
-            proof_digest: PROOF_DIGEST.into(),
+            proof_digest: proof_digest.into(),
         })
     }
 
-    fn matches(&self, intent: &Intent) -> bool {
+    fn matches(&self, intent: &Intent, proof_digest: &str) -> bool {
         self.intent == *intent
-            && self.proof_digest == PROOF_DIGEST
+            && self.proof_digest == proof_digest
             && serde_json::to_vec(intent)
                 .is_ok_and(|serialized| self.intent_digest == hash(&serialized))
     }
@@ -87,13 +129,32 @@ struct DurableReceipt {
     guest: GuestProof,
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct DeleteResponseWitness {
+    delete_http_status: u16,
+    delete_requests: u64,
+    after_images: u64,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct FixtureCalls {
+    observations: u64,
+    guest_observations: u64,
+    mutations: u64,
+    guest_mutations: u64,
+    receipt_reads: u64,
+}
+
 struct LiveFixture {
     // The registered host project and the pinned guest author are distinct identities.
     // Only this fixture maps a verified guest result to the local registered owner.
     binding: Binding,
     state: PathBuf,
     helper: PathBuf,
-    proof: Option<Value>,
+    trial: Trial,
+    guest_enabled: bool,
+    calls: FixtureCalls,
 }
 
 impl LiveFixture {
@@ -103,13 +164,23 @@ impl LiveFixture {
         }
     }
 
-    fn guest(&self, verb: &str, intent: Option<&Intent>) -> Option<GuestProof> {
-        let proof = self.proof.as_ref()?;
-        let input = serde_json::to_vec(&json!({ "proof": proof, "intent": intent })).ok()?;
+    fn guest(&mut self, intent: Option<&Intent>) -> Option<GuestProof> {
+        if !self.guest_enabled {
+            return None;
+        }
+        let applying = intent.is_some();
+        let mut envelope = self.trial.wire.clone();
+        envelope["intent"] = serde_json::to_value(intent).ok()?;
+        let input = serde_json::to_vec(&envelope).ok()?;
+        if applying {
+            self.calls.guest_mutations += 1;
+        } else {
+            self.calls.guest_observations += 1;
+        }
         let mut child = Command::new("/usr/bin/python3")
             .arg("-E")
             .arg(&self.helper)
-            .arg(verb)
+            .arg(self.trial.guest_command(applying))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -126,7 +197,7 @@ impl LiveFixture {
             return None;
         }
         let result: GuestProof = serde_json::from_slice(&output?).ok()?;
-        result.matches(intent.is_some()).then_some(result)
+        result.matches(&self.trial, applying).then_some(result)
     }
 
     fn registry_path(&self) -> PathBuf {
@@ -158,36 +229,51 @@ impl LiveFixture {
 
 impl ControlledDockerGc for LiveFixture {
     fn observe(&mut self, owner: &str, kind: DockerGcKind, id: &str) -> Option<Observation> {
-        if owner != self.binding.owner || kind != DockerGcKind::Image || id != IMAGE {
+        self.calls.observations += 1;
+        if owner != self.binding.owner || kind != DockerGcKind::Image || id != self.binding.id {
             return None;
         }
-        self.guest("observe", None)?;
+        self.guest(None)?;
+        let identity = &self.trial.identity;
         Some(Observation {
             binding: self.binding.clone(),
             unreferenced: Some(true),
             usage: Usage::Image(ImageGcPlan {
-                context: TRIAL.into(),
-                engine_id: Some(ENGINE.into()),
-                image_id: IMAGE.into(),
+                context: identity.trial.clone(),
+                engine_id: Some(identity.engine_id.clone()),
+                image_id: identity.image_id.clone(),
                 disposition: ImageGcDisposition::Candidate,
                 reason: ImageGcReason::Eligible,
-                fingerprint: Some(SNAPSHOT.into()),
+                fingerprint: Some(identity.snapshot.clone()),
                 apply_gate: DockerApplyGate::Controlled,
             }),
         })
     }
 
     fn apply_if_current(&mut self, intent: &Intent) -> Option<Receipt> {
-        if self.proof.is_none()
+        self.calls.mutations += 1;
+        if !self.guest_enabled
             || self.binding != intent.binding
-            || intent.policy != PROOF_DIGEST
+            || intent.policy != self.trial.digest
             || !self.intent_committed(intent)
         {
             return None;
         }
-        let dispatch = Dispatch::new(intent)?;
+        let dispatch = Dispatch::new(intent, &self.trial.digest)?;
         write_new(&self.state, DISPATCH_FILE, &dispatch)?;
-        let guest = self.guest("apply", Some(intent))?;
+        let guest = self.guest(Some(intent))?;
+        if self.trial.mode == TrialMode::LoseReceipt {
+            write_new(
+                &self.state,
+                WITNESS_FILE,
+                &DeleteResponseWitness {
+                    delete_http_status: guest.delete_http_status?,
+                    delete_requests: guest.delete_requests,
+                    after_images: guest.after_images?,
+                },
+            )?;
+            resume_unwind(Box::new(InterruptedBeforeReceipt));
+        }
         write_new(
             &self.state,
             RECEIPT_FILE,
@@ -197,14 +283,15 @@ impl ControlledDockerGc for LiveFixture {
     }
 
     fn receipt(&mut self, intent: &Intent) -> Option<Receipt> {
+        self.calls.receipt_reads += 1;
         let dispatch: Dispatch =
             serde_json::from_slice(&read_regular(&self.state.join(DISPATCH_FILE))?).ok()?;
         let receipt: DurableReceipt =
             serde_json::from_slice(&read_regular(&self.state.join(RECEIPT_FILE))?).ok()?;
         (self.binding == intent.binding
-            && dispatch.matches(intent)
-            && receipt.dispatch.matches(intent)
-            && receipt.guest.matches(true))
+            && dispatch.matches(intent, &self.trial.digest)
+            && receipt.dispatch.matches(intent, &self.trial.digest)
+            && receipt.guest.matches(&self.trial, true))
         .then(|| Receipt {
             intent: receipt.dispatch.intent,
             effect: Effect::Applied(0),
@@ -213,6 +300,7 @@ impl ControlledDockerGc for LiveFixture {
 }
 
 struct InterruptedAfterReceipt;
+struct InterruptedBeforeReceipt;
 
 fn read_limited(reader: impl Read) -> Option<Vec<u8>> {
     let mut bytes = Vec::new();
@@ -223,7 +311,7 @@ fn read_limited(reader: impl Read) -> Option<Vec<u8>> {
     (bytes.len() as u64 <= ARTIFACT_LIMIT).then_some(bytes)
 }
 
-fn read_regular(path: &Path) -> Option<Vec<u8>> {
+fn open_regular(path: &Path) -> Option<File> {
     let file = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
@@ -233,7 +321,11 @@ fn read_regular(path: &Path) -> Option<Vec<u8>> {
     if !meta.is_file() || meta.len() > ARTIFACT_LIMIT {
         return None;
     }
-    read_limited(file)
+    Some(file)
+}
+
+fn read_regular(path: &Path) -> Option<Vec<u8>> {
+    read_limited(open_regular(path)?)
 }
 
 fn write_new(directory: &Path, name: &str, record: &impl Serialize) -> Option<()> {
@@ -249,7 +341,7 @@ fn write_new(directory: &Path, name: &str, record: &impl Serialize) -> Option<()
     File::open(directory).ok()?.sync_all().ok()
 }
 
-fn checked_proof(repo: &Path) -> Option<(PathBuf, Value)> {
+fn checked_pinned_trial(repo: &Path) -> Option<Trial> {
     if env::var("DSG_DEDICATED_GC_APPROVED_IMAGE").ok()?.as_str() != IMAGE
         || env::var("DSG_DEDICATED_GC_APPROVED_GENERATION")
             .ok()?
@@ -276,12 +368,97 @@ fn checked_proof(repo: &Path) -> Option<(PathBuf, Value)> {
         ("snapshot", SNAPSHOT),
         ("author_fingerprint", GUEST_OWNER),
     ];
+    let identity = serde_json::from_value(proof.clone()).ok()?;
     (expected.iter().all(|(key, value)| proof[*key] == *value)
         && proof["delete_requests"] == 0
         && proof["before_images"] == 0
         && proof["after_images"] == 1
         && proof["guest_restored_to_suspended"] == true)
-        .then_some((source, proof))
+        .then(|| Trial {
+            mode: TrialMode::RetainReceipt,
+            source,
+            identity,
+            digest: PROOF_DIGEST.into(),
+            wire: json!({ "proof": proof }),
+        })
+}
+
+fn protected_directory(path: &Path, uid: u32, private: bool) -> Option<()> {
+    let info = fs::symlink_metadata(path).ok()?;
+    (info.is_dir()
+        && info.uid() == uid
+        && if private {
+            info.mode() & 0o7777 == 0o700
+        } else {
+            info.mode() & 0o022 == 0
+        })
+    .then_some(())
+}
+
+fn checked_receipt_loss_trial(repo: &Path) -> Option<Trial> {
+    let source = repo.join(PathBuf::from(env::var_os("DSG_DEDICATED_GC_EVIDENCE")?));
+    let dist = repo.join("dist");
+    let directory = source.parent()?;
+    let suffix = directory
+        .file_name()?
+        .to_str()?
+        .strip_prefix("dsg-dedicated-engine-")?;
+    if source.file_name()?.to_str()? != "PREAPPROVAL.json"
+        || directory.parent()? != dist
+        || suffix.len() != 12
+        || !suffix
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        || fs::canonicalize(&source).ok()? != source
+        || source == repo.join(EVIDENCE)
+    {
+        return None;
+    }
+    // SAFETY: geteuid reads the process identity and accepts no arguments.
+    let uid = unsafe { libc::geteuid() };
+    protected_directory(&dist, uid, false)?;
+    protected_directory(directory, uid, true)?;
+    let evidence = open_regular(&source)?;
+    let info = evidence.metadata().ok()?;
+    if info.uid() != uid || info.mode() & 0o7177 != 0 || info.nlink() != 1 {
+        return None;
+    }
+    let bytes = read_limited(evidence)?;
+    let digest = env::var("DSG_DEDICATED_GC_APPROVED_PROOF_SHA256").ok()?;
+    if hash(&bytes) != digest {
+        return None;
+    }
+    let identity: TrialIdentity = serde_json::from_slice(&bytes).ok()?;
+    let engine = env::var("DSG_DEDICATED_GC_APPROVED_ENGINE").ok()?;
+    let generation = env::var("DSG_DEDICATED_GC_APPROVED_GENERATION").ok()?;
+    let image = env::var("DSG_DEDICATED_GC_APPROVED_IMAGE").ok()?;
+    if identity.trial != format!("dsg-gc-{suffix}")
+        || identity.engine_id != engine
+        || identity.generation != generation
+        || identity.image_id != image
+        || !valid_full_image_id(&image)
+        || ![
+            &identity.endpoint,
+            &identity.generation,
+            &identity.snapshot,
+            &identity.author_fingerprint,
+        ]
+        .into_iter()
+        .all(|value| valid_owner_fingerprint(value))
+    {
+        return None;
+    }
+    let wire = json!({
+        "proof": std::str::from_utf8(&bytes).ok()?,
+        "approval": { "proof_sha256": digest, "engine_id": engine, "generation": generation, "image_id": image },
+    });
+    Some(Trial {
+        mode: TrialMode::LoseReceipt,
+        source,
+        identity,
+        digest,
+        wire,
+    })
 }
 
 fn ledger(backend: &LiveFixture, plan: i64) -> (String, bool, Option<i64>, Vec<String>) {
@@ -306,18 +483,19 @@ fn ledger(backend: &LiveFixture, plan: i64) -> (String, bool, Option<i64>, Vec<S
     (status, claimed, bytes, events)
 }
 
-#[test]
-#[ignore = "requires explicit approval of the pinned, dedicated Docker trial"]
-fn controlled_docker_live_approved_receipt() {
-    let repo = fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.."))
-        .expect("resolve repository path");
-    let (source, proof) = checked_proof(&repo).expect("explicit pinned trial proof required");
-    let state = source.parent().unwrap().join(".dsg-live-apply");
+fn repository() -> PathBuf {
+    fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.."))
+        .expect("resolve repository path")
+}
+
+fn open_fixture(repo: &Path, trial: Trial) -> (Registry, LiveFixture) {
+    let source_directory = trial.source.parent().expect("resolve proof directory");
+    let state = source_directory.join(".dsg-live-apply");
     DirBuilder::new()
         .mode(0o700)
         .create(&state)
         .expect("one-use private trial state must not already exist");
-    File::open(source.parent().unwrap())
+    File::open(source_directory)
         .and_then(|directory| directory.sync_all())
         .expect("persist the new trial state directory");
     let project_root = state.join("synthetic-project");
@@ -334,21 +512,35 @@ fn controlled_docker_live_approved_receipt() {
     let owner = registry
         .docker_gc_project_owner(project)
         .expect("derive local registered owner");
-    assert!(owner != GUEST_OWNER && valid_owner_fingerprint(&owner));
-    let mut backend = LiveFixture {
+    let identity = &trial.identity;
+    assert!(owner != identity.author_fingerprint && valid_owner_fingerprint(&owner));
+    let backend = LiveFixture {
         binding: Binding {
             project,
             owner,
             kind: DockerGcKind::Image,
-            id: IMAGE.into(),
-            endpoint: ENDPOINT.into(),
-            generation: GENERATION.into(),
-            snapshot: SNAPSHOT.into(),
+            id: identity.image_id.clone(),
+            endpoint: identity.endpoint.clone(),
+            generation: identity.generation.clone(),
+            snapshot: identity.snapshot.clone(),
         },
         state,
         helper: repo.join("scripts/check-dedicated-docker-apply.py"),
-        proof: Some(proof),
+        trial,
+        guest_enabled: true,
+        calls: FixtureCalls::default(),
     };
+    (registry, backend)
+}
+
+#[test]
+#[ignore = "requires explicit approval of the pinned, dedicated Docker trial"]
+fn controlled_docker_live_approved_receipt() {
+    let repo = repository();
+    let trial = checked_pinned_trial(&repo).expect("explicit pinned trial proof required");
+    let (mut registry, mut backend) = open_fixture(&repo, trial);
+    let registry_dir = backend.state.join("registry");
+    let project = backend.binding.project;
     let plan = backend
         .service()
         .plan(
@@ -385,7 +577,7 @@ fn controlled_docker_live_approved_receipt() {
     assert_eq!(bytes, None);
     assert_eq!(events, expected_pending);
     drop(registry);
-    backend.proof = None;
+    backend.guest_enabled = false;
     let mut registry = Registry::open(&registry_dir).expect("reopen isolated fixture registry");
     let recovered = backend
         .service()
@@ -436,6 +628,164 @@ fn controlled_docker_live_approved_receipt() {
             "after_images": stored.guest.after_images,
             "approval_reuse_rejected": true,
             "recovery_reuse_rejected": true,
+        })
+    );
+}
+
+fn assert_receipt_missing(backend: &LiveFixture) {
+    assert!(matches!(
+        fs::symlink_metadata(backend.state.join(RECEIPT_FILE)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound
+    ));
+}
+
+#[test]
+#[ignore = "requires new explicit approval of the exact dedicated Docker receipt-loss trial"]
+fn controlled_docker_live_receipt_loss() {
+    let repo = repository();
+    let trial =
+        checked_receipt_loss_trial(&repo).expect("exact approved receipt-loss trial required");
+    let policy = trial.digest.clone();
+    let image = trial.identity.image_id.clone();
+    let (mut registry, mut backend) = open_fixture(&repo, trial);
+    let project = backend.binding.project;
+    let registry_dir = backend.state.join("registry");
+    let plans = [0, 1].map(|_| {
+        backend
+            .service()
+            .plan(&mut registry, project, &policy, DockerGcKind::Image, &image)
+            .expect("plan the exact independently verified image")
+            .plan_id
+    });
+    let [plan, competing_plan] = plans;
+    let [approval, competing_approval] = plans.map(|candidate| {
+        backend
+            .service()
+            .approve(&mut registry, project, candidate, &policy)
+            .expect("issue separate one-use local approvals")
+    });
+    let lease = registry
+        .acquire_lease(project, &policy, Duration::from_secs(180), |_| false)
+        .expect("acquire isolated trial lease");
+    let interrupted = catch_unwind(AssertUnwindSafe(|| {
+        backend
+            .service()
+            .apply(&mut registry, &lease, plan, &policy, &approval)
+    }));
+    assert!(
+        interrupted
+            .err()
+            .is_some_and(|error| error.is::<InterruptedBeforeReceipt>()),
+        "expected interruption after verified deletion and before durable receipt"
+    );
+    assert_receipt_missing(&backend);
+    let witness: DeleteResponseWitness = serde_json::from_slice(
+        &read_regular(&backend.state.join(WITNESS_FILE)).expect("read synced deletion witness"),
+    )
+    .expect("parse deletion witness");
+    assert_eq!(witness.delete_http_status, 200);
+    assert_eq!(witness.delete_requests, 1);
+    assert_eq!(witness.after_images, 0);
+    let before_recovery = backend.calls;
+    assert_eq!(before_recovery.mutations, 1);
+    assert_eq!(before_recovery.guest_mutations, 1);
+    assert_eq!(before_recovery.receipt_reads, 0);
+    let (status, claimed, bytes, events) = ledger(&backend, plan);
+    assert_eq!(status, "applying");
+    assert!(claimed);
+    assert_eq!(bytes, None);
+    assert_eq!(events, ["PLAN_SAVED", "GC_APPROVED", "GC_APPLY_INTENT"]);
+
+    drop(registry);
+    backend.guest_enabled = false;
+    let mut registry = Registry::open(&registry_dir).expect("reopen isolated fixture registry");
+    let recovered = backend
+        .service()
+        .recover(&mut registry, &lease, plan)
+        .expect("recover the pending intent");
+    assert_eq!(
+        recovered,
+        DockerGcResult {
+            status: GcApplyStatus::RecoveryRequired,
+            reclaimed_bytes: 0,
+        }
+    );
+    let after_recovery = backend.calls;
+    assert_eq!(
+        after_recovery,
+        FixtureCalls {
+            receipt_reads: before_recovery.receipt_reads + 1,
+            ..before_recovery
+        }
+    );
+    assert!(matches!(
+        backend
+            .service()
+            .apply(&mut registry, &lease, plan, &policy, &approval),
+        Err(DockerGcError::Registry(RegistryError::GcStateConflict))
+    ));
+    assert!(matches!(
+        backend.service().apply(
+            &mut registry,
+            &lease,
+            competing_plan,
+            &policy,
+            &competing_approval
+        ),
+        Err(DockerGcError::Registry(
+            RegistryError::DockerGcRecoveryPending
+        ))
+    ));
+    assert_eq!(
+        backend.calls,
+        FixtureCalls {
+            // The competing apply checks the controller before attempting the claim.
+            observations: after_recovery.observations + 1,
+            ..after_recovery
+        }
+    );
+    assert_receipt_missing(&backend);
+    let (status, claimed, bytes, events) = ledger(&backend, plan);
+    assert_eq!(status, "recovery_required");
+    assert!(claimed);
+    assert_eq!(bytes, Some(0));
+    assert_eq!(
+        events,
+        [
+            "PLAN_SAVED",
+            "GC_APPROVED",
+            "GC_APPLY_INTENT",
+            "GC_RECOVERY_REQUIRED"
+        ]
+    );
+    let (competing_status, competing_claimed, competing_bytes, competing_events) =
+        ledger(&backend, competing_plan);
+    assert_eq!(competing_status, "approved");
+    assert!(!competing_claimed);
+    assert_eq!(competing_bytes, None);
+    assert_eq!(competing_events, ["PLAN_SAVED", "GC_APPROVED"]);
+    registry
+        .finish_lease(lease, AuditOutcome::Success, "FIXTURE_LEASE_CLOSED")
+        .expect("close isolated trial lease");
+    println!(
+        "DSG_LIVE_GC_RECEIPT_LOSS_RESULT {}",
+        json!({
+            "status": status,
+            "reclaimed_bytes": bytes,
+            "delete_http_status": witness.delete_http_status,
+            "delete_requests": witness.delete_requests,
+            "after_images": witness.after_images,
+            "receipt_present": false,
+            "intent_events": events.iter().filter(|event| *event == "GC_APPLY_INTENT").count(),
+            "recovery_required_events": events.iter().filter(|event| *event == "GC_RECOVERY_REQUIRED").count(),
+            "mutation_calls": backend.calls.mutations,
+            "guest_mutation_calls": backend.calls.guest_mutations,
+            "guest_observation_calls": backend.calls.guest_observations,
+            "recovery_receipt_reads": after_recovery.receipt_reads - before_recovery.receipt_reads,
+            "recovery_observation_calls": after_recovery.observations - before_recovery.observations,
+            "recovery_mutation_calls": after_recovery.mutations - before_recovery.mutations,
+            "approval_reuse_rejected": true,
+            "competing_approval_claim_rejected": true,
         })
     );
 }

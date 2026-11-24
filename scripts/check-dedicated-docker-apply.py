@@ -1,4 +1,4 @@
-"""Observe or apply the single approved live Docker GC trial."""
+"""Observe or apply one explicitly approved live Docker GC trial."""
 
 import hashlib
 import http.client
@@ -21,16 +21,24 @@ TRIAL = "dsg-gc-cf83a703d2fd"
 ENGINE = "3f0311f3-c456-43e5-a123-014f500108fd"
 GENERATION = "91258d7a9be96b3a41320dc67c09329b0e81fa23d865cd059fffe37ad9296e50"
 IMAGE = "sha256:a854697496f4c843431566255d0cb2ae780ebf51f9ca70773445c1f52549f94c"
-ROOT = Path("/run") / TRIAL
-STORE = ROOT / "store"
-SOCKET = STORE / "docker.sock"
-GROUP = f"/system.slice/{TRIAL}.service"
-CGROUP = Path("/sys/fs/cgroup" + GROUP)
 ENV = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C"}
 HEX = re.compile(r"[0-9a-f]{64}")
+TRIAL_NAME = re.compile(r"dsg-gc-([0-9a-f]{12})")
+ENGINE_ID = re.compile(r"[A-Za-z0-9:-]{8,128}")
+IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}")
 API_VERSION = re.compile(r"1\.[0-9]{1,3}")
+PINNED_MODES = ("observe", "apply")
+RECEIPT_LOSS_MODES = ("observe-receipt-loss", "apply-receipt-loss")
+APPLY_MODES = ("apply", "apply-receipt-loss")
+APPROVAL_VARIABLES = {
+    "proof_sha256": "DSG_DEDICATED_GC_APPROVED_PROOF_SHA256",
+    "engine_id": "DSG_DEDICATED_GC_APPROVED_ENGINE",
+    "generation": "DSG_DEDICATED_GC_APPROVED_GENERATION",
+    "image_id": "DSG_DEDICATED_GC_APPROVED_IMAGE",
+}
 HOST_FLAGS = ("host_namespace_socket_hidden", "guest_trial_active_before_suspend", "guest_restored_to_suspended")
 HOST_FIELDS = (*HOST_FLAGS, "script_sha256")
+MAX_PROOF = 4096
 MAX_JSON = 8192
 MAX_CHILD_OUTPUT = 16384
 GUEST_SECONDS = 8
@@ -45,6 +53,19 @@ class Failed(RuntimeError):
     def __init__(self, code, status=None):
         self.code = code
         self.status = status
+
+
+class Trial:
+    def __init__(self, proof):
+        self.name = proof["trial"]
+        self.engine = proof["engine_id"]
+        self.generation = proof["generation"]
+        self.image = proof["image_id"]
+        self.root = Path("/run") / self.name
+        self.store = self.root / "store"
+        self.socket = self.store / "docker.sock"
+        self.group = f"/system.slice/{self.name}.service"
+        self.cgroup = Path("/sys/fs/cgroup" + self.group)
 
 
 def require(condition, code):
@@ -95,42 +116,67 @@ def zeros(value, keys):
     return all(type(value.get(key)) is int and value[key] == 0 for key in keys)
 
 
+def receipt_loss_proof(envelope):
+    require(fields(envelope, ("proof", "approval", "intent")), "E_INPUT")
+    raw, approval = envelope["proof"], envelope["approval"]
+    require(isinstance(raw, str) and raw.isascii() and len(raw) <= MAX_PROOF
+            and fields(approval, APPROVAL_VARIABLES), "E_PROOF")
+    raw = raw.encode("ascii")
+    require(digest(raw) == approval["proof_sha256"], "E_PROOF")
+    proof = decode(raw, "E_PROOF")
+    require(isinstance(proof, dict) and all(isinstance(proof.get(key), str) for key in (
+        "trial", "engine_id", "generation", "image_id"
+    )), "E_BINDING")
+    require(TRIAL_NAME.fullmatch(proof["trial"]) is not None and proof["trial"] != TRIAL
+            and ENGINE_ID.fullmatch(proof["engine_id"]) is not None
+            and IMAGE_ID.fullmatch(proof["image_id"]) is not None and hex_field(proof["generation"])
+            and all(proof[key] == approval[key] for key in ("engine_id", "generation", "image_id")), "E_BINDING")
+    return proof
+
+
 def binding(mode, envelope):
-    require(mode in ("observe", "apply") and fields(envelope, ("proof", "intent")), "E_INPUT")
-    proof, intent = envelope["proof"], envelope["intent"]
-    require(isinstance(proof, dict) and (
-        proof.get("trial"), proof.get("engine_id"), proof.get("generation"), proof.get("image_id")
-    ) == (TRIAL, ENGINE, GENERATION, IMAGE), "E_BINDING")
+    if mode in RECEIPT_LOSS_MODES:
+        proof = receipt_loss_proof(envelope)
+    else:
+        require(mode in PINNED_MODES and fields(envelope, ("proof", "intent")), "E_INPUT")
+        proof = envelope["proof"]
+        require(isinstance(proof, dict) and (
+            proof.get("trial"), proof.get("engine_id"), proof.get("generation"), proof.get("image_id")
+        ) == (TRIAL, ENGINE, GENERATION, IMAGE), "E_BINDING")
+    intent = envelope["intent"]
+    trial = Trial(proof)
     require(all(proof.get(flag) is True for flag in HOST_FLAGS) and hex_field(proof.get("script_sha256")), "E_PROOF")
     require(positive_int(proof.get("engine_pid")) and all(
         hex_field(proof.get(key)) for key in ("author_fingerprint", "endpoint", "snapshot", "archive_sha256")
     ) and zeros(proof, ("before_images", "containers", "volumes", "cache", "tcp_listeners", "delete_requests"))
         and type(proof.get("after_images")) is int and proof["after_images"] == 1
         and proof.get("restricted_access_denied") is True, "E_PROOF")
-    if mode == "observe":
+    if mode not in APPLY_MODES:
         require(intent is None, "E_BINDING")
-        return proof
+        return proof, trial
 
     require(fields(intent, ("operation", "policy", "binding"))
             and hex_field(intent["operation"]) and hex_field(intent["policy"]), "E_BINDING")
+    if mode in RECEIPT_LOSS_MODES:
+        require(intent["policy"] == envelope["approval"]["proof_sha256"], "E_BINDING")
     target = intent["binding"]
     # The registry verifies its host owner. The private engine's owner is checked in snapshot().
     require(fields(target, ("project", "owner", "kind", "id", "endpoint", "generation", "snapshot"))
             and positive_int(target["project"]) and hex_field(target["owner"])
             and (target["kind"], target["id"], target["endpoint"], target["generation"], target["snapshot"])
-            == ("image", IMAGE, proof["endpoint"], GENERATION, proof["snapshot"]), "E_BINDING")
-    return proof
+            == ("image", trial.image, proof["endpoint"], trial.generation, proof["snapshot"]), "E_BINDING")
+    return proof, trial
 
 
 def monotonic_us():
     return time.monotonic_ns() // 1000
 
 
-def read_proof(expected):
-    directory = ROOT.lstat()
+def read_proof(trial, expected):
+    directory = trial.root.lstat()
     require(stat.S_ISDIR(directory.st_mode) and directory.st_uid == 0
             and stat.S_IMODE(directory.st_mode) == 0o700, "E_PROOF")
-    fd = os.open(ROOT / "proof.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    fd = os.open(trial.root / "proof.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
     with os.fdopen(fd, "rb") as proof:
         meta = os.fstat(proof.fileno())
         require(stat.S_ISREG(meta.st_mode) and meta.st_uid == 0 and not meta.st_mode & 0o022, "E_PROOF")
@@ -161,11 +207,13 @@ def transport(source, entry, *args):
     return source + ("\nwire_entry(" + entry + ", " + ascii(args) + ")\n").encode("ascii")
 
 
-def verified_result(mode, proof):
-    result = {"verified": True, "engine_id": ENGINE, "generation": GENERATION, "image_id": IMAGE,
+def verified_result(mode, proof, trial, delete_http_status=200):
+    result = {"verified": True, "engine_id": trial.engine, "generation": trial.generation, "image_id": trial.image,
               "snapshot": proof["snapshot"], "author_fingerprint": proof["author_fingerprint"], "delete_requests": 0}
-    if mode == "apply":
+    if mode in APPLY_MODES:
         result.update(delete_requests=1, after_images=0, effect="applied")
+    if mode == "apply-receipt-loss":
+        result["delete_http_status"] = delete_http_status
     return result
 
 
@@ -182,14 +230,14 @@ def result_from(result, expected, code):
     raise Failed(code)
 
 
-def unit_state():
+def unit_state(trial):
     names = ("MainPID", "ActiveState", "SubState", "RuntimeMaxUSec", "ControlGroup",
              "ExecMainStartTimestampMonotonic", "ActiveEnterTimestampMonotonic")
-    rows = command(("/usr/bin/systemctl", "show", f"{TRIAL}.service",
+    rows = command(("/usr/bin/systemctl", "show", f"{trial.name}.service",
                     "--property=" + ",".join(names)), "E_UNIT")
     values = dict(row.split("=", 1) for row in rows.splitlines())
     require(set(values) == set(names) and values["ActiveState"] == "active" and values["SubState"] == "running"
-            and values["RuntimeMaxUSec"] == "2min" and values["ControlGroup"] == GROUP, "E_UNIT")
+            and values["RuntimeMaxUSec"] == "2min" and values["ControlGroup"] == trial.group, "E_UNIT")
     pid, started, activated = (int(values[key]) for key in
                                ("MainPID", "ExecMainStartTimestampMonotonic", "ActiveEnterTimestampMonotonic"))
     now = monotonic_us()
@@ -211,24 +259,24 @@ def namespaces(pid):
     return tuple(os.readlink(f"/proc/{pid}/ns/{kind}") for kind in ("mnt", "net"))
 
 
-def join_group():
-    with (CGROUP / "cgroup.procs").open("w", encoding="ascii") as membership:
+def join_group(trial):
+    with (trial.cgroup / "cgroup.procs").open("w", encoding="ascii") as membership:
         membership.write(str(os.getpid()))
 
 
 def guest_outer(mode, envelope, source):
-    proof = binding(mode, envelope)
+    proof, trial = binding(mode, envelope)
     require(sys.platform == "linux" and os.uname().machine == "aarch64" and os.geteuid() == 0, "E_UNIT")
-    pid, deadline = unit_state()
-    read_proof(proof)
+    pid, deadline = unit_state(trial)
+    read_proof(trial, proof)
     start = proc_start(pid)
     target = namespaces(pid)
-    require(proc_group(pid) == "0::" + GROUP
+    require(proc_group(pid) == "0::" + trial.group
             and all(left != right for left, right in zip(target, namespaces(1))), "E_ISOLATION")
     argv = ("/usr/bin/nsenter", "--target", str(pid), "--mount", "--net", "--", "/usr/bin/python3", "-IB", "-")
     payload = transport(source, "guest_inner", mode, envelope, pid, start, target, deadline)
-    result = run(argv, GUEST_SECONDS, "E_ISOLATION", input=payload, preexec_fn=join_group)
-    return result_from(result, verified_result(mode, proof), "E_ISOLATION")
+    result = run(argv, GUEST_SECONDS, "E_ISOLATION", input=payload, preexec_fn=lambda: join_group(trial))
+    return result_from(result, verified_result(mode, proof, trial), "E_ISOLATION")
 
 
 def empty_network(pid):
@@ -239,16 +287,16 @@ def empty_network(pid):
                                     for row in (path / protocol).read_text(encoding="ascii").splitlines()[1:])
 
 
-def isolation(proof, pid, start, target):
-    require(proc_start(pid) == start and proc_group(pid) == proc_group("self") == "0::" + GROUP
+def isolation(trial, proof, pid, start, target):
+    require(proc_start(pid) == start and proc_group(pid) == proc_group("self") == "0::" + trial.group
             and namespaces(pid) == namespaces("self") == target
             and all(left != right for left, right in zip(target, namespaces(1))), "E_ISOLATION")
-    store = STORE.lstat()
+    store = trial.store.lstat()
     require(stat.S_ISDIR(store.st_mode) and store.st_uid == 0 and stat.S_IMODE(store.st_mode) == 0o700
-            and STORE.is_mount(), "E_ISOLATION")
-    storage = os.statvfs(STORE)
-    cpu, period = (CGROUP / "cpu.max").read_text(encoding="ascii").split()
-    memory, pids = (int((CGROUP / key).read_text(encoding="ascii")) for key in ("memory.max", "pids.max"))
+            and trial.store.is_mount(), "E_ISOLATION")
+    storage = os.statvfs(trial.store)
+    cpu, period = (trial.cgroup / "cpu.max").read_text(encoding="ascii").split()
+    memory, pids = (int((trial.cgroup / key).read_text(encoding="ascii")) for key in ("memory.max", "pids.max"))
     size = storage.f_blocks * storage.f_frsize
     require(0 < int(cpu) <= int(period) and 0 < memory <= 512 * 1024**2 and 0 < pids <= 128
             and 0 < size <= 128 * 1024**2 and 0 < storage.f_files <= 4096
@@ -258,85 +306,88 @@ def isolation(proof, pid, start, target):
             "E_ISOLATION")
 
 
-def peer_generation(conn, proof, target):
+def peer_generation(conn, trial, proof, target):
     pid = proof["engine_pid"]
     reply = conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
     actual_pid, uid, _ = struct.unpack("3i", reply)
-    require((actual_pid, uid) == (pid, 0) and proc_group(pid) == "0::" + GROUP
+    require((actual_pid, uid) == (pid, 0) and proc_group(pid) == "0::" + trial.group
             and namespaces(pid) == target and empty_network(pid), "E_PEER")
-    sock = SOCKET.lstat()
+    sock = trial.socket.lstat()
     require(stat.S_ISSOCK(sock.st_mode) and sock.st_uid == sock.st_gid == 0
             and not sock.st_mode & stat.S_IRWXO, "E_PEER")
     boot = Path("/proc/sys/kernel/random/boot_id").read_text(encoding="ascii").strip()
-    endpoint = digest(encode([TRIAL, ENGINE, str(STORE / "docker-data")]))
+    endpoint = digest(encode([trial.name, trial.engine, str(trial.store / "docker-data")]))
     generation = digest(encode([endpoint, boot, pid, proc_start(pid), sock.st_dev, sock.st_ino]))
-    require(endpoint == proof["endpoint"] and generation == GENERATION, "E_PEER")
+    require(endpoint == proof["endpoint"] and generation == trial.generation, "E_PEER")
 
 
-def docker_command(*args):
+def docker_command(trial, *args):
     executable = shutil.which("docker", path=ENV["PATH"])
     require(executable is not None, "E_INVENTORY")
-    return command((executable, "--config", str(STORE / "config"), "--host", f"unix://{SOCKET}", *args),
+    return command((executable, "--config", str(trial.store / "config"), "--host", f"unix://{trial.socket}", *args),
                    "E_INVENTORY")
 
 
-def inventory(expected, code):
-    info = docker_command("info", "--format", "{{.ID}} {{.DockerRootDir}} {{.Containers}} {{.Images}} {{.Driver}}")
-    require(info.split() == [ENGINE, str(STORE / "docker-data"), "0", str(len(expected)), "vfs"], code)
-    ids = docker_command("image", "ls", "-aq", "--no-trunc").splitlines()
-    cache = docker_command("system", "df", "--format", '{{if eq .Type "Build Cache"}}{{.TotalCount}} {{.Active}}{{end}}')
-    volumes = docker_command("volume", "ls", "-q")
+def inventory(trial, expected, code):
+    info = docker_command(trial, "info", "--format", "{{.ID}} {{.DockerRootDir}} {{.Containers}} {{.Images}} {{.Driver}}")
+    require(info.split() == [trial.engine, str(trial.store / "docker-data"), "0", str(len(expected)), "vfs"], code)
+    ids = docker_command(trial, "image", "ls", "-aq", "--no-trunc").splitlines()
+    cache = docker_command(trial, "system", "df", "--format", '{{if eq .Type "Build Cache"}}{{.TotalCount}} {{.Active}}{{end}}')
+    volumes = docker_command(trial, "volume", "ls", "-q")
     require(ids == expected and cache == "0 0" and not volumes, code)
 
 
-def snapshot(proof):
-    project = STORE / "project"
+def snapshot(trial, proof):
+    project = trial.store / "project"
     meta = project.lstat()
     require(stat.S_ISDIR(meta.st_mode) and meta.st_uid == 0 and stat.S_IMODE(meta.st_mode) == 0o700, "E_SNAPSHOT")
     owner = digest(os.fsencode(project.resolve(strict=True)))
     require(owner == proof["author_fingerprint"], "E_SNAPSHOT")
     fmt = ('{{.ID}} {{.Os}} {{.Architecture}} {{len .RepoTags}} {{len .RepoDigests}} '
            '{{len .RootFS.Layers}} {{.Size}} {{eq (index .Config.Labels "io.dsg.gc.owner") "' + owner + '"}}')
-    report = docker_command("image", "inspect", "--format", fmt, "--", IMAGE)
-    require(report.split() == [IMAGE, "linux", "arm64", "0", "0", "0", "0", "true"]
-            and digest(encode([IMAGE, report])) == proof["snapshot"], "E_SNAPSHOT")
-    release = docker_command("version", "--format", "{{.Server.Version}} {{.Server.APIVersion}}").split()
+    report = docker_command(trial, "image", "inspect", "--format", fmt, "--", trial.image)
+    require(report.split() == [trial.image, "linux", "arm64", "0", "0", "0", "0", "true"]
+            and digest(encode([trial.image, report])) == proof["snapshot"], "E_SNAPSHOT")
+    release = docker_command(trial, "version", "--format", "{{.Server.Version}} {{.Server.APIVersion}}").split()
     require(len(release) == 2 and release[0] == proof.get("server_version")
             and API_VERSION.fullmatch(release[1]) is not None, "E_SNAPSHOT")
     return release[1]
 
 
-def delete_once(conn, api_version):
-    request = (f"DELETE /v{api_version}/images/{IMAGE}?force=false&noprune=true HTTP/1.1\r\n"
+def delete_once(conn, api_version, image):
+    request = (f"DELETE /v{api_version}/images/{image}?force=false&noprune=true HTTP/1.1\r\n"
                "Host: localhost\r\nConnection: close\r\nContent-Length: 0\r\n\r\n").encode("ascii")
     conn.sendall(request)
     reply = http.client.HTTPResponse(conn, method="DELETE")
     with reply:
         reply.begin()
-        if reply.status != 200:
-            raise Failed("E_DELETE_STATUS", reply.status)
+        status = reply.status
+        if status != 200:
+            raise Failed("E_DELETE_STATUS", status)
         payload = decode(reply.read(MAX_JSON + 1), "E_DELETE_RESULT")
-    require(payload == [{"Deleted": IMAGE}], "E_DELETE_RESULT")
+    require(payload == [{"Deleted": image}], "E_DELETE_RESULT")
+    return status
 
 
 def guest_inner(mode, envelope, pid, start, target, deadline):
-    proof = binding(mode, envelope)
-    read_proof(proof)
-    isolation(proof, pid, start, target)
+    proof, trial = binding(mode, envelope)
+    read_proof(trial, proof)
+    isolation(trial, proof, pid, start, target)
+    delete_http_status = None
     with socket.socket(socket.AF_UNIX) as conn:
         conn.settimeout(1.5)
-        conn.connect(str(SOCKET))
-        peer_generation(conn, proof, target)
-        inventory([IMAGE], "E_INVENTORY")
-        api_version = snapshot(proof)
-        peer_generation(conn, proof, target)
-        if mode == "apply":
+        conn.connect(str(trial.socket))
+        peer_generation(conn, trial, proof, target)
+        inventory(trial, [trial.image], "E_INVENTORY")
+        api_version = snapshot(trial, proof)
+        peer_generation(conn, trial, proof, target)
+        if mode in APPLY_MODES:
             require(deadline - monotonic_us() >= 4_000_000 and proc_start(pid) == start, "E_TIME")
-            delete_once(conn, api_version)
-            inventory([], "E_AFTER")
-            peer_generation(conn, proof, target)
+            delete_http_status = delete_once(conn, api_version, trial.image)
+            inventory(trial, [], "E_AFTER")
+            peer_generation(conn, trial, proof, target)
 
-    return verified_result(mode, proof)
+    return verified_result(mode, proof, trial, delete_http_status)
 
 
 def timed_out(*_):
@@ -360,12 +411,35 @@ def wire_entry(entry, args):
         raise SystemExit(1) from None
 
 
+def check_host_approval(envelope, trial):
+    require(all(os.getenv(variable) == envelope["approval"][key]
+                for key, variable in APPROVAL_VARIABLES.items()), "E_BINDING")
+    dist = Path(__file__).resolve().parent.parent / "dist"
+    suffix = TRIAL_NAME.fullmatch(trial.name).group(1)
+    directory = dist / f"dsg-dedicated-engine-{suffix}"
+    source = dist.parent / os.getenv("DSG_DEDICATED_GC_EVIDENCE", "")
+    require(source == directory / "PREAPPROVAL.json" and source.resolve(strict=True) == source, "E_PROOF")
+    uid = os.geteuid()
+    for path, private in ((dist, False), (directory, True)):
+        info = path.lstat()
+        require(stat.S_ISDIR(info.st_mode) and info.st_uid == uid
+                and (stat.S_IMODE(info.st_mode) == 0o700 if private else not info.st_mode & 0o022), "E_PROOF")
+    fd = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    with os.fdopen(fd, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        require(stat.S_ISREG(info.st_mode) and info.st_uid == uid
+                and not info.st_mode & 0o7177 and info.st_nlink == 1, "E_PROOF")
+        require(stream.read(MAX_PROOF + 1) == envelope["proof"].encode("ascii"), "E_PROOF")
+
+
 def host_main():
     try:
-        require(len(sys.argv) == 2 and sys.argv[1] in ("observe", "apply"), "E_INPUT")
+        require(len(sys.argv) == 2 and sys.argv[1] in (*PINNED_MODES, *RECEIPT_LOSS_MODES), "E_INPUT")
         mode = sys.argv[1]
         envelope = decode(sys.stdin.buffer.read(MAX_JSON + 1), "E_INPUT")
-        proof = binding(mode, envelope)
+        proof, trial = binding(mode, envelope)
+        if mode in RECEIPT_LOSS_MODES:
+            check_host_approval(envelope, trial)
         prlctl = next((path for path in ("/usr/local/bin/prlctl",
                      "/Applications/Parallels Desktop.app/Contents/MacOS/prlctl") if os.access(path, os.X_OK)), None)
         require(prlctl is not None, "E_VM")
@@ -374,7 +448,7 @@ def host_main():
         source = Path(__file__).read_bytes().rsplit(b'\nif __name__ == "__main__":\n', 1)[0]
         payload = transport(source, "guest_outer", mode, envelope, source)
         reply = run((prlctl, "exec", VM, "/usr/bin/python3", "-IB", "-"), 12, "E_TRANSPORT", input=payload)
-        result = result_from(reply, verified_result(mode, proof), "E_TRANSPORT")
+        result = result_from(reply, verified_result(mode, proof, trial), "E_TRANSPORT")
         print(encode(result).decode("ascii"))
     except Exception as exc:
         print(encode(error_payload(exc)).decode("ascii"), file=sys.stderr)
