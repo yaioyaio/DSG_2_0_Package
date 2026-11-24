@@ -522,7 +522,11 @@ mod supported {
     #[cfg(test)]
     mod tests {
         use super::*;
-        use std::os::unix::fs::symlink;
+        use crate::registry::{AuditOutcome, GcApplyStatus, Registry, RegistryError};
+        use std::io::Write;
+        use std::os::unix::{fs::symlink, process::ExitStatusExt};
+        use std::process::{Child, Command, Stdio};
+        use std::time::{Duration, Instant};
         use tempfile::{tempdir, TempDir};
 
         const PLAN_ID: i64 = 3;
@@ -581,11 +585,198 @@ mod supported {
             }
 
             fn stage(&self) -> PathBuf {
-                let project = Project::open(self.root.path()).unwrap();
-                let quarantine = Quarantine::open(&project, PLAN_ID, true).unwrap();
-                rename_noreplace(&project.root, &quarantine.plan, "build").unwrap();
-                quarantine.plan.path.join("build")
+                stage_output(self.root.path(), PLAN_ID)
             }
+        }
+
+        fn stage_output(root: &Path, plan_id: i64) -> PathBuf {
+            let project = Project::open(root).unwrap();
+            let quarantine = Quarantine::open(&project, plan_id, true).unwrap();
+            rename_noreplace(&project.root, &quarantine.plan, "build").unwrap();
+            quarantine.plan.path.join("build")
+        }
+
+        struct OwnedChild(Child);
+
+        impl Drop for OwnedChild {
+            fn drop(&mut self) {
+                if !matches!(self.0.try_wait(), Ok(Some(_))) {
+                    let _ = self.0.kill();
+                    let _ = self.0.wait();
+                }
+            }
+        }
+
+        #[test]
+        fn crash_after_quarantine_recovers_file_and_committed_audit() {
+            const CHILD_MODE: &str = "__dsg_quarantine_crash_fixture_child";
+            let scope = "c".repeat(64);
+            let policy_digest = "a".repeat(64);
+            let approval_digest = "b".repeat(64);
+
+            // The test harness accepts a skip filter. This private filter selects the
+            // child role without an environment hook or any change to the CLI.
+            if std::env::args_os().any(|arg| arg == CHILD_MODE) {
+                let (project_id, plan_id): (i64, i64) =
+                    serde_json::from_reader(io::stdin().lock()).unwrap();
+                let mut registry = Registry::open(Path::new("state")).unwrap();
+                let lease = registry
+                    .acquire_lease(project_id, &scope, Duration::from_secs(1), |_| false)
+                    .unwrap();
+                registry
+                    .attach_lease_process(&lease, std::process::id())
+                    .unwrap();
+                registry
+                    .claim_gc(&lease, plan_id, &policy_digest, &approval_digest)
+                    .unwrap();
+                stage_output(Path::new("."), plan_id);
+                std::thread::sleep(Duration::from_secs(10));
+                panic!("parent missed the quarantine boundary");
+            }
+
+            let fixture = Fixture::new();
+            let root = fixture.root.path();
+            let state = root.join("state");
+            let file = root.join("build/nested/file");
+            let identity = filesystem::identity(&file.metadata().unwrap()).unwrap();
+            let expected = Sha256::digest(fs::read(&file).unwrap());
+            let mut registry = Registry::open(&state).unwrap();
+            let project_id = registry.register(root, "crash-fixture", 1).unwrap().id;
+            let ttl = Duration::from_secs(60);
+            let plan_id = registry
+                .save_plan(project_id, &policy_digest, &fixture.plan, ttl)
+                .unwrap()
+                .plan_id;
+            registry
+                .register_gc_output(project_id, "build", &fixture.identity)
+                .unwrap();
+            registry
+                .approve_gc(
+                    project_id,
+                    plan_id,
+                    "build",
+                    &policy_digest,
+                    &fixture.identity,
+                    &approval_digest,
+                    ttl,
+                )
+                .unwrap();
+            drop(registry);
+
+            let staged = root
+                .join(".dsg/quarantine")
+                .join(plan_id.to_string())
+                .join("build/nested/file");
+            let test_name =
+                "gc::supported::tests::crash_after_quarantine_recovers_file_and_committed_audit";
+            let mut child = OwnedChild(
+                Command::new(std::env::current_exe().unwrap())
+                    .args(["--exact", test_name, "--skip", CHILD_MODE])
+                    .current_dir(root)
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::null())
+                    .spawn()
+                    .unwrap(),
+            );
+            let pid = child.0.id();
+            let mut input = child.0.stdin.take().unwrap();
+            write!(input, "[{project_id},{plan_id}]").unwrap();
+            drop(input);
+            let deadline = Instant::now() + Duration::from_secs(8);
+            while !staged.is_file() {
+                assert!(
+                    child.0.try_wait().unwrap().is_none(),
+                    "child exited before staging"
+                );
+                assert!(Instant::now() < deadline, "quarantine deadline expired");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert!(!file.exists());
+            child.0.kill().unwrap();
+            assert_eq!(child.0.wait().unwrap().signal(), Some(libc::SIGKILL));
+
+            let mut registry = Registry::open(&state).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(3);
+            let lease = loop {
+                match registry.acquire_lease(project_id, &scope, ttl, |recorded| recorded == pid) {
+                    Ok(lease) => break lease,
+                    Err(RegistryError::LeaseConflict) if Instant::now() < deadline => {
+                        std::thread::sleep(Duration::from_millis(25))
+                    }
+                    _ => panic!("could not acquire recovery lease"),
+                }
+            };
+            let claim = registry.pending_gc(&lease, plan_id).unwrap();
+            let restored = recover(
+                root,
+                &fixture.policy,
+                plan_id,
+                &claim.relative_path,
+                &claim.identity,
+                &claim.payload,
+            );
+            assert_eq!(restored.reason, "gc_artifacts_restored");
+            assert_eq!(restored.status, GcStatus::Preserved);
+            assert_eq!(restored.reclaimed_bytes, 0);
+            registry
+                .finish_gc(
+                    &lease,
+                    plan_id,
+                    GcApplyStatus::Preserved,
+                    restored.reclaimed_bytes,
+                )
+                .unwrap();
+            assert!(matches!(
+                registry.pending_gc(&lease, plan_id),
+                Err(RegistryError::GcStateConflict)
+            ));
+            registry
+                .finish_lease(lease, AuditOutcome::Incomplete, "GC_LEASE_RELEASED")
+                .unwrap();
+            drop(registry);
+            assert_eq!(
+                filesystem::identity(&file.metadata().unwrap()),
+                Some(identity)
+            );
+            assert_eq!(Sha256::digest(fs::read(file).unwrap()), expected);
+            assert!(!staged.exists());
+
+            let db = rusqlite::Connection::open_with_flags(
+                state.join("registry.sqlite3"),
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+            )
+            .unwrap();
+            let integrity: String = db
+                .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(integrity, "ok");
+            let violations: i64 = db
+                .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(violations, 0);
+            let status: (String, i64) = db
+                .query_row(
+                    "SELECT gc_plan.status, gc_application.bytes_applied FROM gc_plan
+                 JOIN gc_application ON gc_plan.id=gc_application.plan_id WHERE gc_plan.id=?1",
+                    [plan_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(status, ("preserved".into(), 0));
+            let mut query = db
+                .prepare(
+                    "SELECT reason_code FROM audit_event
+                 WHERE plan_id=?1 AND action='gc_apply' ORDER BY id",
+                )
+                .unwrap();
+            let events: Vec<String> = query
+                .query_map([plan_id], |row| row.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            assert_eq!(events, ["GC_APPLY_INTENT", "GC_PRESERVED"]);
         }
 
         #[test]
