@@ -174,3 +174,10 @@ DSG-08의 `f6397b2`를 PR #15로 `develop`, PR #16으로 `main`에 반영했다.
 - `feature/20261124-macos-qualification`, 기준 `b7d94d6`, Rust 소스 트리 `681be1efa0ed4136f47fb6d4c5c6a7122b503519`. 최적화 빌드한 현재 바이너리의 임시 설치본으로 `DSG_TEST_AGENT_NATIVE=all`의 실제 Claude·Codex·Gemini 9개 사례와 MCP 대조를 통과했다. 네트워크와 쓰기를 제한한 시험에서 합성 응답과 대역 도구를 사용했다. [에이전트 검증](TEST_PLAN.md#에이전트-연동-검증)
 - 현재 `dsgd`의 임시 GUI launchd 등록·재시작·해제와 기존 격리 Docker의 실제 Unix·TCP 직접 접근 차단 및 브로커 조회가 통과했다. 별도 macOS 운영 계정·공식 LaunchDaemon은 관리자 경로가 필요하다. 기존 Parallels Ubuntu ARM64의 기본 게스트 명령을 확인하고 일시정지로 복귀했다. Linux 관리형 실행과 Windows 실제 Docker 엔진은 별도 수용 조건이다. [플랫폼 검증](TEST_PLAN.md#브로커와-서비스-검증)
 - macOS `0.1.1-rc.1`을 독립 대상 디렉터리에서 두 번 최적화 빌드했다. `tar.gz` SHA-256이 일치했고 보존된 `0.1.0`에서 업그레이드·실행·제거를 통과했다. 기존 Docker 엔진에서 독립 조회한 컨테이너 7개, 이미지 ID 5개, 볼륨 0개가 현재 패키지의 API·WebKit 1060px·390px 화면에 일치했다. 첫 대시보드 호출은 실행 래퍼의 컨텍스트 변수가 누락돼 실패했고, 동일 패키지를 명시 컨텍스트로 재검증해 통과했다. `dist/dsg-macos-qualification-681be1e/`에 패키지·SHA-256·검증 요약을 보존했다. 임시 설치·서비스와 보조 워크트리 잔여는 0개다. [제품 검증](RELEASE.md)
+
+## 최신 계획과 산출물 정합성 검증
+
+- 2026-11-24, `feature/20261124-latest-plan-evidence`, 기준 `fb67f38`, Rust 소스 트리 `681be1e`. WBS 14개와 DSG-01~08을 대조하고 구현 산출물과 실측·시험 근거를 별도 열로 정리했다. PLAN·WBS, 실행 초안의 단계별 산출물·수용 기준 및 요구사항 13개의 기준을 보존했다. 문서의 1:1 대조 결과와 구현·시험의 범위별 수용 판정은 [작업 대조표](TASK.md)에 기록한다.
+- 이번 macOS 회귀에서 `sh scripts/test.sh`의 Python 14개와 진단·스캔, `DSG_TEST_DOCKER_CONTEXT=dockerguard-test DSG_TEST_BUILDX=1 DSG_TEST_WEBKIT=1 sh scripts/test-rust.sh`의 Rust 103개 및 통합 검증을 통과했다. 파일 격리 직후 강제 종료 복구, 기존 격리 엔진 인벤토리 7/5/0 및 중복 후보 0건, 기본 Buildx 캐시 208개 조회·보존, API와 WebKit 1060px·390px 집계 일치를 확인했다. [시험 절차](TEST_PLAN.md)
+- 보존 아카이브 4개의 대상·버전·아카이브 및 파일별 SHA-256을 대조했다. 최신 macOS 아카이브는 `QUALIFICATION.json`의 해시와 현재 Rust 소스 트리에 일치했다. 이전 Linux·Windows 패키지 수명 주기와 Windows NTFS·SCM은 각 절의 기존 실측을 인용한다. 이번에는 VM을 실행하지 않았으며 Docker 데몬 시작·실제 Docker 자원 변경·보조 워크트리 생성은 0회다. [후보별 근거](RELEASE.md)
+- 재개 항목은 WBS 2.3의 별도 빌더 조회·캐시 소유권·안전한 회수다. 실제 Compose 이미지·마운트 변경, Docker 이미지 적용 구현과 승인, 관리형 실행·OS 서비스·패키지의 플랫폼별 잔여 검증을 [백로그](BACKLOG.md)와 [출시 게이트](TEST_PLAN.md#출시-게이트)에 연결했다.
