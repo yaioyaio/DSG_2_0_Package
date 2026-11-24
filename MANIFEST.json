@@ -26,7 +26,8 @@
     "windows_installer_process_architecture": "Current ada5a09 package: on the existing ARM64 Windows Parallels guest, native ARM64 and emulated x64 portable CPython 3.13.9 each returned exit 1 with the expected host mismatch for x64 install and upgrade. Prefix, existing pointer, installed hashes and fixture user file were preserved. Guest was restored to suspended. Current existing Mac/Parallels scope is complete. Windows x64 OS lifecycle is excluded because the registered Windows guest is ARM64.",
     "docker_controlled_gc": "Seven controlled-backend tests passed plus 17 registry and four image regressions. Exact binding, one-use approval, slot exclusion, durable intent and receipt recovery passed. Existing Docker contexts preserve unverified control.",
     "macos_lease_scope": "Runner, registry and process identity tests passed. Owned detached processes retained expired leases during normal exit and forced supervisor termination; when they exited, lease reacquisition and audit passed in throwaway state.",
-    "docker_pending_target": "macOS: eight controlled Docker GC tests, 17 registry tests and four image tests passed. An unresolved intent blocks new plans, approvals and old tokens for the same endpoint/kind/ID until receipt recovery settles it. Full Python 14 and Rust 118 plus scoped inventory and Buildx passed. Live dedicated-engine application and recovery remain unverified."
+    "docker_pending_target": "macOS: eight controlled Docker GC tests, 17 registry tests and four image tests passed. An unresolved intent blocks new plans, approvals and old tokens for the same endpoint/kind/ID until receipt recovery settles it. Full Python 14 and Rust 118 plus scoped inventory and Buildx passed. Live dedicated-engine application and recovery remain unverified.",
+    "dedicated_docker_preapproval": "Existing Ubuntu ARM64 verified read-only prerequisites, then a transient Docker 29.1.3 engine verified a private Unix peer, isolated mount and network, no TCP listener and denied unprivileged clients. Initial inventory was empty. Exactly one untagged no-layer synthetic image matched the expected configuration digest and deterministic archive digest. Delete requests: zero. Guest suspended; actual application and receipt recovery await separate approval for this generation and image."
   },
   "files": [
     {
@@ -141,8 +142,8 @@
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "da59afdb014bf391ffe72895b027175c849f14501751276239ff651ecb320717",
-      "bytes": 26671
+      "sha256": "212c8b9160adf51f27a2c24623efb19d68b21307cdb565c5af546c45203c2999",
+      "bytes": 27703
     },
     {
       "path": "docs/WBS.md",
@@ -463,6 +464,11 @@
       "path": "scripts/check-dashboard.py",
       "sha256": "6b27ec7bfe81caad9534b2771fde6c1fead0d1cf08329f7bc8c7b6e9414771ba",
       "bytes": 7075
+    },
+    {
+      "path": "scripts/check-dedicated-docker-engine.py",
+      "sha256": "559d401f7271d598f0ac84eec8426f614a3636f723eeab7d2e90351c8330cdb3",
+      "bytes": 13026
     },
     {
       "path": "scripts/check-enforcement.py",
