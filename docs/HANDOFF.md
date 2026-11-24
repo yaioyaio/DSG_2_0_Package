@@ -151,3 +151,9 @@ DSG-08의 `f6397b2`를 PR #15로 `develop`, PR #16으로 `main`에 반영했다.
 - `feature/20261124-windows-foundation`, 기준 `1708cea`. WBS 1.3의 Windows 스캔·계획에서 읽기 전용 NTFS 핸들로 파일·볼륨 ID와 링크 수를 확인한다. 프로젝트 루트까지의 경로와 검사 중인 디렉터리를 핸들로 유지한다. 하위 파일 ID와 링크 수를 메타데이터 다이제스트에 반영한다. 링크·junction·다중 하드 링크·공유 충돌로 확인할 수 없는 후보는 보존한다. Windows의 실제 GC 적용은 별도 범위다. [코드](../rust-scaffold/crates/dsg-core/src/filesystem/windows.rs) · [작업 대조표](TASK.md)
 - macOS에서 Python 14개와 Rust 98개 및 통합 러너, `cargo fmt` 검증을 통과했다. Windows ARM64 MSVC로 교차 링크한 Rust 시험 바이너리를 해시 비교 후 기존 Parallels Windows 11 ARM64에서 실행했다. `filesystem::tests --test-threads=1`의 9개가 통과했다. 그중 Windows 전용 5개가 디렉터리 교체 차단과 검사 종료 뒤 정상 교체, 동일 시간·크기 하위 파일 교체, 하드 링크, junction, 공유 충돌을 재현했다. [재현 절차](TEST_PLAN.md#rust-foundation-검증)
 - PowerShell 실행 경로와 공유 파일 전달을 분리해 확인했다. 디렉터리 교체 시험에서 출력 핸들만 해제한 경우 루트 핸들이 보호를 유지했다. 루트 검사를 종료한 뒤 교체를 재검증했다. 호스트·게스트 임시 시험 자료를 회수하고 게스트를 원래 일시정지 상태로 돌렸다. Docker 자원 변경과 보조 워크트리 생성은 0회다.
+
+## DSG-03 기본 Buildx 빌더 조회 검증
+
+- `feature/20261124-buildx-observation`, 기준 `c3707b0`. WBS 2.3의 기본 Buildx 조회를 `docker-buildx-cache`로 추가했다. 빈 전용 Buildx 설정과 명시 컨텍스트, 조회 전후 엔진 ID 대조, 수치 범위 검증, 하위 프로세스 정리를 적용했다. 조회가 실패하면 수치를 미확인으로 남기고 보존한다. [명령과 결과](API_SPEC.md#docker-읽기-전용-인벤토리)
+- `DSG_TEST_DOCKER_CONTEXT=dockerguard-test DSG_TEST_BUILDX=1 sh scripts/test-rust.sh`에서 Rust 102개와 통합 검증을 통과했다. 실제 기본 Buildx 캐시는 총 208개, 회수 가능 표시 208개, 공유 8개, 변경 가능 167개다. 각 수치는 해당 플래그의 집계로 일부 항목은 둘 이상의 상태에 해당한다. 실제 Docker 자원과 캐시는 변경하지 않았다.
+- 첫 통합 시 기존 워크트리 정리 fixture가 실패했다. 보존한 배포 바이너리의 같은 fixture를 단독으로 실행해 통과했고 후속 전체 검증도 통과했다. 현재 격리 컨텍스트에서는 실행 중인 별도 BuildKit 빌더를 확인하지 못했다. 별도 빌더의 조회, 소유권과 GC 수용 기준은 남아 있다. 이번 검증에서 VM 실행과 보조 워크트리 생성은 0회다.

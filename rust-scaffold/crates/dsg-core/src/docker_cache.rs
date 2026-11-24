@@ -5,6 +5,8 @@ use crate::docker::{
 use serde::{Deserialize, Serialize};
 
 const MAX_SUMMARY_BYTES: usize = 128;
+const MAX_BUILDX_BYTES: usize = 64 * 1024;
+const MAX_BUILDX_RECORDS: usize = 4096;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -29,6 +31,32 @@ pub struct BuildCacheInventory {
     pub disposition: BuildCacheDisposition,
     pub reason: BuildCacheReason,
     pub issues: Vec<InventoryIssue>,
+}
+
+pub trait BuildxRead: DockerRead {
+    fn query_buildx_usage(&self) -> Result<String, QueryFailure>;
+}
+
+#[derive(Debug, Serialize)]
+pub struct BuildxCacheInventory {
+    pub context: String,
+    pub engine_id: Option<String>,
+    pub status: InventoryStatus,
+    pub total_count: Option<u64>,
+    pub reclaimable_count: Option<u64>,
+    pub shared_count: Option<u64>,
+    pub mutable_count: Option<u64>,
+    pub disposition: BuildCacheDisposition,
+    pub reason: BuildCacheReason,
+    pub issues: Vec<InventoryIssue>,
+}
+
+#[derive(Default)]
+struct BuildxUsage {
+    total: u64,
+    reclaimable: u64,
+    shared: u64,
+    mutable: u64,
 }
 
 #[derive(Deserialize)]
@@ -73,14 +101,19 @@ fn engine_usage(query: &impl DockerRead) -> Result<(String, u64, u64), Inventory
         stage: InventoryStage::BuildCache,
         failure,
     })?;
-    let recheck = |failure| InventoryIssue {
+    recheck_engine(query, &engine)?;
+    Ok((engine, total, active))
+}
+
+fn recheck_engine(query: &impl DockerRead, engine: &str) -> Result<(), InventoryIssue> {
+    let issue = |failure| InventoryIssue {
         stage: InventoryStage::EngineRecheck,
         failure,
     };
-    if query_engine(query).map_err(recheck)? != engine {
-        return Err(recheck(QueryFailure::Malformed));
+    if query_engine(query).map_err(issue)? != engine {
+        return Err(issue(QueryFailure::Malformed));
     }
-    Ok((engine, total, active))
+    Ok(())
 }
 
 /// Observe only the selected engine's embedded builder cache summary.
@@ -110,6 +143,87 @@ pub fn build_cache_inventory(query: &impl DockerRead) -> BuildCacheInventory {
             inventory.status = InventoryStatus::Complete;
             inventory.total_count = Some(total);
             inventory.active_count = Some(active);
+            inventory.reason = BuildCacheReason::UnknownOwnership;
+        }
+        Err(issue) => inventory.issues.push(issue),
+    }
+    inventory
+}
+
+fn buildx_flag(value: &str) -> Result<u64, QueryFailure> {
+    match value {
+        "true" => Ok(1),
+        "false" => Ok(0),
+        _ => Err(QueryFailure::Malformed),
+    }
+}
+
+fn buildx_usage(response: &str) -> Result<BuildxUsage, QueryFailure> {
+    if response.len() > MAX_BUILDX_BYTES {
+        return Err(QueryFailure::TooLarge);
+    }
+    let mut usage = BuildxUsage::default();
+    for (index, row) in response.lines().enumerate() {
+        if index >= MAX_BUILDX_RECORDS {
+            return Err(QueryFailure::TooLarge);
+        }
+        let (reclaimable, rest) = row.split_once('|').ok_or(QueryFailure::Malformed)?;
+        let (shared, mutable) = rest.split_once('|').ok_or(QueryFailure::Malformed)?;
+        usage.reclaimable += buildx_flag(reclaimable)?;
+        usage.shared += buildx_flag(shared)?;
+        usage.mutable += buildx_flag(mutable)?;
+        usage.total += 1;
+    }
+    Ok(usage)
+}
+
+fn engine_buildx_usage(query: &impl BuildxRead) -> Result<(String, BuildxUsage), InventoryIssue> {
+    let engine = query_engine(query).map_err(|failure| InventoryIssue {
+        stage: InventoryStage::Engine,
+        failure,
+    })?;
+    let usage = query
+        .query_buildx_usage()
+        .and_then(|response| buildx_usage(&response))
+        .map_err(|failure| InventoryIssue {
+            stage: InventoryStage::BuildCache,
+            failure,
+        })?;
+    recheck_engine(query, &engine)?;
+    Ok((engine, usage))
+}
+
+/// Observe records from the selected context's engine-provided Buildx builder.
+pub fn buildx_cache_inventory(query: &impl BuildxRead) -> BuildxCacheInventory {
+    let mut inventory = BuildxCacheInventory {
+        context: String::new(),
+        engine_id: None,
+        status: InventoryStatus::Unknown,
+        total_count: None,
+        reclaimable_count: None,
+        shared_count: None,
+        mutable_count: None,
+        disposition: BuildCacheDisposition::Preserve,
+        reason: BuildCacheReason::IncompleteInventory,
+        issues: Vec::new(),
+    };
+    let context = query.context();
+    if !valid_context_name(context) {
+        inventory.issues.push(InventoryIssue {
+            stage: InventoryStage::Context,
+            failure: QueryFailure::InvalidSelector,
+        });
+        return inventory;
+    }
+    inventory.context = context.to_owned();
+    match engine_buildx_usage(query) {
+        Ok((engine, usage)) => {
+            inventory.engine_id = Some(engine);
+            inventory.status = InventoryStatus::Complete;
+            inventory.total_count = Some(usage.total);
+            inventory.reclaimable_count = Some(usage.reclaimable);
+            inventory.shared_count = Some(usage.shared);
+            inventory.mutable_count = Some(usage.mutable);
             inventory.reason = BuildCacheReason::UnknownOwnership;
         }
         Err(issue) => inventory.issues.push(issue),
@@ -152,6 +266,152 @@ mod tests {
         let inventory = build_cache_inventory(&fixture);
         assert!(fixture.calls.borrow().is_empty());
         inventory
+    }
+
+    struct BuildxFixture<'a> {
+        engine: Fixture<'a>,
+        usage: Result<&'a str, QueryFailure>,
+        calls_before_usage: usize,
+    }
+
+    impl DockerRead for BuildxFixture<'_> {
+        fn context(&self) -> &str {
+            self.engine.context()
+        }
+
+        fn query(&self, operation: DockerOperation<'_>) -> Result<String, QueryFailure> {
+            self.engine.query(operation)
+        }
+    }
+
+    impl BuildxRead for BuildxFixture<'_> {
+        fn query_buildx_usage(&self) -> Result<String, QueryFailure> {
+            assert_eq!(self.engine.calls.borrow().len(), self.calls_before_usage);
+            self.usage.map(str::to_owned)
+        }
+    }
+
+    fn read_buildx(
+        usage: Result<&str, QueryFailure>,
+        recheck: Option<Result<&str, QueryFailure>>,
+    ) -> BuildxCacheInventory {
+        let mut calls = VecDeque::from([(DockerOperation::Engine, Ok("engine-test"))]);
+        if let Some(recheck) = recheck {
+            calls.push_back((DockerOperation::Engine, recheck));
+        }
+        let fixture = BuildxFixture {
+            engine: Fixture {
+                context: "isolated-test",
+                calls: RefCell::new(calls),
+            },
+            usage,
+            calls_before_usage: usize::from(recheck.is_some()),
+        };
+        let inventory = buildx_cache_inventory(&fixture);
+        assert!(fixture.engine.calls.borrow().is_empty());
+        inventory
+    }
+
+    #[test]
+    fn buildx_counts_flags_and_preserves_all_records_including_empty_usage() {
+        for (wire, expected) in [
+            (
+                "true|true|false\ntrue|false|false\nfalse|false|true\r\n",
+                [3, 2, 1, 1],
+            ),
+            ("", [0, 0, 0, 0]),
+        ] {
+            let result = read_buildx(Ok(wire), Some(Ok("engine-test")));
+            assert_eq!(result.engine_id.as_deref(), Some("engine-test"));
+            assert_eq!(result.status, InventoryStatus::Complete);
+            assert_eq!(
+                [
+                    result.total_count,
+                    result.reclaimable_count,
+                    result.shared_count,
+                    result.mutable_count
+                ],
+                expected.map(Some)
+            );
+            assert_eq!(result.disposition, BuildCacheDisposition::Preserve);
+            assert_eq!(result.reason, BuildCacheReason::UnknownOwnership);
+            assert!(result.issues.is_empty());
+        }
+    }
+
+    #[test]
+    fn buildx_discards_all_counts_for_malformed_limited_unavailable_or_changed_usage() {
+        let too_many = "true|true|true\n".repeat(MAX_BUILDX_RECORDS + 1);
+        let too_large = " ".repeat(MAX_BUILDX_BYTES + 1);
+        for (wire, recheck, stage, failure) in [
+            (
+                Ok("true|false|true|raw marker"),
+                None,
+                InventoryStage::BuildCache,
+                QueryFailure::Malformed,
+            ),
+            (
+                Ok("true|False|true"),
+                None,
+                InventoryStage::BuildCache,
+                QueryFailure::Malformed,
+            ),
+            (
+                Ok("\n"),
+                None,
+                InventoryStage::BuildCache,
+                QueryFailure::Malformed,
+            ),
+            (
+                Ok(&too_many),
+                None,
+                InventoryStage::BuildCache,
+                QueryFailure::TooLarge,
+            ),
+            (
+                Ok(&too_large),
+                None,
+                InventoryStage::BuildCache,
+                QueryFailure::TooLarge,
+            ),
+            (
+                Err(QueryFailure::Unavailable),
+                None,
+                InventoryStage::BuildCache,
+                QueryFailure::Unavailable,
+            ),
+            (
+                Err(QueryFailure::Timeout),
+                None,
+                InventoryStage::BuildCache,
+                QueryFailure::Timeout,
+            ),
+            (
+                Ok("true|false|true"),
+                Some(Ok("engine-changed")),
+                InventoryStage::EngineRecheck,
+                QueryFailure::Malformed,
+            ),
+        ] {
+            let result = read_buildx(wire, recheck);
+            assert_eq!(result.status, InventoryStatus::Unknown);
+            assert_eq!(result.engine_id, None);
+            assert_eq!(
+                [
+                    result.total_count,
+                    result.reclaimable_count,
+                    result.shared_count,
+                    result.mutable_count
+                ],
+                [None; 4]
+            );
+            assert_eq!(result.disposition, BuildCacheDisposition::Preserve);
+            assert_eq!(result.reason, BuildCacheReason::IncompleteInventory);
+            assert_eq!(result.issues, [InventoryIssue { stage, failure }]);
+            assert!(!serde_json::to_string(&result)
+                .unwrap()
+                .contains("raw marker"));
+        }
     }
 
     #[test]

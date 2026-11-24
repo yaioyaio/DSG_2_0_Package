@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 use dsg_core::docker;
-use dsg_core::docker_cache::build_cache_inventory;
+use dsg_core::docker_cache::{build_cache_inventory, buildx_cache_inventory};
 use dsg_core::docker_command::{discover_contexts, DockerCli};
 use dsg_core::filesystem::{self, ScanReport};
 use dsg_core::policy::{self, Policy, PolicyError, POLICY_VERSION, PROJECT_CONFIG};
@@ -119,6 +119,11 @@ enum Command {
     },
     /// 선택한 엔진의 빌드 캐시를 읽기 전용으로 집계합니다.
     DockerBuildCache {
+        #[arg(long)]
+        context: String,
+    },
+    /// 지정한 엔진의 기본 Buildx 빌더 캐시 상태를 조회합니다.
+    DockerBuildxCache {
         #[arg(long)]
         context: String,
     },
@@ -304,6 +309,29 @@ fn run(cli: &Cli) -> Result<Output, CliError> {
             exit,
         });
     }
+    if let Command::DockerBuildxCache { context } = &cli.command {
+        let backend = DockerCli::new(context)
+            .map_err(|_| CliError::new("CONFIG_INVALID", "Docker 컨텍스트 이름을 확인하세요"))?;
+        let inventory = buildx_cache_inventory(&backend);
+        let (text, exit) = match (
+            inventory.total_count,
+            inventory.reclaimable_count,
+            inventory.shared_count,
+            inventory.mutable_count,
+        ) {
+            (Some(total), Some(reclaimable), Some(shared), Some(mutable)) => (
+                format!("Buildx 캐시 {total}개 · 회수 가능 표시 {reclaimable}개 · 공유 {shared}개 · 변경 가능 {mutable}개 · 보존"),
+                0,
+            ),
+            _ => ("Buildx 캐시 집계 미확인 · 보존".to_owned(), 5),
+        };
+        return Ok(Output {
+            command: "docker-buildx-cache",
+            data: json!(inventory),
+            text,
+            exit,
+        });
+    }
     let root = filesystem::canonical_root(&cli.root)
         .map_err(|_| CliError::new("PROJECT_UNKNOWN", "프로젝트 디렉터리에 접근할 수 없습니다"))?;
     if let Command::Agents { action } = &cli.command {
@@ -334,6 +362,7 @@ fn run(cli: &Cli) -> Result<Output, CliError> {
         | Command::McpStateRead { .. }
         | Command::DockerContexts { .. }
         | Command::DockerBuildCache { .. }
+        | Command::DockerBuildxCache { .. }
         | Command::Dashboard { .. } => unreachable!(),
         Command::Scan => {
             let report = read_scan(&root, &settings)?;
