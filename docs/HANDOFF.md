@@ -138,3 +138,10 @@ DSG-08의 `f6397b2`를 PR #15로 `develop`, PR #16으로 `main`에 반영했다.
 - `python3 -B scripts/check-release-signature.py --openssl <OpenSSL 3 절대 경로>`에서 임시 키로 생성한 서명 두 개의 조립과 검증, 승인 해시·서명 오류 거부, 출력 충돌 보존을 확인했다. 두 번째 실행 파일의 서명 거부가 반영되는지는 `codesign` 응답을 대역한 회귀로 확인했다.
 - macOS ARM64의 실제 `0.1.1-rc.1` 아카이브와 임시 Ed25519 키로 준비·조립·검증, 두 실행 파일의 ad-hoc 검사 및 CLI 실행, 패키지 재생성과 설치·업그레이드·제거를 통과했다. Developer ID 검증을 요구하면 실제 ad-hoc 후보를 서명 파일 생성과 설치 전에 거부했고, 업그레이드에서는 기존 설치 상태를 보존했다. 후보 해시는 검증 전후에 일치했고 모든 시험 자료는 임시 경로에서 회수했다.
 - DSG용 Apple Developer ID와 공증, Windows 공인 Authenticode·타임스탬프는 승인된 환경에서의 성공 검증이 남아 있다. 이번 작업에서 Docker 데몬과 Parallels 게스트의 상태를 변경하지 않았다. [플랫폼별 공인 서명](RELEASE.md#플랫폼별-공인-서명)
+
+## WBS 작업과 산출물 대조
+
+- 2026-11-24, `feature/20261124-plan-reconciliation`, 기준 `f316175`. DSG-01~08의 구현·검증을 WBS 14개와 일대일로 연결했다. PLAN·WBS의 계획 본문, 요구사항 13개와 수용 기준은 보존했다. 백로그의 승인 범위와 전체 플랫폼 수용 상태, README·POC의 실행 범위, ADR의 초기 제안과 구현 채택 근거를 맞췄다. [작업 대조표](TASK.md) · [백로그](BACKLOG.md) · [요구사항](REQUIREMENTS.md) · [설계 결정](ADR.md)
+- macOS에서 `sh scripts/test.sh`의 Python 14개와 CLI 진단·스캔, `DSG_TEST_DOCKER_CONTEXT=dockerguard-test DSG_TEST_WEBKIT=1 sh scripts/test-rust.sh`의 Rust 98개 및 통합 러너가 통과했다. 기존 지정 엔진에서 컨테이너 7개, 이미지 5개, 볼륨·중복 후보 0개를 읽었고, 내장 빌더 캐시 208개·활성 0개와 기존 이미지의 보존 판정을 확인했다. API와 두 WebKit 화면의 실제 Docker 집계가 일치했다. Docker 데몬을 새로 시작하거나 실제 Docker 자원을 변경하지 않았다. Parallels 게스트는 실행하지 않았다.
+- `dist/`에 보존한 macOS ARM64·Windows ARM64 0.1.1-rc.1, Linux ARM64 0.1.0, Windows x64 0.1.0-rc.3 아카이브의 대상·버전·SHA-256·멤버 해시를 대조했다. 당시 플랫폼별 설치·서비스 시험 결과는 기존 기록을 유지했다. 보조 워크트리는 생성·회수·잔여 0개다. [플랫폼별 결과](RELEASE.md)
+- 재개 시 WBS 2.3의 소유권과 안전한 회수 경계, 실제 Docker 이미지 적용 경로, macOS 운영 계정 및 Windows 실제 엔진 같은 플랫폼별 잔여 수용 기준을 작업 대조표에서 먼저 확인한다. 훅 오류의 운영 기준과 MCP·Provider SDK 확장의 승인 선행 조건도 대조표에 기록했다. [잔여 조건](TASK.md#수용-기준-확정이-남은-항목) · [출시 게이트](TEST_PLAN.md#출시-게이트)
