@@ -27,7 +27,8 @@
     "docker_controlled_gc": "Seven controlled-backend tests passed plus 17 registry and four image regressions. Exact binding, one-use approval, slot exclusion, durable intent and receipt recovery passed. Existing Docker contexts preserve unverified control.",
     "macos_lease_scope": "Runner, registry and process identity tests passed. Owned detached processes retained expired leases during normal exit and forced supervisor termination; when they exited, lease reacquisition and audit passed in throwaway state.",
     "docker_pending_target": "macOS: eight controlled Docker GC tests, 17 registry tests and four image tests passed. An unresolved intent blocks new plans, approvals and old tokens for the same endpoint/kind/ID until receipt recovery settles it. Full Python 14 and Rust 118 plus scoped inventory and Buildx passed. Live dedicated-engine application and recovery remain unverified.",
-    "dedicated_docker_preapproval": "Existing Ubuntu ARM64 verified read-only prerequisites, then a transient Docker 29.1.3 engine verified a private Unix peer, isolated mount and network, no TCP listener and denied unprivileged clients. Initial inventory was empty. Exactly one untagged no-layer synthetic image matched the expected configuration digest and deterministic archive digest. Delete requests: zero. Guest suspended; actual application and receipt recovery await separate approval for this generation and image."
+    "dedicated_docker_preapproval": "Existing Ubuntu ARM64 verified read-only prerequisites, then a transient Docker 29.1.3 engine verified a private Unix peer, isolated mount and network, no TCP listener and denied unprivileged clients. Initial inventory was empty. Exactly one untagged no-layer synthetic image matched the expected configuration digest and deterministic archive digest. Delete requests: zero. Guest suspended; the next test used separate approval for this generation and image.",
+    "dedicated_docker_live": "The pinned Ubuntu ARM64 engine and approved image were revalidated. One live no-force/no-parent-prune deletion removed the one disposable image (inventory 1 to 0). The reopened Rust registry settled the persisted receipt after a test-induced interruption. One intent, one applied audit, zero open leases; reuse was rejected. The isolated runtime and scratch directory were reclaimed and the guest was suspended. Default Python 14 and Rust 118 passed with the live test ignored by default. The exact live test passed once when explicitly selected."
   },
   "files": [
     {
@@ -137,13 +138,13 @@
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "5606ab470feb455cea7fb16158bbba12494a769e025976f3da9dedeb1d8501ad",
-      "bytes": 20048
+      "sha256": "172b1e3de26638fbc469e02dbe851f2ae0b8a0cfc517b8152ff6bef2f316f9ca",
+      "bytes": 20469
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "212c8b9160adf51f27a2c24623efb19d68b21307cdb565c5af546c45203c2999",
-      "bytes": 27703
+      "sha256": "6a1fe7765dfd891b2f08e1641d0f9b5ff6e2bbd40f188b803ff80a42fbcc3e30",
+      "bytes": 29438
     },
     {
       "path": "docs/WBS.md",
@@ -377,8 +378,13 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/docker_gc_apply.rs",
-      "sha256": "c9f58458a3439fa4a8e2d63305dc8f55af3e80695d30aed40b01087c23bb337e",
-      "bytes": 11669
+      "sha256": "6b643b440818c7839e29078e1633aebb65d85e84a19da0ff17a723d14f5af3a0",
+      "bytes": 11727
+    },
+    {
+      "path": "rust-scaffold/crates/dsg-core/src/docker_gc_apply/live_fixture.rs",
+      "sha256": "65e9a5f7f71decd1fef18b40dcbe11a64e587b18a5f420154639ca7e45644b37",
+      "bytes": 15987
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/docker_gc_apply/tests.rs",
@@ -464,6 +470,11 @@
       "path": "scripts/check-dashboard.py",
       "sha256": "6b27ec7bfe81caad9534b2771fde6c1fead0d1cf08329f7bc8c7b6e9414771ba",
       "bytes": 7075
+    },
+    {
+      "path": "scripts/check-dedicated-docker-apply.py",
+      "sha256": "2dac1fc1f133c4bb6fb105dc516f0f6df6d794ac4e02a247c9001d8eb607002e",
+      "bytes": 16486
     },
     {
       "path": "scripts/check-dedicated-docker-engine.py",

@@ -353,3 +353,6 @@ fn hash(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(all(test, target_os = "macos"))]
+mod live_fixture;
