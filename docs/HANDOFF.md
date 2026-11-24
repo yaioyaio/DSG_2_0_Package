@@ -293,3 +293,11 @@ DSG-08의 `f6397b2`를 PR #15로 `develop`, PR #16으로 `main`에 반영했다.
 - 코어 쓰기 요청은 보호된 정책, 커널 연결·메시지 자격과 송신 pidfd, 제어기·엔진·역할 세대 및 정확한 요청 범위를 대조한다. Ubuntu ARM64의 독립 격리 시험에서 기존 4건과 신규 6건을 통과했다. 운영 어댑터에 연결한 변경 요청과 실제 캐시 회수는 0건이다. [Linux 권한 확인 시험](../dist/dsg-auth-gate-c95a42aa0b72/QUALIFICATION.json)
 - 최신 macOS에서 Python 14건, Rust 119건과 통합 회귀가 통과했다. 수동 전용 엔진 시험 3건은 기본 실행에서 제외했다.
 - 다음은 운영 어댑터에서 요청 검증과 SQLite 승인 소비·적용 의도·영수증을 같은 배타 경계에 연결하는 작업이다. BuildKit 단일 레코드 회수는 별칭·솔버·lease의 비대상 변경까지 차단하는 경로와 새 승인 대상이 필요하다. 실제 호스트 전원 장애 시험도 운영 자료를 분리한 검증 환경이 필요하다. [작업 대조표](TASK.md) · [테스트 계획](TEST_PLAN.md)
+
+## 전용 Docker 변경 어댑터와 WAL 재생
+
+- DSG-05·07, WBS 1.4·2.3·5.1, 브랜치 `feature/20261124-docker-exclusive-adapter`, 기준 HEAD `1acb9e5`. 보조 워크트리 생성·회수·잔여는 각각 0개다. [작업 대조표](TASK.md)
+- macOS의 합성 SQLite 등록부에서 승인 소비와 적용 의도를 커밋하는 실제 WAL을 복제했다. WAL 부재 및 마지막 프레임 소실은 소비·의도 부재였고 완전 WAL은 둘을 함께 재생했다. 새 lease로 복구하면서 변경 호출 0건과 `recovery_required`, 회수량 0 B를 확인했다. 물리 호스트와 기존 VM에 전원 차단을 가하지 않았다. [macOS WAL 재생](../dist/dsg-wal-qualification-1acb9e5/QUALIFICATION.json)
+- Linux ARM64 어댑터는 커널이 검증한 요청, 보호 등록부, 동일 프로젝트의 활성 lease를 받는다. 배타 슬롯 안에서 현재 정책·피어·대상을 재확인하고 승인 소비와 적용 의도를 커밋한 뒤에만 변경을 요청한다. 같은 엔진의 소켓·세대·정책이 바뀌어도 미확정 의도를 유지하며 현재 실행자에게 정확한 저장 영수증의 조회만 허용한다. [코어 어댑터](../rust-scaffold/crates/dsg-core/src/docker_gc_apply/dispatch.rs)
+- Ubuntu Parallels ARM64의 전용 격리 환경에서 새 어댑터 3건과 커널·GC·복구 회귀 20건을 통과했다. 변경 대역은 별도 SQLite 연결로 선행 의도 커밋과 타 프로젝트 슬롯 획득 거절을 확인했다. 권한 변경 시 무변경, 승인 재사용 거절, 배포 회전 뒤의 정확 영수증 정산을 확인했다. 실제 Docker·BuildKit 변경 요청은 0건이다. 임시 자료 회수와 VM 일시정지 복귀를 확인했다. [Ubuntu 격리 실측](../dist/dsg-exclusive-dispatch-44a3dedceecb/QUALIFICATION.json)
+- macOS Python 14건, Rust 120건 및 통합 회귀를 통과했다. Linux ARM64 운영 코어의 교차 컴파일도 통과했다. 다음은 배포 출처와 프로젝트 자원 소유권을 입증한 전용 변경 백엔드를 연결하는 작업이다. v0.35.1 공개 BuildKit API의 `Prune`은 비대상에도 영향을 줄 수 있어, 단일 레코드 회수는 좁은 변경 경로와 새 대상 승인이 필요하다. 실제 호스트 전원 장애와 운영 어댑터·실제 캐시 회수는 미완료다. [백로그](BACKLOG.md#환경승인-조건이-남은-항목) · [시험 계획](TEST_PLAN.md)

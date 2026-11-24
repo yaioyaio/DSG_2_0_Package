@@ -13,6 +13,11 @@ use sha2::{Digest, Sha256};
 use std::time::Duration;
 use thiserror::Error;
 
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+pub(crate) mod dispatch;
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+pub use dispatch::{DockerGcDispatch, DockerGcDispatchResult};
+
 const PLAN_TTL: Duration = Duration::from_secs(3600);
 const APPROVAL_TTL: Duration = Duration::from_secs(600);
 
@@ -60,14 +65,14 @@ pub struct DockerGcResult {
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct Binding {
-    project: i64,
-    owner: String,
-    kind: DockerGcKind,
-    id: String,
-    endpoint: String,
-    generation: String,
-    snapshot: String,
+pub(crate) struct Binding {
+    pub(crate) project: i64,
+    pub(crate) owner: String,
+    pub(crate) kind: DockerGcKind,
+    pub(crate) id: String,
+    pub(crate) endpoint: String,
+    pub(crate) generation: String,
+    pub(crate) snapshot: String,
 }
 
 impl Binding {
@@ -91,10 +96,10 @@ impl Binding {
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct Intent {
-    operation: String,
-    policy: String,
-    binding: Binding,
+pub(crate) struct Intent {
+    pub(crate) operation: String,
+    pub(crate) policy: String,
+    pub(crate) binding: Binding,
 }
 
 impl Intent {
@@ -115,15 +120,15 @@ impl Intent {
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
-enum Usage {
+pub(crate) enum Usage {
     Image(ImageGcPlan),
     BuildCache(CacheRecordState),
 }
 
-struct Observation {
-    binding: Binding,
-    unreferenced: Option<bool>,
-    usage: Usage,
+pub(crate) struct Observation {
+    pub(crate) binding: Binding,
+    pub(crate) unreferenced: Option<bool>,
+    pub(crate) usage: Usage,
 }
 
 impl Observation {
@@ -147,17 +152,17 @@ impl Observation {
 
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Copy)]
-enum Effect {
+pub(crate) enum Effect {
     Applied(u64),
     Preserved,
 }
 
-struct Receipt {
-    intent: Intent,
-    effect: Effect,
+pub(crate) struct Receipt {
+    pub(crate) intent: Intent,
+    pub(crate) effect: Effect,
 }
 
-trait ControlledDockerGc {
+pub(crate) trait ControlledDockerGc {
     // Provenance must come from the controller that created and exclusively owns this target.
     fn observe(&mut self, owner: &str, kind: DockerGcKind, id: &str) -> Option<Observation>;
 
@@ -202,26 +207,15 @@ impl<'a> DockerGcService<'a> {
         kind: DockerGcKind,
         id: &str,
     ) -> Result<StoredPlan, DockerGcError> {
-        let controller = self.controller()?;
-        if !kind.valid_id(id) || registry.has_open_execution_lease()? {
-            return Err(DockerGcError::UnverifiedCandidate);
-        }
-        let policy = policy_digest.to_ascii_lowercase();
-        if !valid_owner_fingerprint(&policy) {
-            return Err(RegistryError::InvalidPolicyDigest.into());
-        }
-        let owner = registry.docker_gc_project_owner(project)?;
-        let observation = controller
-            .observe(&owner, kind, id)
-            .filter(|observed| observed.eligible_for(project, &owner, kind, id))
-            .ok_or(DockerGcError::UnverifiedCandidate)?;
-        let intent = Intent {
-            operation: random_hex()?,
-            policy,
-            binding: observation.binding,
-        };
-        let payload = json!({ (MANAGED_DOCKER_TARGET): intent });
-        Ok(registry.save_managed_docker_gc_plan(project, policy_digest, &payload, PLAN_TTL)?)
+        plan_with_controller(
+            self.controller()?,
+            registry,
+            project,
+            policy_digest,
+            kind,
+            id,
+            |_| true,
+        )
     }
 
     pub fn approve(
@@ -312,7 +306,39 @@ impl<'a> DockerGcService<'a> {
     }
 }
 
-fn matches_current(controller: &mut dyn ControlledDockerGc, binding: &Binding) -> bool {
+fn plan_with_controller(
+    controller: &mut (impl ControlledDockerGc + ?Sized),
+    registry: &mut Registry,
+    project: i64,
+    policy_digest: &str,
+    kind: DockerGcKind,
+    id: &str,
+    verify_binding: impl FnOnce(&Binding) -> bool,
+) -> Result<StoredPlan, DockerGcError> {
+    if !kind.valid_id(id) || registry.has_open_execution_lease()? {
+        return Err(DockerGcError::UnverifiedCandidate);
+    }
+    let policy = policy_digest.to_ascii_lowercase();
+    if !valid_owner_fingerprint(&policy) {
+        return Err(RegistryError::InvalidPolicyDigest.into());
+    }
+    let owner = registry.docker_gc_project_owner(project)?;
+    let observation = controller
+        .observe(&owner, kind, id)
+        .filter(|observed| {
+            observed.eligible_for(project, &owner, kind, id) && verify_binding(&observed.binding)
+        })
+        .ok_or(DockerGcError::UnverifiedCandidate)?;
+    let intent = Intent {
+        operation: random_hex()?,
+        policy,
+        binding: observation.binding,
+    };
+    let payload = json!({ (MANAGED_DOCKER_TARGET): intent });
+    Ok(registry.save_managed_docker_gc_plan(project, policy_digest, &payload, PLAN_TTL)?)
+}
+
+fn matches_current(controller: &mut (impl ControlledDockerGc + ?Sized), binding: &Binding) -> bool {
     controller
         .observe(&binding.owner, binding.kind, &binding.id)
         .is_some_and(|observed| {

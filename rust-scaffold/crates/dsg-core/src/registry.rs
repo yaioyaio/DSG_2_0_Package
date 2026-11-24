@@ -850,6 +850,38 @@ impl Registry {
         Ok(locks)
     }
 
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    pub(crate) fn check_protected_docker_gc_state(&self) -> Result<(), RegistryError> {
+        use std::os::unix::fs::MetadataExt;
+
+        let state = crate::docker_control_local::open_protected(&self.state_dir, false)
+            .map_err(|_| RegistryError::UnsafeStatePath)?;
+        let metadata = state.metadata().map_err(RegistryError::StateIo)?;
+        if metadata.uid() != 0 || !metadata.is_dir() || metadata.mode() & 0o7777 != 0o700 {
+            return Err(RegistryError::UnsafeStatePath);
+        }
+        for (name, required) in [
+            (DATABASE_NAME, true),
+            ("registry.sqlite3-journal", false),
+            ("registry.sqlite3-wal", false),
+            ("registry.sqlite3-shm", false),
+            ("execution-slot-0.lock", false),
+            ("execution-slot-1.lock", false),
+        ] {
+            match fs::symlink_metadata(self.state_dir.join(name)) {
+                Ok(info)
+                    if info.uid() == 0
+                        && info.is_file()
+                        && info.mode() & 0o022 == 0
+                        && info.nlink() == 1 => {}
+                Ok(_) => return Err(RegistryError::UnsafeStatePath),
+                Err(error) if !required && error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(RegistryError::StateIo(error)),
+            }
+        }
+        Ok(())
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn approve_gc(
         &mut self,
@@ -1086,6 +1118,30 @@ impl Registry {
         plan_id: i64,
     ) -> Result<GcClaim, RegistryError> {
         self.pending_gc_subject(lease, plan_id, GcPurpose::ManagedDocker)
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    pub(crate) fn pending_managed_docker_gc_by_intent(
+        &self,
+        lease: &Lease,
+        intent_id: &str,
+    ) -> Result<GcClaim, RegistryError> {
+        self.validate_lease_owner(lease)?;
+        require_active_lease(&self.connection, lease)?;
+        let mut statement = self.connection.prepare_cached(
+            "SELECT plan.id FROM gc_plan AS plan
+             JOIN gc_application AS application ON application.plan_id = plan.id
+             WHERE plan.project_id = ?1 AND plan.status IN ('applying', 'recovery_required')
+               AND application.relative_path = '' AND application.claimed_at_ms IS NOT NULL
+               AND json_extract(plan.payload_json, '$.managed_docker_target.operation') = ?2
+             LIMIT 2",
+        )?;
+        let mut rows = statement.query(params![lease.project_id, intent_id])?;
+        let plan_id = rows.next()?.ok_or(RegistryError::GcPlanNotFound)?.get(0)?;
+        if rows.next()?.is_some() {
+            return Err(RegistryError::GcStateConflict);
+        }
+        self.pending_managed_docker_gc(lease, plan_id)
     }
 
     fn pending_gc_subject(
