@@ -55,6 +55,12 @@ Linux ARM64의 `dsg --json docker-controller-admission --policy <절대 경로>/
 
 Unix 피어 자격증명, pidfd, 프로세스 시작 시각, 실행 파일 식별자와 해시, 소켓 식별자를 대조하고 읽기 프로브는 제어기에만 보낸다. 성공 시 `status=verified`, 제어기와 엔진의 `endpoint`·`generation`, `role_separation=verified`, `engine_boundary=protected_unix_socket`과 종료 코드 0을 반환한다. 불일치는 `status=unknown`, `failure`와 종료 코드 5를 반환한다. 두 경우 모두 `mutation_authorized=false`, `apply_gate=preserve_unverified_control`을 유지한다. 운영 쓰기에는 제어기 배포 출처·신뢰, 프로젝트 자원 출처·소유권, 요청별 승인, 배타 변경 경계와 공개 운영 어댑터 검증이 필요하다. [구현](../rust-scaffold/crates/dsg-core/src/docker_control_local/admission.rs)
 
+### 전용 Docker 백엔드 읽기 전용 점검
+
+Linux ARM64에서 `dsg --state-dir <절대경로> --json docker-backend-preflight --policy <배포정책> --ownership <소유등록> --project <등록번호> --kind <image|build_cache> --resource <전체ID>`로 점검한다. `docker-backend-ownership.json`은 root 소유의 보호 경로에 권한 0444로 둔다. 버전 1에는 배포 정책 원본의 SHA-256인 `admission_policy_sha256`과 `controller_executable_sha256`, `engine_executable_sha256`, `store_directory`, `store_id`, `controller_store_fd`, `resources`를 기록한다. 자원 항목마다 `project_id`, `project_owner_sha256`, `kind`, `id`를 대조한다. root가 보유한 저장소 디렉터리의 고정 표지는 `docker-backend-store-id`에 64자리 소문자 16진수와 끝 개행으로 기록한다. SQLite의 보호 상태는 쓰기 보조 파일이 없는 시점에 읽기 전용으로 확인한다.
+
+성공은 보호된 자원 배정, 제어기가 열고 있는 저장소 디렉터리, 현재 엔진의 보호된 Unix 소켓과 안정 저장소 범위를 보고한다. 불일치는 종료 코드 5로 보존한다. 결과에서 `exclusive_mutation=unverified`, `mutation_authorized=false`를 유지한다. 실제 엔진에 적용하려면 해당 엔진 내부의 독점 변경 경로와 영속 영수증을 별도로 검증한다. [점검 구현](../rust-scaffold/crates/dsg-core/src/docker_control_local/admission/backend_ownership.rs)
+
 ### 관리형 실행과 Compose 재사용
 
 `dsg exec --timeout 1~120 -- <argv...>`는 등록된 프로젝트의 정책과 호스트·프로젝트 예산을 확인한 뒤 직접 실행한다. 관리형 실행은 프로젝트별 lease 하나와 동일 상태 저장소의 전역 두 슬롯으로 제한한다. 조회가 불완전하거나 정책상 추가 확인이 필요하면 기존 판단 형식으로 반환한다. 성공 0, 정책 거부 3, 승인 필요 4, 제어 미확인 5, 시간 초과 124, 정상 중단 130을 사용한다. 자식이 실패하면 자식의 종료 코드를 반환한다. `--json`에서는 명령과 자식 원문 출력 없이 `run.outcome`, `run.exit_code`, `run.tree_confirmed_gone`과 `lease_released`를 제공한다.

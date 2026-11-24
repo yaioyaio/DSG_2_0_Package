@@ -344,6 +344,125 @@ pub struct Registry {
     state_dir: PathBuf,
 }
 
+fn docker_gc_project_owner(connection: &Connection, project: i64) -> Result<String, RegistryError> {
+    let root: String = connection
+        .query_row(
+            "SELECT root_path FROM project WHERE id = ?1",
+            [project],
+            |row| row.get(0),
+        )
+        .optional()?
+        .ok_or(RegistryError::ProjectNotFound)?;
+    Ok(format!("{:x}", Sha256::digest(root.as_bytes())))
+}
+
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+pub(crate) fn protected_docker_gc_project_owner(
+    state_dir: &Path,
+    project: i64,
+) -> Result<String, RegistryError> {
+    use crate::docker_control_local::open_protected;
+    use std::os::unix::fs::MetadataExt;
+
+    let database = state_dir.join(DATABASE_NAME);
+    let state_descriptor =
+        open_protected(state_dir, false).map_err(|_| RegistryError::UnsafeStatePath)?;
+    let database_descriptor =
+        open_protected(&database, true).map_err(|_| RegistryError::UnsafeStatePath)?;
+    let state_info = state_descriptor
+        .metadata()
+        .map_err(RegistryError::StateIo)?;
+    let database_info = database_descriptor
+        .metadata()
+        .map_err(RegistryError::StateIo)?;
+    if state_info.uid() != 0
+        || !state_info.is_dir()
+        || state_info.mode() & 0o7777 != 0o700
+        || database_info.uid() != 0
+        || !database_info.is_file()
+        || database_info.mode() & 0o022 != 0
+        || database_info.nlink() != 1
+    {
+        return Err(RegistryError::UnsafeStatePath);
+    }
+
+    let check_current = || {
+        for name in [
+            "registry.sqlite3-journal",
+            "registry.sqlite3-wal",
+            "registry.sqlite3-shm",
+        ] {
+            match fs::symlink_metadata(state_dir.join(name)) {
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(RegistryError::StateIo(error)),
+                Ok(_) => return Err(RegistryError::UnsafeStatePath),
+            }
+        }
+        for (path, expected, private_parent) in [
+            (state_dir, &state_info, false),
+            (database.as_path(), &database_info, true),
+        ] {
+            let actual = open_protected(path, private_parent)
+                .map_err(|_| RegistryError::UnsafeStatePath)?
+                .metadata()
+                .map_err(RegistryError::StateIo)?;
+            if (
+                actual.dev(),
+                actual.ino(),
+                actual.ctime(),
+                actual.ctime_nsec(),
+            ) != (
+                expected.dev(),
+                expected.ino(),
+                expected.ctime(),
+                expected.ctime_nsec(),
+            ) {
+                return Err(RegistryError::UnsafeStatePath);
+            }
+        }
+        Ok(())
+    };
+    // SQLite can update WAL shared-memory metadata even for read-only connections.
+    // Observe only quiescent state and verify the database and sidecar directory around the read.
+    check_current()?;
+    let uri = sqlite_file_uri(&database, "?mode=ro&immutable=1");
+    let flags = OpenFlags::SQLITE_OPEN_READ_ONLY
+        | OpenFlags::SQLITE_OPEN_URI
+        | OpenFlags::SQLITE_OPEN_NO_MUTEX
+        | OpenFlags::SQLITE_OPEN_NOFOLLOW;
+    let connection = Connection::open_with_flags(uri, flags)?;
+    connection.pragma_update(None, "trusted_schema", false)?;
+    let application_id: i64 =
+        connection.pragma_query_value(None, "application_id", |row| row.get(0))?;
+    if application_id != APPLICATION_ID {
+        return Err(RegistryError::UnrecognizedDatabase);
+    }
+    let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if version != SCHEMA_VERSION {
+        return Err(RegistryError::UnsupportedSchema(version));
+    }
+    let owner = docker_gc_project_owner(&connection, project)?;
+    check_current()?;
+    Ok(owner)
+}
+
+#[cfg(any(target_os = "macos", all(target_os = "linux", target_arch = "aarch64")))]
+fn sqlite_file_uri(path: &Path, query: &str) -> String {
+    use std::os::unix::ffi::OsStrExt;
+
+    let mut uri = String::from("file:");
+    for &byte in path.as_os_str().as_bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'-' | b'_' | b'.' | b'~') {
+            uri.push(char::from(byte));
+        } else {
+            use std::fmt::Write;
+            write!(uri, "%{byte:02X}").expect("writing to a String");
+        }
+    }
+    uri.push_str(query);
+    uri
+}
+
 /// Observe the registered project under a process-level filesystem write denial.
 /// The SQLite read-only flag alone does not prevent WAL sidecar operations.
 #[cfg(target_os = "macos")]
@@ -355,7 +474,7 @@ pub fn observe_state(
     policy_digest: &str,
     plan_id: Option<i64>,
 ) -> Result<StateObservation, RegistryError> {
-    use std::os::unix::{ffi::OsStrExt, fs::MetadataExt};
+    use std::os::unix::fs::MetadataExt;
 
     let metadata = fs::symlink_metadata(state_dir).map_err(RegistryError::StateIo)?;
     let owner = unsafe { libc::geteuid() };
@@ -375,16 +494,7 @@ pub fn observe_state(
         }
     }
 
-    let mut uri = String::from("file:");
-    for &byte in database.as_os_str().as_bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'-' | b'_' | b'.' | b'~') {
-            uri.push(char::from(byte));
-        } else {
-            use std::fmt::Write;
-            write!(uri, "%{byte:02X}").expect("writing to a String");
-        }
-    }
-    uri.push_str("?mode=ro&readonly_shm=1");
+    let uri = sqlite_file_uri(&database, "?mode=ro&readonly_shm=1");
     let flags = OpenFlags::SQLITE_OPEN_READ_ONLY
         | OpenFlags::SQLITE_OPEN_URI
         | OpenFlags::SQLITE_OPEN_NO_MUTEX
@@ -820,16 +930,7 @@ impl Registry {
     }
 
     pub(crate) fn docker_gc_project_owner(&self, project: i64) -> Result<String, RegistryError> {
-        let root: String = self
-            .connection
-            .query_row(
-                "SELECT root_path FROM project WHERE id = ?1",
-                [project],
-                |row| row.get(0),
-            )
-            .optional()?
-            .ok_or(RegistryError::ProjectNotFound)?;
-        Ok(format!("{:x}", Sha256::digest(root.as_bytes())))
+        docker_gc_project_owner(&self.connection, project)
     }
 
     pub(crate) fn lock_docker_gc_slots(&self, lease: &Lease) -> Result<Vec<File>, RegistryError> {

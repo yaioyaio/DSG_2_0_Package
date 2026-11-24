@@ -15,8 +15,9 @@ use std::time::{Duration, Instant};
 
 mod admission;
 pub use admission::{
-    configure_write_request_listener, verify_admission, with_authorized_write_request,
-    AdmissionEvidence, AuthorizedWriteRequest, WriteRequest,
+    configure_write_request_listener, verify_admission, verify_backend_ownership,
+    with_authorized_write_request, AdmissionEvidence, AuthorizedWriteRequest,
+    BackendOwnershipEvidence, BackendOwnershipFailure, WriteRequest,
 };
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(2);

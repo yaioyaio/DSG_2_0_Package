@@ -301,3 +301,12 @@ DSG-08의 `f6397b2`를 PR #15로 `develop`, PR #16으로 `main`에 반영했다.
 - Linux ARM64 어댑터는 커널이 검증한 요청, 보호 등록부, 동일 프로젝트의 활성 lease를 받는다. 배타 슬롯 안에서 현재 정책·피어·대상을 재확인하고 승인 소비와 적용 의도를 커밋한 뒤에만 변경을 요청한다. 같은 엔진의 소켓·세대·정책이 바뀌어도 미확정 의도를 유지하며 현재 실행자에게 정확한 저장 영수증의 조회만 허용한다. [코어 어댑터](../rust-scaffold/crates/dsg-core/src/docker_gc_apply/dispatch.rs)
 - Ubuntu Parallels ARM64의 전용 격리 환경에서 새 어댑터 3건과 커널·GC·복구 회귀 20건을 통과했다. 변경 대역은 별도 SQLite 연결로 선행 의도 커밋과 타 프로젝트 슬롯 획득 거절을 확인했다. 권한 변경 시 무변경, 승인 재사용 거절, 배포 회전 뒤의 정확 영수증 정산을 확인했다. 실제 Docker·BuildKit 변경 요청은 0건이다. 임시 자료 회수와 VM 일시정지 복귀를 확인했다. [Ubuntu 격리 실측](../dist/dsg-exclusive-dispatch-44a3dedceecb/QUALIFICATION.json)
 - macOS Python 14건, Rust 120건 및 통합 회귀를 통과했다. Linux ARM64 운영 코어의 교차 컴파일도 통과했다. 다음은 배포 출처와 프로젝트 자원 소유권을 입증한 전용 변경 백엔드를 연결하는 작업이다. v0.35.1 공개 BuildKit API의 `Prune`은 비대상에도 영향을 줄 수 있어, 단일 레코드 회수는 좁은 변경 경로와 새 대상 승인이 필요하다. 실제 호스트 전원 장애와 운영 어댑터·실제 캐시 회수는 미완료다. [백로그](BACKLOG.md#환경승인-조건이-남은-항목) · [시험 계획](TEST_PLAN.md)
+
+## 전용 Docker 백엔드 소유권 사전 검증
+
+- 2026-11-25, DSG-03·05·07 및 WBS 1.4·2.3·5.1, `feature/20261125-docker-backend-ownership`, 기준 HEAD `a136f2d`. 보조 워크트리 생성·회수·잔여는 각각 0개다. [작업 대조표](TASK.md)
+- Ubuntu Parallels의 전용 Moby, containerd 및 별도 임시 승인자·실행자·제어기 피어를 실행했다. 빈 전용 저장소에 합성 이미지 한 건을 적재했다. 보호된 배포 정책 원본 해시와 프로젝트 등록부 지문·전체 ID, 커널 피어의 실행 파일과 세대, 제어기가 연 저장소 디렉터리를 대조했다. 독립 Moby 조회의 데이터 경로도 일치했다. 현재 엔진의 지정 소켓 리스너 한 개와 TCP 리스너 0개를 확인했고, 비특권 두 역할의 직접 연결을 거절했다. 불일치 9건 거절, SQLite 등록부 불변, 이미지 1→1, 변경 요청 0건을 확인했다. [Moby 실측](../dist/dsg-backend-ownership-5fbb83f5a031/QUALIFICATION.json)
+- 별도 관측에서 데몬이 보유한 Unix 리스너 세 곳을 분류했다. 대상 API 소켓 한 곳과 경로상 metrics·libnetwork 내부 소켓 두 곳이 모두 격리된 root 전용 저장소 안에 있었다. 이 관측은 시험 엔진의 외부 접근 범위를 확인한다. 엔진 내부 변경의 직렬화와 영속 정산은 추가 검증이 필요하다. [리스너 실측](../dist/dsg-backend-sockets-b151d4d4d829/QUALIFICATION.json)
+- Parallels 스크립트 전달 두 건이 종료 255로 중단됐다. 검사된 압축 파일 전달과 봉인한 실행 메모리로 바꿔 실측을 통과했다. 전용 서비스·tmpfs·전송 파일을 회수하고 기존 Ubuntu VM을 일시정지로 복귀시켰다. macOS의 Python 14건, Rust 120건과 통합 회귀, Ubuntu ARM64의 소유권 단위 시험 3건을 통과했다. [Linux 단위 실측](../dist/dsg-backend-unit-2b0490cc66b4/QUALIFICATION.json)
+- 제품에는 읽기 전용 점검을 연결했고 운영 변경 게이트는 보존 상태를 유지한다. 운영 쓰기에는 엔진 내부에서 같은 배타 경계로 보호되는 변경과 영속 영수증을 검증해야 한다. BuildKit 실제 회수 요청은 0건이다. v0.35.1 공개 API의 `Prune`은 비대상 lease·워커 GC·솔버 메타데이터에 영향을 줄 수 있다. 별도 정확 ID API의 개발 범위 승인, 비대상 변경 0건 검증, 새 전체 ID 및 출처 증거에 대한 별도 적용 승인 순으로 재개한다. [백로그](BACKLOG.md#환경승인-조건이-남은-항목) · [BuildKit 시험 계약](TEST_PLAN.md#현재-제품의-linux-arm64-별도-buildkit-네이티브-조회)
+- 실제 물리 호스트 전원 장애는 전용 물리 시험기와 독립 저장장치를 확인하지 못해 실행을 보류했다. 이전 합성 WAL 세 경우의 근거를 보존한다. [WAL 재생 실측](../dist/dsg-wal-qualification-1acb9e5/QUALIFICATION.json)

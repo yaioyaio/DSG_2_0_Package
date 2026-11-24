@@ -1,6 +1,10 @@
 use super::*;
 
+mod backend_ownership;
 mod write_request;
+pub use backend_ownership::{
+    verify_backend_ownership, BackendOwnershipEvidence, BackendOwnershipFailure,
+};
 pub use write_request::{
     configure_write_request_listener, with_authorized_write_request, AuthorizedWriteRequest,
     WriteRequest,
