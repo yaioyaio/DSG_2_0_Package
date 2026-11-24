@@ -28,13 +28,15 @@ Windows 스캔·계획은 로컬 NTFS에서 파일·볼륨 ID를 핸들로 확�
 
 Docker 읽기 전용 단계에서는 Docker 명령 대역으로 컨텍스트 고정, 빈 목록과 미확인 상태의 구분, 중복 후보 및 변경 상황을 검증한다. 격리 엔진이 이미 동작 중이면 `DSG_TEST_DOCKER_CONTEXT=dockerguard-test sh scripts/test-rust.sh`로 실제 조회를 추가 검증한다. 엔진 시작·리소스 생성·삭제는 이 조회 검증에서 수행하지 않는다.
 
-동일한 격리 컨텍스트에서 Buildx 플러그인이 준비되어 있으면 `DSG_TEST_DOCKER_CONTEXT=dockerguard-test DSG_TEST_BUILDX=1 sh scripts/test-rust.sh`로 명시한 엔진의 기본 Buildx 빌더를 실측한다. 명령은 사용자 Buildx 설정 대신 임시 설정을 사용한다. 동일 엔진 ID, 항목 수와 각 상태 수의 범위, 보존 판정을 확인한다. 별도 Buildx 빌더, 소유권, GC는 WBS 2.3의 잔여 검증이다.
+동일한 격리 컨텍스트에서 Buildx 플러그인이 준비되어 있으면 `DSG_TEST_DOCKER_CONTEXT=dockerguard-test DSG_TEST_BUILDX=1 sh scripts/test-rust.sh`로 명시한 엔진의 기본 Buildx 빌더를 실측한다. 명령은 사용자 Buildx 설정 대신 임시 설정을 사용한다. 동일 엔진 ID, 항목 수와 각 상태 수의 범위, 보존 판정을 확인한다. 별도 BuildKit 읽기 시험은 Linux ARM64 Ubuntu Parallels에서 임시 전용 소켓과 공식 v0.35.1 클라이언트를 사용한다. [조회 계약](API_SPEC.md#docker-읽기-전용-인벤토리)의 제품 명령으로 빈 캐시와 시험 캐시, 잘못된 PID·클라이언트 해시·소켓 링크 거절을 확인한다. 소유권과 GC는 별도 수용 기준이다.
 
 관리형 실행 검증에는 임시 프로젝트의 작은 Cargo 빌드와 시간 초과 뒤 재실행, lease 경합·회수 및 등록부 마이그레이션이 포함된다. 사전에 digest가 있는 공개 fixture 이미지를 보유한 격리 엔진에서 `DSG_TEST_DOCKER_CONTEXT=dockerguard-test DSG_TEST_COMPOSE_FIXTURE=1 sh scripts/test-rust.sh`로 건강한 컨테이너 하나를 확인한다. 반복 `up`의 동일 ID와 추가 컨테이너 0개를 확인한다. 구성 변경 시험에서는 원래 인스턴스를 회수하고 새 인스턴스에서 과거 기대값을 거절한다. 회수 직전에 동일 엔진과 시험 프로젝트·서비스·라벨·전체 컨테이너 ID를 대조한다.
 
 같은 Compose 시험에서 엔진 ID와 단일 시험 컨테이너의 ID·라벨을 대조한 뒤 컨테이너의 `/dev/shm`에 상태 표식을 쓴다. 구성·이미지·마운트가 같은 컨테이너가 `unhealthy`가 된 경우 재사용은 `not_healthy`와 종료 코드 5를 반환해야 한다. 시험은 기존의 격리 컨테이너 회수 경로를 사용한다.
 
-이미지·마운트 실측에는 같은 명령에 `DSG_TEST_COMPOSE_IMAGE`를 추가하고 값으로 격리 엔진에 준비된 공식 `docker.io/library/alpine@sha256:…` 참조를 지정한다. 두 번째 컨테이너는 원래 이미지와 ID·digest가 다른 이미지와 64 KiB `tmpfs`를 사용한다. 실제 이미지와 마운트를 조회한 뒤 구성·이미지·마운트 기대값을 개별 대조해 두 관측에서 각각 `configuration_changed`, `image_changed`, `mount_changed`와 종료 코드 5를 확인한다. 관측과 같은 `tmpfs`를 기대값에 넣어도 두 관측은 `unknown/unverified_mount`와 종료 코드 5를 반환해야 한다. 실제 명명 볼륨은 사용하지 않으며 명명 볼륨 교체는 [합성 시험](../rust-scaffold/crates/dsg-core/src/docker.rs#L976)에서 확인한다.
+이미지·`tmpfs` 실측에는 같은 명령에 `DSG_TEST_COMPOSE_IMAGE`를 추가하고 값으로 격리 엔진에 준비된 공식 `docker.io/library/alpine@sha256:…` 참조를 지정한다. 두 번째 컨테이너는 원래 이미지와 ID·digest가 다른 이미지와 64 KiB `tmpfs`를 사용한다. 실제 이미지와 마운트를 조회한 뒤 구성·이미지·마운트 기대값을 개별 대조해 두 관측에서 각각 `configuration_changed`, `image_changed`, `mount_changed`와 종료 코드 5를 확인한다. 관측과 같은 `tmpfs`를 기대값에 넣어도 두 관측은 `unknown/unverified_mount`와 종료 코드 5를 반환해야 한다.
+
+명명 볼륨 교체는 `DSG_TEST_COMPOSE_IMAGE` 없이 기본 Compose 시험 명령에 `DSG_TEST_COMPOSE_VOLUMES`와 `DSG_TEST_COMPOSE_VOLUME_ENGINE_ID`를 추가해 실행한다. 값은 각각 `dsg-reuse-volume-<12자리 소문자 16진수>-a,dsg-reuse-volume-<같은 값>-b` 형식인 외부 볼륨 두 개와 확인한 격리 엔진 ID다. 두 볼륨은 옵션 없는 로컬 볼륨이어야 하며 `dsg.fixture.reuse-volume` 라벨 값이 이름에 포함된 12자리 값과 일치해야 한다. 볼륨 A를 읽기 전용·`nocopy`로 연결하고 같은 컨테이너의 재사용을 두 번 확인한다. 실제 B로 교체한 뒤 현재 구성 해시와 이미지 정보를 두 요청에 똑같이 사용한다. 볼륨 A를 기대하면 `mount_changed`와 종료 코드 5, B를 기대하면 재사용 성공을 반환해야 한다. 시험 후 소유 컨테이너를 회수하고 외부 볼륨 두 개가 미연결 상태로 보존됐는지 대조한다. [실측](HANDOFF.md#명명-볼륨과-ubuntu-parallels-실측)
 
 `DSG_TEST_BUILD_PROVIDERS=1 sh scripts/test-rust.sh`는 로컬 도구와 의존성 없는 임시 프로젝트로 등록된 빌드·테스트 작업을 실행한다. `DSG_TEST_PLAYWRIGHT_MODULES`에 준비한 공식 Playwright의 `node_modules` 경로를 추가하면 실제 성공·실패 추적 파일의 존재와 길이, 서로 다른 출력 경로, 기본 프로젝트 출력 보존도 확인한다. 감사 검증에는 실행 결과 코드와 해당 lease 참조만 사용한다.
 
@@ -49,6 +51,8 @@ Docker 읽기 전용 단계에서는 Docker 명령 대역으로 컨텍스트 고
 `sh scripts/test-rust.sh`는 합성 프로젝트의 훅 설치·중복 방지·설정 보존·제거, 허용·거부·잘못된 JSON 응답과 MCP의 읽기 전용 목록·쓰기 거절을 확인한다. 정리 후보를 조회한 뒤 상태 폴더가 생기지 않아야 한다.
 
 macOS에서 실제 CLI를 검증할 때는 `DSG_TEST_AGENT_NATIVE=all`을 설정한다. Claude와 Codex 명령을 `PATH`에 두고 `DSG_TEST_NODE`와 `DSG_TEST_GEMINI_ENTRY`에 Node 실행 파일 및 Gemini CLI 번들의 절대 경로를 지정한다. 단일 CLI 검증은 `all` 대신 `claude`, `codex`, `gemini`를 지정한다. Claude와 Codex는 루프백 대역 응답을, Gemini는 합성 응답 재생을 사용한다. 쓰기와 네트워크를 임시 경계에 제한하고 CLI별로 허용, 정책 거부, 훅 실행 오류에서 대역 명령이 실행됐는지 확인한다.
+
+Linux에서는 같은 실제 CLI 시험을 `DSG_TEST_AGENT_LINUX_CONTAINER=1`로 명시한 격리 프로세스에서 수행한다. 실행기는 읽기 전용 루트, 별도 실행 가능한 `/fixture` tmpfs, 비권한 UID와 유효 capability 0, `NoNewPrivs=1`, 루프백 전용 네트워크, 기본 라우트와 표준 Docker 소켓 부재를 확인한다. 이 조건을 입증하지 못하면 CLI 호출 전에 종료한다. Parallels Ubuntu에서는 별도 네트워크·마운트·PID 네임스페이스를 적용한 제한 실행 경로에서 동일 게이트를 실측했다.
 
 ## 브로커와 서비스 검증
 
@@ -86,8 +90,8 @@ macOS에서 `DSG_TEST_WEBKIT=1 sh scripts/test-rust.sh`는 임시 WebKit 뷰를 
 
 WBS마다 구현과 검증 기록을 [작업 대조표](TASK.md)에서 대조한다. 성공 여부는 실행한 OS, 후보 버전, 실환경·시험 대역, 입출력 범위를 근거로 판정한다. 교차 링크는 컴파일·링크 증거이며, 합성 Docker 파이프는 해당 OS 서비스와 파이프 권한의 증거다. 대상 환경에서 실행하지 못한 항목은 별도의 검증으로 남긴다.
 
-- 현재 `681be1e`의 Windows ARM64 패키지는 기존 Parallels의 로컬 NTFS에서 실제 이전 후보를 새 후보로 교체하고 설치 파일별 해시, 진단·대시보드·제거를 검증했다. 현재 Linux ARM64 패키지는 macOS의 기존 격리 Linux ARM64 엔진에서 교체·진단·대시보드·제거, 관리형 타임아웃과 lease 재획득을 검증했다. Windows x64 네이티브 환경과 Linux Ubuntu Parallels의 현재 후보 실행은 별도 조건이다. [패키지 근거](RELEASE.md)
+- 현재 `681be1e`의 Windows ARM64 패키지는 기존 Parallels의 로컬 NTFS에서 실제 이전 후보를 새 후보로 교체하고 설치 파일별 해시, 진단·대시보드·제거를 검증했다. 현재 Linux ARM64 `ada5a09` 패키지는 기존 Ubuntu Parallels에서 이전 `0.1.0` 설치 후 `0.1.1-rc.1`로 업그레이드하고, 두 바이너리 실행·대시보드 HTTP·제거와 관리형 타임아웃 124 및 lease 재획득을 확인했다. Ubuntu 게스트에서 제거 후 사용자 시험 파일을 보존했다. Windows x64 네이티브 환경 실측은 남아 있다. [패키지 근거](RELEASE.md) · [Ubuntu 실측](HANDOFF.md#명명-볼륨과-ubuntu-parallels-실측)
 
-- Docker 내장 빌더 총량·활성 집계, 기본 Buildx 빌더의 상태별 조회, 기존 이미지 보존은 조회·계획 검증에 해당한다. Buildx 상태별 항목은 서로 겹칠 수 있다. WBS 2.3에는 별도 Buildx 빌더, 캐시 소유권, 안전한 정리 범위의 증거가 필요하다. 이미지 적용 검증에는 승인된 적용 경로와 단독 제어를 확인한 격리 엔진이 필요하다.
-- macOS에서 격리 엔진·Buildx·Compose 이미지 옵션을 포함한 `sh scripts/test-rust.sh`는 종료 코드 0으로 완료됐고 Rust 시험 103개를 통과했다. Compose는 반복 실행 후 동일 ID 1개, 구성·health·실제 이미지·64 KiB `tmpfs` 변경 거절, 일치하는 `tmpfs`의 `unknown/unverified_mount` 판정, 소유 컨테이너 회수를 확인했다. 실제 명명 볼륨 사용은 0개였고 명명 볼륨 교체는 합성 검증 범위다. pnpm 시험에는 일반 프로젝트 스크립트와 실제 Next.js 앱 빌드·루프백 응답을 포함한다.
+- Docker 내장 빌더 총량·활성 집계, 기본 Buildx 빌더의 상태별 조회, 기존 이미지 보존은 조회·계획 검증에 해당한다. Buildx 상태별 항목은 서로 겹칠 수 있다. WBS 2.3의 별도 BuildKit는 실제 4개를 조회하고 전부 보존했다. 프로젝트 캐시 소유권과 안전한 승인 회수의 증거가 필요하다. 이미지 적용 검증에는 승인된 적용 경로와 단독 제어를 확인한 격리 엔진이 필요하다.
+- macOS에서 격리 엔진·Buildx·Compose 이미지 옵션을 포함한 `sh scripts/test-rust.sh`는 종료 코드 0으로 완료됐고 Rust 시험 103개를 통과했다. Compose는 반복 실행 후 동일 ID 1개, 구성·health·실제 이미지·64 KiB `tmpfs` 변경 거절, 일치하는 `tmpfs`의 `unknown/unverified_mount` 판정, 소유 컨테이너 회수를 확인했다. 명명 볼륨 옵션으로 실행한 별도 전체 시험도 종료 코드 0과 Rust 시험 103개 통과를 확인했다. 볼륨 A의 재사용, B로 교체한 뒤 A 기대값의 거절과 B 기대값의 통과, 소유 컨테이너 회수 및 외부 볼륨 두 개 보존을 확인했다. 종료 후 인벤토리는 컨테이너 7개, 이미지 7개, 볼륨 2개, 중복 0건이었다. pnpm 시험에는 일반 프로젝트 스크립트와 실제 Next.js 앱 빌드·루프백 응답을 포함한다. [명명 볼륨 실측](HANDOFF.md#명명-볼륨과-ubuntu-parallels-실측)
 - 프로세스 강제 종료와 재시작 근거는 [핸드오프](HANDOFF.md)에 기록한다. 전원 장애 복구와 전체 플랫폼의 감사 무손실은 독립된 출시 검증으로 추적한다.

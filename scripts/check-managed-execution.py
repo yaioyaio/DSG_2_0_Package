@@ -13,7 +13,7 @@ import time
 
 
 HEALTH_MARKER = '/dev/shm/dsg-fixture-unhealthy'
-TMPFS_TARGET = '/dsg-fixture-mount'
+MOUNT_TARGET = '/dsg-fixture-mount'
 
 
 def call(arguments, timeout=8):
@@ -68,7 +68,7 @@ def compose_up(compose, project, timeout):
         raise RuntimeError('The isolated Compose fixture start exceeded its time limit.') from None
 
 
-def write_compose_fixture(path, image_id, tag, lifetime, mount_tmpfs=False):
+def write_compose_fixture(path, image_id, tag, lifetime, mount_tmpfs=False, named_volume=None):
     configuration = f'''services:
   probe:
     image: "{image_id}"
@@ -97,9 +97,22 @@ def write_compose_fixture(path, image_id, tag, lifetime, mount_tmpfs=False):
     if mount_tmpfs:
         configuration += f'''    volumes:
       - type: tmpfs
-        target: "{TMPFS_TARGET}"
+        target: "{MOUNT_TARGET}"
         tmpfs:
           size: 65536
+'''
+    if named_volume is not None:
+        configuration += f'''    volumes:
+      - type: volume
+        source: probe_data
+        target: "{MOUNT_TARGET}"
+        read_only: true
+        volume:
+          nocopy: true
+volumes:
+  probe_data:
+    external: true
+    name: "{named_volume}"
 '''
     path.write_text(configuration)
 
@@ -110,6 +123,16 @@ def verify_reuse(cli, context, project, runner_deadline):
     pinned_image = os.environ.get('DSG_TEST_COMPOSE_IMAGE')
     if pinned_image is not None and not re.fullmatch(r'docker\.io/library/alpine@sha256:[0-9a-f]{64}', pinned_image):
         raise RuntimeError('The optional Compose image must be an official Docker Hub Alpine digest reference.')
+    requested_volumes = os.environ.get('DSG_TEST_COMPOSE_VOLUMES')
+    volume_engine = os.environ.get('DSG_TEST_COMPOSE_VOLUME_ENGINE_ID')
+    volume_names = (None, None)
+    volume_owner = None
+    if requested_volumes is not None or volume_engine is not None:
+        pair = re.fullmatch(r'dsg-reuse-volume-([0-9a-f]{12})-a,dsg-reuse-volume-\1-b', requested_volumes or '')
+        if pair is None or not volume_engine or pinned_image is not None:
+            raise RuntimeError('The named-volume fixture requires its reserved volume pair and engine ID in a separate run.')
+        volume_names = tuple(requested_volumes.split(','))
+        volume_owner = pair.group(1)
     docker = ['docker', '--context', context]
     overrides = {'DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_API_VERSION', 'DOCKER_DEFAULT_PLATFORM',
                  'DOCKER_TLS', 'DOCKER_TLS_VERIFY', 'DOCKER_CERT_PATH'}
@@ -125,9 +148,13 @@ def verify_reuse(cli, context, project, runner_deadline):
             raise RuntimeError('The isolated Compose fixture verification exceeded its time limit.')
         return min(limit, remaining)
 
+    if volume_owner is not None and docker_field(docker + ['info', '--format', '{{.ID}}'], budget(3)) != volume_engine:
+        raise RuntimeError('The named-volume fixture engine identity could not be confirmed.')
     inventory = result(cli + ['docker-scan', '--context', context, '--max-resources', '64'], timeout=budget(25))
     if not inventory['complete'] or not inventory['engine_id']:
         raise RuntimeError('The isolated Docker inventory could not be verified.')
+    if volume_owner is not None and inventory['engine_id'] != volume_engine:
+        raise RuntimeError('The named-volume fixture engine identity changed during inventory.')
     images = {image['id']: image for image in inventory['images'] if image['digests']}
     inspect_image = docker + ['image', 'inspect', '--format']
     volume_count = '{{len .Config.Volumes}}'
@@ -168,6 +195,20 @@ def verify_reuse(cli, context, project, runner_deadline):
                                          '--filter', f'label=dsg.fixture={tag}']
     container_list = docker + ['container', 'ls', '--all', '--no-trunc', '--format', '{{.ID}}']
 
+    def confirm_volume(name, remaining):
+        projection = ('{{.Name}} {{.Driver}} {{.Scope}} {{len .Options}} '
+                      '{{index .Labels "dsg.fixture.reuse-volume"}}')
+        observed = docker_field(docker + ['volume', 'inspect', '--format', projection, '--', name], remaining(3))
+        if observed != f'{name} local local 0 {volume_owner}':
+            raise RuntimeError('The dedicated external fixture volume identity or ownership could not be verified.')
+
+    def confirm_unused_volumes(remaining):
+        for name in volume_names:
+            confirm_volume(name, remaining)
+            attached = docker_field(container_list + ['--filter', f'volume={name}'], remaining(3))
+            if attached != '':
+                raise RuntimeError('The dedicated external fixture volumes could not be confirmed as unused.')
+
     def owned_container(remaining):
         engine = docker_field(docker + ['info', '--format', '{{.ID}}'], remaining(3))
         if engine != inventory['engine_id']:
@@ -197,11 +238,13 @@ def verify_reuse(cli, context, project, runner_deadline):
         if removed.returncode or owned_container(remaining) is not None:
             raise RuntimeError('Isolated fixture removal could not be verified.')
 
-    def start(lifetime, image, mount_tmpfs=False):
+    def start(lifetime, image, mount_tmpfs=False, named_volume=None):
         nonlocal start_attempted
         if owned_container(budget) != container:
             raise RuntimeError('The observed isolated fixture ID changed before startup.')
-        write_compose_fixture(yaml_path, image['id'], tag, lifetime, mount_tmpfs)
+        if named_volume is not None:
+            confirm_volume(named_volume, budget)
+        write_compose_fixture(yaml_path, image['id'], tag, lifetime, mount_tmpfs, named_volume)
         timeout = budget(11)
         start_attempted = True
         if compose_up(compose, project, timeout):
@@ -223,6 +266,11 @@ def verify_reuse(cli, context, project, runner_deadline):
         args = cli + ['docker-reuse', '--context', context, '--expectation-json', json.dumps(expectation)]
         return result(args, expected=exit_code, timeout=budget(22))
 
+    def expect_candidate(expectation, container_id):
+        observed = verify(expectation, 0)
+        if not observed['verified'] or observed['assessment']['container_id'] != container_id:
+            raise RuntimeError('The isolated Compose reuse candidate ID could not be verified.')
+
     def expect_refusal(expectation, status, reason):
         observed = verify(expectation, 5)
         if (observed['verified'] or observed['assessment']['status'] != status
@@ -230,14 +278,26 @@ def verify_reuse(cli, context, project, runner_deadline):
                 or observed['reason'] != {'code': 'initial_unverified', 'assessment_reason': reason}):
             raise RuntimeError(f'The isolated Compose fixture did not return {status}/{reason} in both observations.')
 
-    def confirm_changed_fixture(container_id, image_id):
+    def confirm_fixture_mount(container_id, image_id, mount):
         confirm_owned(container_id, budget)
         projection = ('{{.Image}} {{.State.Health.Status}}'
-                      '{{range .Mounts}} {{.Type}}:{{.Destination}}:{{.RW}}{{end}}')
+                      '{{range .Mounts}} {{.Type}}:{{if eq .Type "volume"}}{{.Name}}{{end}}:{{.Destination}}:{{.RW}}{{end}}')
+        kind = mount['kind']
+        name = mount['volume'] or ''
+        writable = str(not mount['read_only']).lower()
+        expected = f'{image_id} healthy {kind}:{name}:{mount["destination"]}:{writable}'
+        if kind == 'volume':
+            legacy_read_only = json.dumps(f'{name}:{MOUNT_TARGET}:ro,nocopy')
+            legacy_no_copy = json.dumps(f'{name}:{MOUNT_TARGET}:nocopy,ro')
+            projection += ('{{range .HostConfig.Mounts}}{{if eq .Type "volume"}}'
+                           '{{with .VolumeOptions}}{{if .NoCopy}} nocopy{{end}}{{end}}{{end}}{{end}}'
+                           '{{range .HostConfig.Binds}}{{if or (eq . ' + legacy_read_only + ')'
+                           ' (eq . ' + legacy_no_copy + ')}} nocopy{{end}}{{end}}')
+            expected += ' nocopy'
         observed = docker_field(docker + ['container', 'inspect', '--format', projection,
                                           '--', container_id], budget(4))
-        if observed != f'{image_id} healthy tmpfs:{TMPFS_TARGET}:true':
-            raise RuntimeError('The isolated replacement container image, health or temporary mount could not be verified.')
+        if observed != expected:
+            raise RuntimeError('The isolated container image, health or mount could not be verified.')
 
     def trigger_unhealthy(container_id):
         # The marker lives in this container's private shared memory and is removed with it.
@@ -257,20 +317,29 @@ def verify_reuse(cli, context, project, runner_deadline):
             time.sleep(0.25)
         raise RuntimeError('The isolated fixture did not become unhealthy within its time limit.')
 
+    original_mounts, changed_mounts = [], []
+    if volume_owner is not None:
+        confirm_unused_volumes(budget)
+        original_mounts, changed_mounts = (
+            [{'kind': 'volume', 'volume': name, 'destination': MOUNT_TARGET, 'read_only': True}]
+            for name in volume_names
+        )
+
     container = None
     start_attempted = False
     try:
-        container = start(45, source)
+        container = start(45, source, named_volume=volume_names[0])
         config_hash = read_config_hash(container)
         expectation = dict(engine_id=inventory['engine_id'], project=tag, service='probe', number=1,
-                           config_hash=config_hash, image_id=source['id'], image_digest=source['digests'][0], mounts=[])
-        observed = verify(expectation, 0)
-        assert observed['verified'] and observed['assessment']['container_id'] == container
+                           config_hash=config_hash, image_id=source['id'], image_digest=source['digests'][0],
+                           mounts=original_mounts)
+        if volume_owner is not None:
+            confirm_fixture_mount(container, source['id'], original_mounts[0])
+        expect_candidate(expectation, container)
 
-        repeated = start(45, source)
+        repeated = start(45, source, named_volume=volume_names[0])
         assert repeated == container and read_config_hash(repeated) == config_hash
-        observed = verify(expectation, 0)
-        assert observed['verified'] and observed['assessment']['container_id'] == container
+        expect_candidate(expectation, container)
 
         trigger_unhealthy(container)
         confirm_owned(container, budget)
@@ -282,16 +351,22 @@ def verify_reuse(cli, context, project, runner_deadline):
         remove_owned(original, budget)
         container = None
         start_attempted = False
-        container = start(46, replacement or source, mount_tmpfs=replacement is not None)
+        container = start(46, replacement or source, mount_tmpfs=replacement is not None, named_volume=volume_names[1])
         changed_hash = read_config_hash(container)
         assert container != original and changed_hash != config_hash
-        if replacement is None:
+        if volume_owner is not None:
+            expect_refusal(expectation, 'rejected', 'configuration_changed')
+            confirm_fixture_mount(container, source['id'], changed_mounts[0])
+            expect_refusal(dict(expectation, config_hash=changed_hash), 'rejected', 'mount_changed')
+            expect_candidate(dict(expectation, config_hash=changed_hash, mounts=changed_mounts), container)
+            confirm_owned(container, budget)
+        elif replacement is None:
             stale = verify(expectation, 5)
             assert not stale['verified'] and stale['assessment']['reason'] == 'configuration_changed'
         else:
             expect_refusal(expectation, 'rejected', 'configuration_changed')
-            confirm_changed_fixture(container, replacement['id'])
-            mounted = {'kind': 'tmpfs', 'volume': None, 'destination': TMPFS_TARGET, 'read_only': False}
+            mounted = {'kind': 'tmpfs', 'volume': None, 'destination': MOUNT_TARGET, 'read_only': False}
+            confirm_fixture_mount(container, replacement['id'], mounted)
             changed = dict(expectation, config_hash=changed_hash, image_id=replacement['id'],
                            image_digest=replacement_digest)
             expect_refusal(dict(changed, image_id=source['id'], image_digest=source['digests'][0], mounts=[mounted]),
@@ -312,9 +387,13 @@ def verify_reuse(cli, context, project, runner_deadline):
             current = owned_container(cleanup_budget)
             if current is not None:
                 remove_owned(container or current, cleanup_budget)
+            if volume_owner is not None:
+                confirm_unused_volumes(cleanup_budget)
     print('Isolated Compose reuse: repeated up retained one container; health and configuration changes were rejected.')
     if replacement is not None:
         print('Isolated Compose image and mount changes were rejected, and matching tmpfs stayed unverified.')
+    if volume_owner is not None:
+        print('Isolated Compose named-volume reuse passed, the changed mount was rejected, and both external volumes were preserved.')
 
 
 if __name__ == '__main__':

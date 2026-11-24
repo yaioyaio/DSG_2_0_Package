@@ -1,6 +1,7 @@
 """Verify protocol wiring and, when selected, run native CLIs against local fixtures."""
 
 from contextlib import closing, contextmanager
+from http.client import HTTPConnection
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import os
@@ -23,6 +24,7 @@ AGENTS = {
     'gemini': ('BeforeTool', 'run_shell_command', '.gemini/settings.json'),
 }
 NETWORK_PROFILE = '(deny network-outbound) (allow network-outbound (remote ip "localhost:*"))'
+LINUX_FIXTURE_ROOT = Path('/fixture')
 
 
 def execute(args, *, cwd=None, env=None, stdin=None, timeout=12):
@@ -38,7 +40,14 @@ def execute(args, *, cwd=None, env=None, stdin=None, timeout=12):
             run.communicate(timeout=4)
             raise AssertionError('Agent fixture exceeded its time limit') from None
         if run.returncode:
-            raise AssertionError(f'Fixture CLI exited with status {run.returncode}')
+            output = (stdout + stderr).lower()
+            categories = [label for label, marker in (
+                ('argument', 'unexpected argument'), ('option', 'unknown option'),
+                ('permission', 'permission denied'), ('read_only', 'read-only file system'),
+                ('missing_file', 'no such file'), ('untrusted', 'untrusted'),
+                ('transport', 'connection refused'), ('api', 'api request failed'),
+            ) if marker in output]
+            raise AssertionError(f'Fixture CLI exited with status {run.returncode}: {",".join(categories)}')
         return stdout, stderr
 
 
@@ -250,7 +259,60 @@ def local_gateway(agent, command):
             thread.join(timeout=2)
 
 
-def native_case(dsg, root, agent, scenario):
+def require_linux_container():
+    def require(condition, boundary):
+        if not condition:
+            raise RuntimeError(f'Linux native agent fixture boundary unconfirmed ({boundary})')
+
+    require(sys.platform == 'linux' and os.getuid() != 0 and os.geteuid() != 0, 'non-root Linux')
+    require(os.statvfs('/').f_flag & os.ST_RDONLY, 'read-only root')
+    mount_options = None
+    for line in Path('/proc/self/mountinfo').read_text(encoding='ascii').splitlines():
+        mount, _, filesystem = line.partition(' - ')
+        fields = mount.split()
+        if len(fields) > 5 and fields[4] == str(LINUX_FIXTURE_ROOT) and filesystem.startswith('tmpfs '):
+            mount_options = set(fields[5].split(','))
+    require(mount_options is not None and 'rw' in mount_options and 'noexec' not in mount_options
+            and LINUX_FIXTURE_ROOT.resolve(strict=True) == LINUX_FIXTURE_ROOT
+            and os.access(LINUX_FIXTURE_ROOT, os.W_OK | os.X_OK), 'private executable fixture tmpfs')
+
+    status = {}
+    for line in Path('/proc/self/status').read_text(encoding='ascii').splitlines():
+        name, _, value = line.partition(':')
+        if name in ('CapEff', 'NoNewPrivs'):
+            status[name] = value.strip()
+    require(int(status.get('CapEff', '1'), 16) == 0 and status.get('NoNewPrivs') == '1',
+            'effective capabilities and no-new-privileges')
+
+    interfaces = {line.split(':', 1)[0].strip()
+                  for line in Path('/proc/net/dev').read_text(encoding='ascii').splitlines() if ':' in line}
+    require(interfaces == {'lo'}, 'loopback-only network')
+    ipv4 = Path('/proc/net/route').read_text(encoding='ascii').splitlines()[1:]
+    require(not any(line.split()[1] == '00000000' for line in ipv4 if line.split()), 'IPv4 default route')
+    ipv6 = Path('/proc/net/ipv6_route')
+    if ipv6.exists():
+        for line in ipv6.read_text(encoding='ascii').splitlines():
+            fields = line.split()
+            flags = int(fields[8], 16)
+            # Linux can expose an unreachable ::/0 sentinel on an otherwise isolated loopback.
+            live_default = (fields[0] == '0' * 32 and fields[1] == '00'
+                            and flags & 0x1 and not flags & 0x200)
+            require(not live_default, 'IPv6 default route')
+
+    known_sockets = ('/var/run/docker.sock', '/run/docker.sock', f'/run/user/{os.getuid()}/docker.sock')
+    require(not any(os.path.lexists(path) for path in known_sockets), 'Docker sockets absent')
+    with local_gateway('codex', '') as (address, exchanges):
+        connection = HTTPConnection('127.0.0.1', urlsplit(address).port, timeout=2)
+        try:
+            connection.request('HEAD', '/')
+            response = connection.getresponse()
+            require(response.status == 200 and not response.read(1) and not exchanges, 'local fixture gateway')
+        finally:
+            connection.close()
+    print('Linux native agent fixture: isolated loopback and read-only root verified.')
+
+
+def native_case(dsg, root, agent, scenario, *, linux_container=False):
     root.mkdir()
     home = root / 'home'
     home.mkdir()
@@ -275,10 +337,12 @@ def native_case(dsg, root, agent, scenario):
     env = {'HOME': str(home), 'PATH': '/usr/bin:/bin:/usr/sbin:/sbin', 'TMPDIR': str(home),
            'SHELL': '/bin/bash',
            'LANG': 'en_US.UTF-8', 'CI': '1', 'TERM': 'dumb', 'NO_COLOR': '1'}
-    profile = ('(version 1) (allow default) ' + NETWORK_PROFILE + ' (deny file-write*) '
-               + '(allow file-write* (literal "/dev/null") (subpath '
-               + json.dumps(str(root.resolve())) + '))')
-    sandbox = ['/usr/bin/sandbox-exec', '-p', profile]
+    sandbox = []
+    if not linux_container:
+        profile = ('(version 1) (allow default) ' + NETWORK_PROFILE + ' (deny file-write*) '
+                   + '(allow file-write* (literal "/dev/null") (subpath '
+                   + json.dumps(str(root.resolve())) + '))')
+        sandbox = ['/usr/bin/sandbox-exec', '-p', profile]
     if agent == 'gemini':
         node = os.environ['DSG_TEST_NODE']
         entry = os.environ['DSG_TEST_GEMINI_ENTRY']
@@ -345,12 +409,20 @@ def native_case(dsg, root, agent, scenario):
 if __name__ == '__main__' and os.name == 'posix':
     binary = str(Path(sys.argv[1]).resolve(strict=True))
     selection = os.environ.get('DSG_TEST_AGENT_NATIVE', '')
-    with tempfile.TemporaryDirectory(prefix='dsg-agent-fixtures-') as scratch:
+    linux_container = (sys.platform == 'linux' and bool(selection)
+                       and os.environ.get('DSG_TEST_AGENT_LINUX_CONTAINER') == '1')
+    if selection:
+        if selection not in {*AGENTS, 'all'} or not (sys.platform == 'darwin' or linux_container):
+            raise RuntimeError('Native agent fixture requires macOS or explicit Linux container opt-in')
+        if linux_container:
+            require_linux_container()
+    with tempfile.TemporaryDirectory(prefix='dsg-agent-fixtures-',
+                                     dir=LINUX_FIXTURE_ROOT if linux_container else None) as scratch:
         fixture = Path(scratch).resolve()
         verify_contracts(binary, fixture)
         if selection:
-            assert sys.platform == 'darwin' and selection in {*AGENTS, 'all'}
             for agent in AGENTS if selection == 'all' else [selection]:
                 for scenario in ('allow', 'deny', 'hook-error'):
-                    native_case(binary, fixture / f'native-{agent}-{scenario}', agent, scenario)
+                    native_case(binary, fixture / f'native-{agent}-{scenario}', agent, scenario,
+                                linux_container=linux_container)
                 print(f'Native {agent}: allow, deny and hook-error paths passed.')
