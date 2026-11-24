@@ -17,7 +17,8 @@
     "windows_foundation": "Windows ARM64 MSVC cross-link and nine native NTFS filesystem tests passed on the existing Parallels guest. macOS Python 14 and Rust 98 plus registered integration passed.",
     "buildx_cache": "macOS Rust 102 and live isolated Buildx integration passed. Engine default Buildx totals 208 records, 208 reclaimable, 8 shared, 167 mutable; all preserved. Separate builder qualification remains open.",
     "next_and_compose_health": "macOS Rust 102 and integration passed with the real Next.js 16.4.6 pnpm build, loopback runtime and leases, plus real same-container Compose health rejection and bounded cleanup.",
-    "gc_crash_recovery": "macOS Rust 103 and integration passed. Committed GC intent and staged artifact survived an owned child SIGKILL, restored identical identity/SHA-256 with zero deletion and retained exact audit events."
+    "gc_crash_recovery": "macOS Rust 103 and integration passed. Committed GC intent and staged artifact survived an owned child SIGKILL, restored identical identity/SHA-256 with zero deletion and retained exact audit events.",
+    "current_macos_qualification": "Rust tree 681be1e: all nine local agent CLI fixtures, temporary launchd and isolated Docker boundary, paired independent release archive builds, prior 0.1.0 upgrade, and live WebKit/API comparisons passed."
   },
   "files": [
     {
@@ -107,8 +108,8 @@
     },
     {
       "path": "docs/RELEASE.md",
-      "sha256": "b0ae0bc970a86ad35f785517d33555bd734d095746fd7ac199bc5f1d85859a30",
-      "bytes": 9436
+      "sha256": "b26024ac29a90847f3c6263689d076a8576bccc340370c389c17baa2bbc02580",
+      "bytes": 9914
     },
     {
       "path": "docs/REQUIREMENTS.md",
@@ -127,8 +128,8 @@
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "f89584f2723ac26c3efe739692468a92ddb86cedbfca9528c1d1324107b97665",
-      "bytes": 12215
+      "sha256": "fd6d61f2f03773fba34991e1bde9a1fce2951033ce51ee1cbdd812f88018c2ff",
+      "bytes": 12552
     },
     {
       "path": "docs/TEST_PLAN.md",

@@ -168,3 +168,9 @@ DSG-08의 `f6397b2`를 PR #15로 `develop`, PR #16으로 `main`에 반영했다.
 
 - `feature/20261124-gc-crash-recovery`, 기준 `777f9a7`. WBS 1.4에서 임시 파일의 승인 적용 의도 커밋과 격리 이동 뒤 시험 자식만 `SIGKILL`했다. 새 등록부에서 만료 lease와 적용 의도를 되찾아 실제 복원 경로를 적용했다. 복원 파일의 ID·SHA-256이 일치하고, 회수 0바이트와 중복 복원 거절, SQLite 무결성·외래키 위반 0건, `GC_APPLY_INTENT`·`GC_PRESERVED` 각 1건을 확인했다. [시험 코드](../rust-scaffold/crates/dsg-core/src/gc.rs)
 - macOS `sh scripts/test-rust.sh`에서 Rust 103개와 통합 러너가 통과했다. 실제 사용자 데이터·Docker 자원 변경과 보조 워크트리 생성은 0회다. 호스트 전원 장애와 실제 Docker 이미지·Buildx 캐시 회수는 별도 수용 조건으로 남는다.
+
+## DSG-06~08 현재 소스의 macOS 자격 검증
+
+- `feature/20261124-macos-qualification`, 기준 `b7d94d6`, Rust 소스 트리 `681be1efa0ed4136f47fb6d4c5c6a7122b503519`. 최적화 빌드한 현재 바이너리의 임시 설치본으로 `DSG_TEST_AGENT_NATIVE=all`의 실제 Claude·Codex·Gemini 9개 사례와 MCP 대조를 통과했다. 네트워크와 쓰기를 제한한 시험에서 합성 응답과 대역 도구를 사용했다. [에이전트 검증](TEST_PLAN.md#에이전트-연동-검증)
+- 현재 `dsgd`의 임시 GUI launchd 등록·재시작·해제와 기존 격리 Docker의 실제 Unix·TCP 직접 접근 차단 및 브로커 조회가 통과했다. 별도 macOS 운영 계정·공식 LaunchDaemon은 관리자 경로가 필요하다. 기존 Parallels Ubuntu ARM64의 기본 게스트 명령을 확인하고 일시정지로 복귀했다. Linux 관리형 실행과 Windows 실제 Docker 엔진은 별도 수용 조건이다. [플랫폼 검증](TEST_PLAN.md#브로커와-서비스-검증)
+- macOS `0.1.1-rc.1`을 독립 대상 디렉터리에서 두 번 최적화 빌드했다. `tar.gz` SHA-256이 일치했고 보존된 `0.1.0`에서 업그레이드·실행·제거를 통과했다. 기존 Docker 엔진에서 독립 조회한 컨테이너 7개, 이미지 ID 5개, 볼륨 0개가 현재 패키지의 API·WebKit 1060px·390px 화면에 일치했다. 첫 대시보드 호출은 실행 래퍼의 컨텍스트 변수가 누락돼 실패했고, 동일 패키지를 명시 컨텍스트로 재검증해 통과했다. `dist/dsg-macos-qualification-681be1e/`에 패키지·SHA-256·검증 요약을 보존했다. 임시 설치·서비스와 보조 워크트리 잔여는 0개다. [제품 검증](RELEASE.md)
