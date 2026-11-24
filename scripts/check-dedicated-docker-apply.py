@@ -1,5 +1,6 @@
 """Observe or apply one explicitly approved live Docker GC trial."""
 
+import errno
 import hashlib
 import http.client
 import json
@@ -18,6 +19,7 @@ import time
 
 VM = "Ubuntu 24.04 P5-001"
 TRIAL = "dsg-gc-cf83a703d2fd"
+CONSUMED_RECEIPT_LOSS_TRIAL = "dsg-gc-93292d9f465f"
 ENGINE = "3f0311f3-c456-43e5-a123-014f500108fd"
 GENERATION = "91258d7a9be96b3a41320dc67c09329b0e81fa23d865cd059fffe37ad9296e50"
 IMAGE = "sha256:a854697496f4c843431566255d0cb2ae780ebf51f9ca70773445c1f52549f94c"
@@ -29,7 +31,9 @@ IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}")
 API_VERSION = re.compile(r"1\.[0-9]{1,3}")
 PINNED_MODES = ("observe", "apply")
 RECEIPT_LOSS_MODES = ("observe-receipt-loss", "apply-receipt-loss")
-APPLY_MODES = ("apply", "apply-receipt-loss")
+RESPONSE_LOSS_MODES = ("observe-response-loss", "apply-response-loss")
+APPROVED_MODES = (*RECEIPT_LOSS_MODES, *RESPONSE_LOSS_MODES)
+APPLY_MODES = ("apply", "apply-receipt-loss", "apply-response-loss")
 APPROVAL_VARIABLES = {
     "proof_sha256": "DSG_DEDICATED_GC_APPROVED_PROOF_SHA256",
     "engine_id": "DSG_DEDICATED_GC_APPROVED_ENGINE",
@@ -37,7 +41,7 @@ APPROVAL_VARIABLES = {
     "image_id": "DSG_DEDICATED_GC_APPROVED_IMAGE",
 }
 HOST_FLAGS = ("host_namespace_socket_hidden", "guest_trial_active_before_suspend", "guest_restored_to_suspended")
-HOST_FIELDS = (*HOST_FLAGS, "script_sha256")
+HOST_FIELDS = (*HOST_FLAGS, "script_sha256", "apply_trial")
 MAX_PROOF = 4096
 MAX_JSON = 8192
 MAX_CHILD_OUTPUT = 16384
@@ -45,7 +49,7 @@ GUEST_SECONDS = 8
 ERRORS = frozenset({
     "E_INPUT", "E_BINDING", "E_VM", "E_UNIT", "E_PROOF", "E_ISOLATION", "E_PEER",
     "E_INVENTORY", "E_SNAPSHOT", "E_TIME", "E_DELETE_STATUS", "E_DELETE_RESULT",
-    "E_AFTER", "E_TRANSPORT", "E_RUNTIME",
+    "E_AFTER", "E_TRANSPORT", "E_RUNTIME", "E_RESPONSE_LOSS", "E_DISPATCH", "E_OBSERVE_TRANSIENT",
 })
 
 
@@ -116,7 +120,7 @@ def zeros(value, keys):
     return all(type(value.get(key)) is int and value[key] == 0 for key in keys)
 
 
-def receipt_loss_proof(envelope):
+def approved_proof(mode, envelope):
     require(fields(envelope, ("proof", "approval", "intent")), "E_INPUT")
     raw, approval = envelope["proof"], envelope["approval"]
     require(isinstance(raw, str) and raw.isascii() and len(raw) <= MAX_PROOF
@@ -131,12 +135,17 @@ def receipt_loss_proof(envelope):
             and ENGINE_ID.fullmatch(proof["engine_id"]) is not None
             and IMAGE_ID.fullmatch(proof["image_id"]) is not None and hex_field(proof["generation"])
             and all(proof[key] == approval[key] for key in ("engine_id", "generation", "image_id")), "E_BINDING")
+    if mode in RESPONSE_LOSS_MODES:
+        require(proof.get("apply_trial") == "response-loss" and proof["trial"] != CONSUMED_RECEIPT_LOSS_TRIAL,
+                "E_BINDING")
+    else:
+        require("apply_trial" not in proof, "E_BINDING")
     return proof
 
 
 def binding(mode, envelope):
-    if mode in RECEIPT_LOSS_MODES:
-        proof = receipt_loss_proof(envelope)
+    if mode in APPROVED_MODES:
+        proof = approved_proof(mode, envelope)
     else:
         require(mode in PINNED_MODES and fields(envelope, ("proof", "intent")), "E_INPUT")
         proof = envelope["proof"]
@@ -157,7 +166,7 @@ def binding(mode, envelope):
 
     require(fields(intent, ("operation", "policy", "binding"))
             and hex_field(intent["operation"]) and hex_field(intent["policy"]), "E_BINDING")
-    if mode in RECEIPT_LOSS_MODES:
+    if mode in APPROVED_MODES:
         require(intent["policy"] == envelope["approval"]["proof_sha256"], "E_BINDING")
     target = intent["binding"]
     # The registry verifies its host owner. The private engine's owner is checked in snapshot().
@@ -210,18 +219,25 @@ def transport(source, entry, *args):
 def verified_result(mode, proof, trial, delete_http_status=200):
     result = {"verified": True, "engine_id": trial.engine, "generation": trial.generation, "image_id": trial.image,
               "snapshot": proof["snapshot"], "author_fingerprint": proof["author_fingerprint"], "delete_requests": 0}
-    if mode in APPLY_MODES:
+    if mode == "apply-response-loss":
+        result.update(delete_requests=1, after_images=0, delete_response_bytes_read=0,
+                      delete_response_handling="client_read_shutdown")
+    elif mode == "observe-response-loss":
+        result["guest_delete_attempt_absent"] = True
+    elif mode in APPLY_MODES:
         result.update(delete_requests=1, after_images=0, effect="applied")
     if mode == "apply-receipt-loss":
         result["delete_http_status"] = delete_http_status
     return result
 
 
-def result_from(result, expected, code):
+def result_from(result, expected, code, mismatch_code=None):
     value = decode(result.stdout, code)
     if result.returncode == 0:
-        require(encode(value) == encode(expected), code)
+        require(encode(value) == encode(expected), mismatch_code or code)
         return expected
+    if mismatch_code is not None and isinstance(value, dict) and "verified" in value:
+        raise Failed(mismatch_code)
     if isinstance(value, dict) and isinstance(value.get("error"), str) and value["error"] in ERRORS:
         status = value.get("status")
         if value["error"] == "E_DELETE_STATUS" and type(status) is int and 100 <= status <= 599:
@@ -354,10 +370,13 @@ def snapshot(trial, proof):
     return release[1]
 
 
+def delete_request(api_version, image):
+    return (f"DELETE /v{api_version}/images/{image}?force=false&noprune=true HTTP/1.1\r\n"
+            "Host: localhost\r\nConnection: close\r\nContent-Length: 0\r\n\r\n").encode("ascii")
+
+
 def delete_once(conn, api_version, image):
-    request = (f"DELETE /v{api_version}/images/{image}?force=false&noprune=true HTTP/1.1\r\n"
-               "Host: localhost\r\nConnection: close\r\nContent-Length: 0\r\n\r\n").encode("ascii")
-    conn.sendall(request)
+    conn.sendall(delete_request(api_version, image))
     reply = http.client.HTTPResponse(conn, method="DELETE")
     with reply:
         reply.begin()
@@ -369,23 +388,82 @@ def delete_once(conn, api_version, image):
     return status
 
 
+def send_delete_without_response(conn, api_version, image):
+    # Shut the receive direction before dispatch. Keep the sending direction open
+    # while independent read-only connections observe the engine.
+    conn.shutdown(socket.SHUT_RD)
+    conn.sendall(delete_request(api_version, image))
+    require(conn.recv(1) == b"", "E_RESPONSE_LOSS")
+
+
+def reserve_guest_delete_attempt(trial):
+    try:
+        fd = os.open(trial.store / "response-loss-delete-attempt",
+                     os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, 0o600)
+    except FileExistsError:
+        raise Failed("E_DISPATCH") from None
+    os.close(fd)
+
+
+def require_guest_delete_attempt_absent(trial):
+    try:
+        (trial.store / "response-loss-delete-attempt").lstat()
+    except FileNotFoundError:
+        return
+    raise Failed("E_DISPATCH")
+
+
+def observe_delete_effect(trial):
+    # The server may still be processing the DELETE while the first GET arrives.
+    # Poll only the exact image inventory under the existing guest time limit.
+    for _ in range(4):
+        ids = docker_command(trial, "image", "ls", "-aq", "--no-trunc").splitlines()
+        if not ids:
+            inventory(trial, [], "E_AFTER")
+            return
+        require(ids == [trial.image], "E_AFTER")
+        time.sleep(0.1)
+    raise Failed("E_AFTER")
+
+
 def guest_inner(mode, envelope, pid, start, target, deadline):
     proof, trial = binding(mode, envelope)
     read_proof(trial, proof)
     isolation(trial, proof, pid, start, target)
     delete_http_status = None
+    observing_response_loss = mode == "observe-response-loss"
+    if observing_response_loss:
+        require_guest_delete_attempt_absent(trial)
     with socket.socket(socket.AF_UNIX) as conn:
         conn.settimeout(1.5)
-        conn.connect(str(trial.socket))
+        try:
+            conn.connect(str(trial.socket))
+        except OSError as exc:
+            if observing_response_loss and (isinstance(exc, TimeoutError)
+                    or exc.errno in (errno.EAGAIN, errno.ECONNREFUSED, errno.EINTR)):
+                raise Failed("E_OBSERVE_TRANSIENT") from None
+            raise
         peer_generation(conn, trial, proof, target)
-        inventory(trial, [trial.image], "E_INVENTORY")
-        api_version = snapshot(trial, proof)
+        try:
+            inventory(trial, [trial.image], "E_INVENTORY")
+            api_version = snapshot(trial, proof)
+        except Failed as exc:
+            if observing_response_loss and exc.code == "E_TIME":
+                raise Failed("E_OBSERVE_TRANSIENT") from None
+            raise
         peer_generation(conn, trial, proof, target)
         if mode in APPLY_MODES:
             require(deadline - monotonic_us() >= 4_000_000 and proc_start(pid) == start, "E_TIME")
-            delete_http_status = delete_once(conn, api_version, trial.image)
-            inventory(trial, [], "E_AFTER")
+            if mode == "apply-response-loss":
+                reserve_guest_delete_attempt(trial)
+                send_delete_without_response(conn, api_version, trial.image)
+                observe_delete_effect(trial)
+            else:
+                delete_http_status = delete_once(conn, api_version, trial.image)
+                inventory(trial, [], "E_AFTER")
             peer_generation(conn, trial, proof, target)
+    if observing_response_loss:
+        require_guest_delete_attempt_absent(trial)
 
     return verified_result(mode, proof, trial, delete_http_status)
 
@@ -430,16 +508,50 @@ def check_host_approval(envelope, trial):
         require(stat.S_ISREG(info.st_mode) and info.st_uid == uid
                 and not info.st_mode & 0o7177 and info.st_nlink == 1, "E_PROOF")
         require(stream.read(MAX_PROOF + 1) == envelope["proof"].encode("ascii"), "E_PROOF")
+    return directory
+
+
+def consume_response_loss_dispatch(directory, envelope):
+    directory_fd = os.open(directory / ".dsg-live-apply",
+                           os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        uid = os.geteuid()
+        state = os.fstat(directory_fd)
+        require(state.st_uid == uid and stat.S_IMODE(state.st_mode) == 0o700, "E_DISPATCH")
+        fd = os.open("DISPATCH.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC,
+                     dir_fd=directory_fd)
+        with os.fdopen(fd, "rb") as stream:
+            meta = os.fstat(stream.fileno())
+            require(stat.S_ISREG(meta.st_mode) and meta.st_uid == uid
+                    and stat.S_IMODE(meta.st_mode) == 0o600 and meta.st_nlink == 1, "E_DISPATCH")
+            raw = stream.read(MAX_PROOF + 1)
+            require(len(raw) <= MAX_PROOF, "E_DISPATCH")
+            dispatch = decode(raw, "E_DISPATCH")
+        require(fields(dispatch, ("intent", "intent_digest", "proof_digest"))
+                and dispatch["intent"] == envelope["intent"] and hex_field(dispatch["intent_digest"])
+                and dispatch["proof_digest"] == envelope["approval"]["proof_sha256"], "E_DISPATCH")
+        try:
+            fd = os.open("DELETE_ATTEMPT.json", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC,
+                         0o600, dir_fd=directory_fd)
+        except FileExistsError:
+            raise Failed("E_DISPATCH") from None
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(encode({key: dispatch[key] for key in ("intent_digest", "proof_digest")}))
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
 
 
 def host_main():
     try:
-        require(len(sys.argv) == 2 and sys.argv[1] in (*PINNED_MODES, *RECEIPT_LOSS_MODES), "E_INPUT")
+        require(len(sys.argv) == 2 and sys.argv[1] in (*PINNED_MODES, *APPROVED_MODES), "E_INPUT")
         mode = sys.argv[1]
         envelope = decode(sys.stdin.buffer.read(MAX_JSON + 1), "E_INPUT")
         proof, trial = binding(mode, envelope)
-        if mode in RECEIPT_LOSS_MODES:
-            check_host_approval(envelope, trial)
+        if mode in APPROVED_MODES:
+            directory = check_host_approval(envelope, trial)
         prlctl = next((path for path in ("/usr/local/bin/prlctl",
                      "/Applications/Parallels Desktop.app/Contents/MacOS/prlctl") if os.access(path, os.X_OK)), None)
         require(prlctl is not None, "E_VM")
@@ -447,8 +559,11 @@ def host_main():
         require(running in (f"VM {VM} exist running", f"VM '{VM}' is running"), "E_VM")
         source = Path(__file__).read_bytes().rsplit(b'\nif __name__ == "__main__":\n', 1)[0]
         payload = transport(source, "guest_outer", mode, envelope, source)
+        if mode == "apply-response-loss":
+            consume_response_loss_dispatch(directory, envelope)
         reply = run((prlctl, "exec", VM, "/usr/bin/python3", "-IB", "-"), 12, "E_TRANSPORT", input=payload)
-        result = result_from(reply, verified_result(mode, proof, trial), "E_TRANSPORT")
+        mismatch_code = "E_PROOF" if mode == "observe-response-loss" else None
+        result = result_from(reply, verified_result(mode, proof, trial), "E_TRANSPORT", mismatch_code)
         print(encode(result).decode("ascii"))
     except Exception as exc:
         print(encode(error_payload(exc)).decode("ascii"), file=sys.stderr)

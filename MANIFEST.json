@@ -78,8 +78,8 @@
     },
     {
       "path": "docs/API_SPEC.md",
-      "sha256": "409ad6deeb3fa45eafd35280d42a6c2583a97190b9477b40731d94ade1f45819",
-      "bytes": 21020
+      "sha256": "7fe043f3d1a8bd80bddc944d93ae82d0c736e5832dca1174ae59ed4295cf1223",
+      "bytes": 23764
     },
     {
       "path": "docs/ARCHITECTURE.md",
@@ -128,8 +128,8 @@
     },
     {
       "path": "docs/SECURITY.md",
-      "sha256": "0e8a76f2dde3426ab92260a520c8c33ac0ae48df5bca8f78ed0517db0ae21598",
-      "bytes": 2862
+      "sha256": "031e3e38f5f59919af2d5941e939ded9c572762097f425c1f8bbe40d242d0f69",
+      "bytes": 4736
     },
     {
       "path": "docs/SOURCES.md",
@@ -138,13 +138,13 @@
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "054a63d3400c4a67b0fbb06aae3bb640c605f9653ba22f214c0a13d1221e5185",
-      "bytes": 21761
+      "sha256": "c95268b2b31a9d042c4d83245386f31766a6eadd5316c7abdb85be930e87c499",
+      "bytes": 23176
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "f41c6441bb4f7af71f5027e45d6866e4c458282dbd7e0a780643124a5c6f1a0c",
-      "bytes": 32581
+      "sha256": "274edccf81faaacafe3caa20cd8f761e23314b4d5623b549de923d2ccc5dd851",
+      "bytes": 38484
     },
     {
       "path": "docs/WBS.md",
@@ -313,8 +313,8 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/src/main.rs",
-      "sha256": "12394039744706af54cf4e367970ed1aff5b9bfc317f395de3eef4fd59d28fa9",
-      "bytes": 28696
+      "sha256": "057cb6947433afcb37e689ecf9821b63c2f91c948ae26128e048c4e79036a289",
+      "bytes": 30236
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/src/mcp.rs",
@@ -378,8 +378,18 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/docker_control_local.rs",
-      "sha256": "1d41b7bf7f4ab7764382bd97576764ac1a384360440dbe41cbc112d1fa20b567",
-      "bytes": 12201
+      "sha256": "c34c614e774f65465ade7bd7f188b55ccebb27262c9b170f9f9ef2c06d106c85",
+      "bytes": 12737
+    },
+    {
+      "path": "rust-scaffold/crates/dsg-core/src/docker_control_local/admission.rs",
+      "sha256": "ed9609a910fc7a7752fa0a2c97cfd4f71d9b72103125ef6f29d0718fb4b5b0ef",
+      "bytes": 16138
+    },
+    {
+      "path": "rust-scaffold/crates/dsg-core/src/docker_control_local/admission/write_request.rs",
+      "sha256": "85b17085bb0f1b55a36474f7c08659ef5ce7f63e157782fd1b510eedc15f31a5",
+      "bytes": 24130
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/docker_gc_apply.rs",
@@ -388,13 +398,13 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/docker_gc_apply/live_fixture.rs",
-      "sha256": "7bf19910e83c6e5f36caffeaa806e0840e169469482ed2a5d925f0d620f2827a",
-      "bytes": 28351
+      "sha256": "8cac1161ec19cf86fd455212a18f627fc694749abcefe72ab5d6622922da2fdb",
+      "bytes": 46423
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/docker_gc_apply/tests.rs",
-      "sha256": "f3e7d926dbd74b07c22c89291b41282aee851a085cbb98c0935e94a9f5d40f13",
-      "bytes": 26334
+      "sha256": "cc5b618506a36d42e95682b989a5a4e8882aeea0085eb2486ff836ada0293e55",
+      "bytes": 33632
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/docker_image_gc.rs",
@@ -463,8 +473,8 @@
     },
     {
       "path": "scripts/check-buildkit-native.py",
-      "sha256": "4317cdc1fbbcc0fc9c694f69917846f43f6960adbef31f86b47df479873c8fdb",
-      "bytes": 12905
+      "sha256": "e89e1e3eef942c96a94b69e1fbb00ed033ee64f16529e82b148482eedaf53c85",
+      "bytes": 23647
     },
     {
       "path": "scripts/check-cleanup.py",
@@ -483,8 +493,8 @@
     },
     {
       "path": "scripts/check-dedicated-docker-apply.py",
-      "sha256": "bd4efb96cfd07094ad93c66fc8784490226a34b2fbb7f9aece7c739506cf5614",
-      "bytes": 20622
+      "sha256": "5c81194a752299fcf4ccc4e01261789318ad16d7033ca1f73210308fef763b83",
+      "bytes": 25907
     },
     {
       "path": "scripts/check-dedicated-docker-engine.py",
