@@ -145,3 +145,9 @@ DSG-08의 `f6397b2`를 PR #15로 `develop`, PR #16으로 `main`에 반영했다.
 - macOS에서 `sh scripts/test.sh`의 Python 14개와 CLI 진단·스캔, `DSG_TEST_DOCKER_CONTEXT=dockerguard-test DSG_TEST_WEBKIT=1 sh scripts/test-rust.sh`의 Rust 98개 및 통합 러너가 통과했다. 기존 지정 엔진에서 컨테이너 7개, 이미지 5개, 볼륨·중복 후보 0개를 읽었고, 내장 빌더 캐시 208개·활성 0개와 기존 이미지의 보존 판정을 확인했다. API와 두 WebKit 화면의 실제 Docker 집계가 일치했다. Docker 데몬을 새로 시작하거나 실제 Docker 자원을 변경하지 않았다. Parallels 게스트는 실행하지 않았다.
 - `dist/`에 보존한 macOS ARM64·Windows ARM64 0.1.1-rc.1, Linux ARM64 0.1.0, Windows x64 0.1.0-rc.3 아카이브의 대상·버전·SHA-256·멤버 해시를 대조했다. 당시 플랫폼별 설치·서비스 시험 결과는 기존 기록을 유지했다. 보조 워크트리는 생성·회수·잔여 0개다. [플랫폼별 결과](RELEASE.md)
 - 재개 시 WBS 2.3의 소유권과 안전한 회수 경계, 실제 Docker 이미지 적용 경로, macOS 운영 계정 및 Windows 실제 엔진 같은 플랫폼별 잔여 수용 기준을 작업 대조표에서 먼저 확인한다. 훅 오류의 운영 기준과 MCP·Provider SDK 확장의 승인 선행 조건도 대조표에 기록했다. [잔여 조건](TASK.md#수용-기준-확정이-남은-항목) · [출시 게이트](TEST_PLAN.md#출시-게이트)
+
+## DSG-02 Windows NTFS 파일 식별 보완
+
+- `feature/20261124-windows-foundation`, 기준 `1708cea`. WBS 1.3의 Windows 스캔·계획에서 읽기 전용 NTFS 핸들로 파일·볼륨 ID와 링크 수를 확인한다. 프로젝트 루트까지의 경로와 검사 중인 디렉터리를 핸들로 유지한다. 하위 파일 ID와 링크 수를 메타데이터 다이제스트에 반영한다. 링크·junction·다중 하드 링크·공유 충돌로 확인할 수 없는 후보는 보존한다. Windows의 실제 GC 적용은 별도 범위다. [코드](../rust-scaffold/crates/dsg-core/src/filesystem/windows.rs) · [작업 대조표](TASK.md)
+- macOS에서 Python 14개와 Rust 98개 및 통합 러너, `cargo fmt` 검증을 통과했다. Windows ARM64 MSVC로 교차 링크한 Rust 시험 바이너리를 해시 비교 후 기존 Parallels Windows 11 ARM64에서 실행했다. `filesystem::tests --test-threads=1`의 9개가 통과했다. 그중 Windows 전용 5개가 디렉터리 교체 차단과 검사 종료 뒤 정상 교체, 동일 시간·크기 하위 파일 교체, 하드 링크, junction, 공유 충돌을 재현했다. [재현 절차](TEST_PLAN.md#rust-foundation-검증)
+- PowerShell 실행 경로와 공유 파일 전달을 분리해 확인했다. 디렉터리 교체 시험에서 출력 핸들만 해제한 경우 루트 핸들이 보호를 유지했다. 루트 검사를 종료한 뒤 교체를 재검증했다. 호스트·게스트 임시 시험 자료를 회수하고 게스트를 원래 일시정지 상태로 돌렸다. Docker 자원 변경과 보조 워크트리 생성은 0회다.
