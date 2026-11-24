@@ -16,8 +16,7 @@ use std::time::{Duration, Instant};
 
 const CLIENT_SHA256: &str = "cb57dfdc462d2d2ea1ca2f6b81b801520582ba536513228eb0e5213244626814";
 const MAX_CLIENT_BYTES: u64 = 128 * 1024 * 1024;
-const FORMAT: &str =
-    r#"{{range .}}{{not .InUse}}|{{.Shared}}|{{.Mutable}}{{printf "%c" 10}}{{end}}"#;
+const FORMAT: &str = r#"{{range .}}{{printf "%q" .ID}}|{{not .InUse}}|{{.Shared}}|{{.Mutable}}{{printf "%c" 10}}{{end}}"#;
 type Result<T> = std::result::Result<T, QueryFailure>;
 
 fn file(fd: RawFd) -> Result<File> {

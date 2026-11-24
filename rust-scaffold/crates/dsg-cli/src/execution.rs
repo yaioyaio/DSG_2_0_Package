@@ -6,6 +6,10 @@ use super::{
 };
 use crate::cleanup_cli;
 use dsg_core::cleanup::{CleanupEvent, PlaywrightEvidence};
+use dsg_core::compose::{
+    ComposeAction, ComposeAssessment, ComposeComparison, ComposeUnknown, ComposeVerification,
+    MAX_PROJECTION_BYTES,
+};
 use dsg_core::docker::{Mount, ReuseRequest};
 use dsg_core::docker_command::DockerCli;
 use dsg_core::policy::Policy;
@@ -19,7 +23,7 @@ use serde::Deserialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -141,8 +145,17 @@ pub fn exec(
         },
         |event| {
             match event {
+                #[cfg(target_os = "macos")]
+                RunEvent::Started(pid) => registry.attach_watched_lease_process(&lease, pid),
+                #[cfg(not(target_os = "macos"))]
                 RunEvent::Started(pid) => registry.attach_lease_process(&lease, pid),
                 RunEvent::Heartbeat => registry.heartbeat(&lease, LEASE_TTL),
+                #[cfg(target_os = "macos")]
+                RunEvent::ObservationStarted => registry.begin_lease_observation(&lease),
+                #[cfg(target_os = "macos")]
+                RunEvent::ObservationCompleted(observed) => {
+                    registry.commit_lease_observation(&lease, &observed)
+                }
             }
             .map_err(|_| io::Error::other("lease update failed"))
         },
@@ -467,6 +480,7 @@ pub fn reuse(
     policy: &Policy,
     context: &str,
     input: &str,
+    compose_projection_stdin: bool,
 ) -> Result<Output, CliError> {
     if input.len() > 32 * 1024 {
         return Err(CliError::new(
@@ -480,13 +494,6 @@ pub fn reuse(
             "Compose 기대 구성의 JSON 형식을 확인하세요",
         )
     })?;
-    let backend = DockerCli::new(context)
-        .map_err(|_| CliError::new("CONFIG_INVALID", "Docker 컨텍스트 이름을 확인하세요"))?;
-    let mut registry = open_registry(cli)?;
-    let project_id = project_id(&registry, root, policy)?;
-    let lease = registry
-        .acquire_lease(project_id, &scope_key(root), LEASE_TTL, process_group_gone)
-        .map_err(lease_error)?;
     let expected = ReuseRequest {
         engine_id: &expectation.engine_id,
         project: &expectation.project,
@@ -497,21 +504,64 @@ pub fn reuse(
         image_digest: &expectation.image_digest,
         mounts: &expectation.mounts,
     };
-    let verification = verify_reuse(&backend, 64, &expected);
-    let (outcome, code, text, exit) = if verification.verified {
-        (
+    let comparison = if compose_projection_stdin {
+        match read_compose_comparison(&expected) {
+            Ok(comparison) => Some(comparison),
+            Err(reason) => {
+                return Ok(Output {
+                    command: "docker-reuse",
+                    text: "Compose 설정 투영을 확인할 수 없습니다".to_owned(),
+                    data: json!(ComposeVerification::unknown(reason)),
+                    exit: 5,
+                });
+            }
+        }
+    } else {
+        None
+    };
+    let backend = DockerCli::new(context)
+        .map_err(|_| CliError::new("CONFIG_INVALID", "Docker 컨텍스트 이름을 확인하세요"))?;
+    let mut registry = open_registry(cli)?;
+    let project_id = project_id(&registry, root, policy)?;
+    let lease = registry
+        .acquire_lease(project_id, &scope_key(root), LEASE_TTL, process_group_gone)
+        .map_err(lease_error)?;
+    let (data, verified, action) = if let Some(comparison) = comparison {
+        let verification = comparison.verify(&backend, 64);
+        let action = match verification.compose {
+            ComposeAssessment::Changed { action } => Some(action),
+            _ => None,
+        };
+        (json!(verification), verification.verified, action)
+    } else {
+        let verification = verify_reuse(&backend, 64, &expected);
+        (json!(verification), verification.verified, None)
+    };
+    let (outcome, code, text, exit) = match (verified, action) {
+        (true, _) => (
             AuditOutcome::Success,
             "REUSE_VERIFIED",
             "실행 중인 Compose 컨테이너를 재사용할 수 있습니다",
             0,
-        )
-    } else {
-        (
+        ),
+        (false, Some(ComposeAction::Rebuild)) => (
+            AuditOutcome::Warn,
+            "COMPOSE_REBUILD_REQUIRED",
+            "Compose 이미지 재빌드가 필요합니다",
+            5,
+        ),
+        (false, Some(ComposeAction::Recreate)) => (
+            AuditOutcome::Warn,
+            "COMPOSE_RECREATE_REQUIRED",
+            "Compose 컨테이너 재생성이 필요합니다",
+            5,
+        ),
+        (false, None) => (
             AuditOutcome::Incomplete,
             "REUSE_UNVERIFIED",
             "재사용 대상을 확인할 수 없습니다",
             5,
-        )
+        ),
     };
     registry
         .record_event(Some(project_id), AuditAction::ComposeReuse, outcome, code)
@@ -522,9 +572,21 @@ pub fn reuse(
     Ok(Output {
         command: "docker-reuse",
         text: text.to_owned(),
-        data: json!(verification),
+        data,
         exit,
     })
+}
+
+fn read_compose_comparison<'a>(
+    expected: &'a ReuseRequest<'a>,
+) -> Result<ComposeComparison<'a>, ComposeUnknown> {
+    let mut input = Vec::new();
+    io::stdin()
+        .lock()
+        .take(MAX_PROJECTION_BYTES as u64 + 1)
+        .read_to_end(&mut input)
+        .map_err(|_| ComposeUnknown::InputUnavailable)?;
+    ComposeComparison::prepare(&input, expected)
 }
 
 pub(super) fn project_id(

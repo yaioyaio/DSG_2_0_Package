@@ -1,10 +1,17 @@
 use serde::Serialize;
 use std::{io, path::Path, sync::atomic::AtomicBool, time::Duration};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg(target_os = "macos")]
+pub use crate::mac_process::ProcessIdentity;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RunEvent {
     Started(u32),
     Heartbeat,
+    #[cfg(target_os = "macos")]
+    ObservationStarted,
+    #[cfg(target_os = "macos")]
+    ObservationCompleted(Vec<ProcessIdentity>),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -21,7 +28,7 @@ pub enum RunOutcome {
 pub struct RunResult {
     pub outcome: RunOutcome,
     pub exit_code: Option<i32>,
-    /// The owned process group is absent. Providers must keep descendants in that group.
+    /// The owned group and all observed descendants are absent.
     pub tree_confirmed_gone: bool,
 }
 
@@ -138,9 +145,16 @@ pub fn process_group_gone(pid: u32) -> bool {
     }
 }
 
+#[cfg(target_os = "macos")]
+pub(crate) fn process_group_absent(pid: u32) -> bool {
+    i32::try_from(pid).is_ok_and(|pid| pid > 1 && posix::absent(-pid))
+}
+
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod posix {
     use super::*;
+    #[cfg(target_os = "macos")]
+    use crate::mac_process::Descendants;
     use std::os::unix::process::CommandExt;
     use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
     use std::process::{Child, Command, ExitStatus, Stdio};
@@ -150,6 +164,8 @@ mod posix {
 
     const POLL: Duration = Duration::from_millis(20);
     const HEARTBEAT: Duration = Duration::from_secs(1);
+    #[cfg(target_os = "macos")]
+    const OBSERVATION_INTERVAL: Duration = Duration::from_millis(125);
     const TERM_GRACE: Duration = Duration::from_millis(100);
     const CLEANUP_WAIT: Duration = Duration::from_secs(1);
 
@@ -226,23 +242,39 @@ mod posix {
         pid: u32,
         deadline: Instant,
         cancelled: &AtomicBool,
+        #[cfg(target_os = "macos")] descendants: &mut Descendants,
         mut notify: impl FnMut(RunEvent) -> io::Result<()>,
     ) -> io::Result<Option<RunOutcome>> {
         notify(RunEvent::Started(pid))?;
         let mut next_heartbeat = Instant::now() + HEARTBEAT;
+        #[cfg(target_os = "macos")]
+        let mut next_observation = Instant::now();
         loop {
-            if cancelled.load(Ordering::Acquire) {
-                return Ok(Some(RunOutcome::Interrupted));
-            }
-            match exited(pid) {
-                Ok(true) => return Ok(None),
-                Ok(false) => {}
-                Err(err) if err.kind() == io::ErrorKind::Interrupted => {}
-                Err(err) => return Err(err),
-            }
             let now = Instant::now();
-            if now >= deadline {
-                return Ok(Some(RunOutcome::TimedOut));
+            let finished = if cancelled.load(Ordering::Acquire) {
+                Some(Some(RunOutcome::Interrupted))
+            } else {
+                match exited(pid) {
+                    Ok(true) => Some(None),
+                    Ok(false) => None,
+                    Err(err) if err.kind() == io::ErrorKind::Interrupted => None,
+                    Err(err) => return Err(err),
+                }
+                .or_else(|| (now >= deadline).then_some(Some(RunOutcome::TimedOut)))
+            };
+            #[cfg(target_os = "macos")]
+            if finished.is_some() || now >= next_observation {
+                if descendants.complete {
+                    descendants.complete = false;
+                    notify(RunEvent::ObservationStarted)?;
+                }
+                let observed = descendants.observe(pid)?;
+                notify(RunEvent::ObservationCompleted(observed))?;
+                descendants.complete = true;
+                next_observation = Instant::now() + OBSERVATION_INTERVAL;
+            }
+            if let Some(outcome) = finished {
+                return Ok(outcome);
             }
             if now >= next_heartbeat {
                 notify(RunEvent::Heartbeat)?;
@@ -337,10 +369,21 @@ mod posix {
         unsafe { command.pre_exec(move || isolate(cpu_seconds, file_limit)) };
         let deadline = Instant::now() + timeout;
         let child = command.spawn()?;
+        #[cfg(target_os = "macos")]
+        let mut descendants = Descendants::default();
         let monitored = catch_unwind(AssertUnwindSafe(|| {
-            supervise(child.id(), deadline, cancelled, notify)
+            supervise(
+                child.id(),
+                deadline,
+                cancelled,
+                #[cfg(target_os = "macos")]
+                &mut descendants,
+                notify,
+            )
         }));
         let (status, tree_confirmed_gone) = cleanup(child, !matches!(monitored, Ok(Ok(None))));
+        #[cfg(target_os = "macos")]
+        let tree_confirmed_gone = tree_confirmed_gone && descendants.gone();
         let outcome = match monitored {
             Ok(Ok(Some(reason))) => reason,
             Ok(Ok(None)) => match status {

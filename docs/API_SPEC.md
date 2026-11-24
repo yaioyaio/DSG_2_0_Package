@@ -31,17 +31,25 @@ python3 -m dsg hook --agent codex
 
 `dsg --json docker-build-cache --context <context>`는 지정한 Docker 엔진의 내장 빌더 캐시 총량과 활성 항목 수를 조회한다. 조회 전후 엔진 ID가 일치해야 한다. 개별 캐시 소유권은 감지할 수 없어 모든 경우에 `disposition=preserve`를 반환한다. 집계 실패 시 수치는 `null`이며 종료 코드는 5다. 이 경로의 지원 범위는 엔진이 보고하는 내장 빌더 집계다.
 
-`dsg --json docker-buildx-cache --context <context>`는 지정 엔진에 기본 제공되는 Buildx 빌더의 `total_count`, `reclaimable_count`, `shared_count`, `mutable_count`를 읽는다. 이 명령은 빈 임시 Buildx 설정을 사용하고 조회 전후에 엔진 ID를 대조한다. Buildx의 회수 가능 표시는 캐시 상태이며 프로젝트 소유권이나 삭제 승인과 별개다. 이 명령은 항상 `disposition=preserve`를 반환하며 조회 실패·초과 시 수치는 `null`, 종료 코드는 5다. [Docker Buildx 사용량 명령](https://docs.docker.com/reference/cli/docker/buildx/du/)
+`dsg --json docker-buildx-cache --context <context>`는 지정 엔진에 기본 제공되는 Buildx 빌더의 `total_count`, `reclaimable_count`, `shared_count`, `mutable_count`를 읽는다. 이 명령은 빈 임시 Buildx 설정을 사용하고 조회 전후에 엔진 ID를 대조한다. Buildx의 회수 가능 표시는 캐시 상태이며 프로젝트 소유권이나 삭제 승인과 별개다. 이 명령은 항상 `disposition=preserve`와 `candidate_count=0`을 반환한다. 조회 실패·초과 시 상태 집계와 `preserved_by_reason`은 `null`, 종료 코드는 5다. [Docker Buildx 사용량 명령](https://docs.docker.com/reference/cli/docker/buildx/du/)
 
-Linux ARM64의 `dsg --json buildkit-local-cache --socket <절대 Unix 소켓> --expected-pid <데몬 PID> --buildctl <절대 실행 경로>`는 이미 실행 중인 별도 BuildKit의 사용량만 읽는다. 소켓이 속한 디렉터리는 현재 UID 소유의 권한 0700이어야 한다. 같은 PID 네임스페이스의 상대 PID·UID와 소켓 식별자를 조회 전후에 확인한다. 실행 가능 상태 및 SHA-256을 검사한 공식 v0.35.1 `buildctl`만 `du`에 사용한다. 성공 응답의 `counts`에 `total`, `reclaimable`, `shared`, `mutable`을 제공한다. 소유권 판정은 `unknown_ownership`이며 `disposition=preserve`를 유지한다. 검증이나 조회 실패는 `status=unknown`, `counts=null`, 종료 5로 반환한다. [공식 BuildKit 릴리스](https://github.com/moby/buildkit/releases/tag/v0.35.1) · [실측 근거](HANDOFF.md#별도-buildkit-읽기-전용-실측)
+Linux ARM64의 `dsg --json buildkit-local-cache --socket <절대 Unix 소켓> --expected-pid <데몬 PID> --buildctl <절대 실행 경로>`는 이미 실행 중인 별도 BuildKit의 사용량만 읽는다. 소켓이 속한 디렉터리는 현재 UID 소유의 권한 0700이어야 한다. 같은 PID 네임스페이스의 상대 PID·UID와 소켓 식별자를 조회 전후에 확인한다. 실행 가능 상태 및 SHA-256을 검사한 공식 v0.35.1 `buildctl`만 `du`에 사용한다. 성공 응답의 `counts`에 `total`, `reclaimable`, `shared`, `mutable`과 `candidate_count=0`, `preserved_by_reason`을 제공한다. 소유권 판정은 `unknown_ownership`이며 `disposition=preserve`를 유지한다. 검증이나 조회 실패는 `status=unknown`, `counts=null`, 종료 5로 반환한다. [공식 BuildKit 릴리스](https://github.com/moby/buildkit/releases/tag/v0.35.1) · [실측 근거](HANDOFF.md#별도-buildkit-읽기-전용-실측)
+
+두 조회에서 회수 가능·공유·변경 가능 상태의 집계는 서로 겹칠 수 있다. `preserved_by_reason`은 각 레코드에 사유 하나를 부여한다. 회수 가능 표시가 없으면 `active`, 다음으로 공유면 `shared`, 변경 가능이면 `mutable`, 나머지는 `unknown_ownership`에 집계한다. 정상적인 빈 응답의 상태와 보존 사유는 모두 0으로 집계한다. 중복 ID, 마지막 줄이 잘린 출력과 한도 초과는 부분 수치를 폐기하고 조회 실패로 처리한다. 캐시 ID는 중복 확인에만 사용한다.
 
 ### 관리형 실행과 Compose 재사용
 
 `dsg exec --timeout 1~120 -- <argv...>`는 등록된 프로젝트의 정책과 호스트·프로젝트 예산을 확인한 뒤 직접 실행한다. 관리형 실행은 프로젝트별 lease 하나와 동일 상태 저장소의 전역 두 슬롯으로 제한한다. 조회가 불완전하거나 정책상 추가 확인이 필요하면 기존 판단 형식으로 반환한다. 성공 0, 정책 거부 3, 승인 필요 4, 제어 미확인 5, 시간 초과 124, 정상 중단 130을 사용한다. 자식이 실패하면 자식의 종료 코드를 반환한다. `--json`에서는 명령과 자식 원문 출력 없이 `run.outcome`, `run.exit_code`, `run.tree_confirmed_gone`과 `lease_released`를 제공한다.
 
+macOS에서는 관리형 실행 중 확인한 리더와 자손을 PID와 시작 시각으로 등록한다. 등록된 자손은 별도 프로세스 그룹으로 이동해도 같은 프로세스 세대로 추적한다. 만료된 lease를 회수하려면 완료된 관측과 등록된 모든 세대의 종료를 확인해야 한다. 같은 PID가 다른 시작 시각으로 재사용되면 이전 세대는 종료된 것으로 본다. 진위가 불명확하거나 관측이 미완료이면 lease를 보존한다. Linux는 리더와 프로세스 그룹의 종료를 확인하는 기존 경로를 사용한다. macOS의 주기적 관측은 두 관측 사이에 생성돼 추적 중인 계보에서 빠져나간 자손을 놓칠 수 있다.
+
 `dsg exec --provider <cargo|node|pnpm|gradle|uv|go|playwright> -- <작업>`는 등록된 정형 작업을 실행한다. Cargo는 `build`, `check`, `test`, pnpm·Gradle·Go는 `build`, `test`, Node·uv·Playwright는 `test`를 받는다. 하나의 작업만 받으며 각 도구의 병렬 실행 옵션을 제한한다. pnpm이 호출한 프로젝트 스크립트 내부의 작업자는 프로젝트 설정을 따른다. Playwright는 프로젝트에 준비된 실행기를 사용하고 실행마다 독립된 상태 폴더에 성공·실패 추적 자료를 저장한다. 응답 `evidence_path`는 상태 디렉터리 기준 상대 경로다. 트리 종료가 확인되면 Provider·작업·결과 코드가 해당 lease 감사 이벤트에 기록된다.
 
 `dsg docker-reuse --context <context> --expectation-json <JSON>`은 `engine_id`, `project`, `service`, `number`, `config_hash`, `image_id`, `image_digest`, `mounts`를 받는다. 같은 실행 중인 정상 컨테이너가 두 번 모두 유일한 후보면 `verified=true`와 `assessment.container_id`를 반환한다. 확인할 수 없으면 종료 코드 5와 판정 사유를 반환한다. 이미 실행 중인 컨테이너 식별자를 전달하는 경로다.
+
+`--compose-projection-stdin`을 추가하면 최대 32 KiB의 비민감 JSON을 표준 입력으로 받는다. 최상위 필드는 `baseline_config_hash`, `baseline`, `desired`다. 각 구성에는 `service`와 필수 필드인 `build_inputs_sha256`이 있으며 빌드 입력이 없을 때는 `null`, 있을 때는 64자리 16진수 SHA-256을 넣는다. `service`는 레지스트리를 명시하고 digest로 고정한 `image`, `platform`(`linux/amd64` 또는 `linux/arm64`), `init`, `read_only`, `volumes`를 받는다. 각 명명 볼륨 항목은 `type: "volume"`, `source`, `target`, `read_only`, `volume.nocopy`를 포함한다. 호출자는 기준 투영이 관측된 Compose 구성 해시에 대응하도록 준비한다. DSG는 기준 해시·이미지 digest·마운트를 기존 기대값과 대조하고 두 번의 Docker 조회로 기존 재사용 조건과 이미지 플랫폼을 확인한다. 입력 범위는 이 JSON의 필드로 한정된다.
+
+`--json` 응답은 `verified`, 기존 재사용 판정을 담는 `baseline`, 투영 비교 결과인 `compose`를 제공한다. `compose.status`가 `same`이면 `verified=true`와 종료 코드 0을 반환한다. 변경이 확인되면 `changed`와 종료 코드 5를 반환한다. 원하는 구성에 빌드 입력 해시가 있고 해시나 플랫폼이 바뀌면 `action=rebuild`를, 그 밖의 서비스 또는 빌드 입력 변경에는 `action=recreate`를 반환한다. 비교할 수 없으면 `unknown`과 종료 코드 5를 반환한다. `reason`은 입력 문제(`invalid_projection`, `input_too_large`, `input_unavailable`), 기대값과의 불일치(`baseline_mismatch`), Docker 관측에서 기준을 확인할 수 없는 경우(`baseline_unverified`)를 구분한다. 조회 전 입력 오류나 불일치는 `baseline=null`로 표시한다. 이 경로는 판정까지만 수행하며 옵션을 생략하면 기존 명령 계약을 그대로 사용한다.
 
 ### 승인 기반 정리
 
@@ -49,7 +57,9 @@ Linux ARM64의 `dsg --json buildkit-local-cache --socket <절대 Unix 소켓> --
 
 `gc-apply --plan <번호> --approval-stdin`에 승인값을 표준 입력으로 전달한다. 적용은 활성 lease, 소유권, 파일 식별자와 트리 메타데이터를 재확인하며, 입력 승인 원문은 감사 기록과 명령 인자로 보관하지 않는다. 결과는 `applied`, `preserved`, `recovery_required`로 구분한다. 복구가 필요하면 `gc-recover --plan <번호>`가 일치하는 격리 자료를 확인해 빈 원래 경로로 복원을 시도한다.
 
-`gc-plan --docker-context <context> --docker-engine <ID> --docker-image <sha256:전체ID>`는 파일 정리 계획과 별도로 `plan.docker_images`에 이미지 후보 또는 보존 사유를 기록한다. 후보는 선택한 엔진, 프로젝트의 소유 표식 `io.dsg.gc.owner`(정규 경로의 SHA-256), 전체 이미지 ID가 일치하며 태그·digest·컨테이너 참조·활성 lease가 없어야 한다. 관측 한도 초과와 이미지 마운트의 참조 불명은 보존한다. `docker-image-recheck --plan <번호>`는 유효기간과 정책을 확인하고 같은 엔진에서 후보 지문을 비교한다. 이미지 경로의 기능 범위는 계획과 재확인이다.
+`gc-plan --docker-context <context> --docker-engine <ID> --docker-image <sha256:전체ID>`는 파일 정리 계획과 별도로 `plan.docker_images`에 이미지 후보 또는 보존 사유를 기록한다. 후보는 선택한 엔진, 프로젝트의 소유 표식 `io.dsg.gc.owner`(정규 경로의 SHA-256), 전체 이미지 ID가 일치하며 태그·digest·컨테이너 참조·활성 lease가 없어야 한다. 관측 한도 초과와 이미지 마운트의 참조 불명은 보존한다. `docker-image-recheck --plan <번호>`는 유효기간과 정책을 확인하고 같은 엔진에서 후보 지문을 비교한다. 공개 이미지 경로의 계획과 재확인은 적용 게이트를 기본값인 `preserve_unverified_control`로 반환한다.
+
+내부 Docker GC 서비스의 제어 대역은 이미지 또는 빌드 캐시 한 건을 프로젝트 ID, 프로젝트 루트 SHA-256, 정책 digest, 엔드포인트 지문, 세대 지문, 자원 종류, 전체 ID, 관측 스냅샷에 묶는다. 승인에는 계획과 만료 시각이 연결되며 적용은 레지스트리 슬롯을 배타적으로 확보하고 일회 승인을 소비하면서 적용 의도를 커밋한다. 제어 백엔드는 동일한 상태를 확인하는 경계에서 단일 대상 변경과 결과 영수증의 기록을 원자적으로 처리해야 한다. 복구에서는 적용 의도와 정확히 일치하는 영수증을 조회해 결과를 확정한다. 영수증이 없거나 불일치하면 `recovery_required`로 처리하며 변경을 재실행하지 않는다. 이 내부 경로는 공개 파일 GC 명령과 MCP 도구에서 분리돼 있다.
 
 `exec --auto-clean-cargo -- cargo check …`는 자동 회수 대상인 전용 Cargo 산출물 디렉터리를 만든다. 실행 결과의 `cleanup`에서 회수·보존 건수와 확인된 바이트를 읽는다. Git 완료는 `scripts/git-completion.sh`로 전달한다. 이 경로는 여섯 참조의 파일 일치 후 사용자 원본과 브랜치를 보존하면서 등록된 보조 워크트리만 검사한다.
 

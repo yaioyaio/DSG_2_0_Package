@@ -3,6 +3,7 @@ use crate::docker::{
     InventoryStatus, QueryFailure,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 const MAX_SUMMARY_BYTES: usize = 128;
 const MAX_BUILDX_BYTES: usize = 64 * 1024;
@@ -46,6 +47,8 @@ pub struct BuildxCacheInventory {
     pub reclaimable_count: Option<u64>,
     pub shared_count: Option<u64>,
     pub mutable_count: Option<u64>,
+    pub candidate_count: u64,
+    pub preserved_by_reason: Option<CachePreservation>,
     pub disposition: BuildCacheDisposition,
     pub reason: BuildCacheReason,
     pub issues: Vec<InventoryIssue>,
@@ -57,6 +60,62 @@ pub struct BuildxUsage {
     reclaimable: u64,
     shared: u64,
     mutable: u64,
+    candidate_count: u64,
+    preserved_by_reason: CachePreservation,
+}
+
+#[derive(Debug, Default, Eq, PartialEq, Serialize)]
+pub struct CachePreservation {
+    active: u64,
+    shared: u64,
+    mutable: u64,
+    unknown_ownership: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CachePreserveReason {
+    Active,
+    Shared,
+    Mutable,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct CacheRecordState {
+    pub(crate) reclaimable: bool,
+    pub(crate) shared: bool,
+    pub(crate) mutable: bool,
+}
+
+impl CacheRecordState {
+    /// Evaluate usage alone. A missing blocker carries no ownership or apply authority.
+    pub(crate) fn reclaim_blocker(self) -> Option<CachePreserveReason> {
+        if !self.reclaimable {
+            Some(CachePreserveReason::Active)
+        } else if self.shared {
+            Some(CachePreserveReason::Shared)
+        } else if self.mutable {
+            Some(CachePreserveReason::Mutable)
+        } else {
+            None
+        }
+    }
+}
+
+impl BuildxUsage {
+    fn record_external(&mut self, state: CacheRecordState) {
+        self.total += 1;
+        self.reclaimable += u64::from(state.reclaimable);
+        self.shared += u64::from(state.shared);
+        self.mutable += u64::from(state.mutable);
+
+        // Standard builder observations carry no project ownership evidence.
+        match state.reclaim_blocker() {
+            Some(CachePreserveReason::Active) => self.preserved_by_reason.active += 1,
+            Some(CachePreserveReason::Shared) => self.preserved_by_reason.shared += 1,
+            Some(CachePreserveReason::Mutable) => self.preserved_by_reason.mutable += 1,
+            None => self.preserved_by_reason.unknown_ownership += 1,
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -150,29 +209,59 @@ pub fn build_cache_inventory(query: &impl DockerRead) -> BuildCacheInventory {
     inventory
 }
 
-fn buildx_flag(value: &str) -> Result<u64, QueryFailure> {
+fn buildx_flag(value: &str) -> Result<bool, QueryFailure> {
     match value {
-        "true" => Ok(1),
-        "false" => Ok(0),
+        "true" => Ok(true),
+        "false" => Ok(false),
         _ => Err(QueryFailure::Malformed),
     }
+}
+
+fn cache_record_id(value: &str) -> Result<&str, QueryFailure> {
+    let id = value
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .ok_or(QueryFailure::Malformed)?;
+    // Both formatters quote IDs so an invalid ID cannot introduce another row.
+    // Treat accepted IDs as opaque and use them only to check uniqueness.
+    if !valid_cache_record_id(id) {
+        return Err(QueryFailure::Malformed);
+    }
+    Ok(id)
+}
+
+pub(crate) fn valid_cache_record_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b':'))
 }
 
 pub(crate) fn buildx_usage(response: &str) -> Result<BuildxUsage, QueryFailure> {
     if response.len() > MAX_BUILDX_BYTES {
         return Err(QueryFailure::TooLarge);
     }
+    if !response.is_empty() && !response.ends_with('\n') {
+        return Err(QueryFailure::Malformed);
+    }
     let mut usage = BuildxUsage::default();
+    let mut ids = HashSet::new();
     for (index, row) in response.lines().enumerate() {
         if index >= MAX_BUILDX_RECORDS {
             return Err(QueryFailure::TooLarge);
         }
-        let (reclaimable, rest) = row.split_once('|').ok_or(QueryFailure::Malformed)?;
+        let (id, rest) = row.split_once('|').ok_or(QueryFailure::Malformed)?;
+        if !ids.insert(cache_record_id(id)?) {
+            return Err(QueryFailure::Malformed);
+        }
+        let (reclaimable, rest) = rest.split_once('|').ok_or(QueryFailure::Malformed)?;
         let (shared, mutable) = rest.split_once('|').ok_or(QueryFailure::Malformed)?;
-        usage.reclaimable += buildx_flag(reclaimable)?;
-        usage.shared += buildx_flag(shared)?;
-        usage.mutable += buildx_flag(mutable)?;
-        usage.total += 1;
+        usage.record_external(CacheRecordState {
+            reclaimable: buildx_flag(reclaimable)?,
+            shared: buildx_flag(shared)?,
+            mutable: buildx_flag(mutable)?,
+        });
     }
     Ok(usage)
 }
@@ -203,6 +292,8 @@ pub fn buildx_cache_inventory(query: &impl BuildxRead) -> BuildxCacheInventory {
         reclaimable_count: None,
         shared_count: None,
         mutable_count: None,
+        candidate_count: 0,
+        preserved_by_reason: None,
         disposition: BuildCacheDisposition::Preserve,
         reason: BuildCacheReason::IncompleteInventory,
         issues: Vec::new(),
@@ -224,6 +315,8 @@ pub fn buildx_cache_inventory(query: &impl BuildxRead) -> BuildxCacheInventory {
             inventory.reclaimable_count = Some(usage.reclaimable);
             inventory.shared_count = Some(usage.shared);
             inventory.mutable_count = Some(usage.mutable);
+            inventory.candidate_count = usage.candidate_count;
+            inventory.preserved_by_reason = Some(usage.preserved_by_reason);
             inventory.reason = BuildCacheReason::UnknownOwnership;
         }
         Err(issue) => inventory.issues.push(issue),
@@ -314,12 +407,23 @@ mod tests {
 
     #[test]
     fn buildx_counts_flags_and_preserves_all_records_including_empty_usage() {
-        for (wire, expected) in [
+        for (wire, expected, preserved) in [
             (
-                "true|true|false\ntrue|false|false\nfalse|false|true\r\n",
-                [3, 2, 1, 1],
+                concat!(
+                    "\"record-1\"|false|true|true\n",
+                    "\"record-2\"|true|true|true\n",
+                    "\"record-3\"|true|false|true\r\n",
+                    "\"record-4\"|true|false|false\n",
+                ),
+                [4, 3, 2, 3],
+                CachePreservation {
+                    active: 1,
+                    shared: 1,
+                    mutable: 1,
+                    unknown_ownership: 1,
+                },
             ),
-            ("", [0, 0, 0, 0]),
+            ("", [0, 0, 0, 0], CachePreservation::default()),
         ] {
             let result = read_buildx(Ok(wire), Some(Ok("engine-test")));
             assert_eq!(result.engine_id.as_deref(), Some("engine-test"));
@@ -335,23 +439,60 @@ mod tests {
             );
             assert_eq!(result.disposition, BuildCacheDisposition::Preserve);
             assert_eq!(result.reason, BuildCacheReason::UnknownOwnership);
+            assert_eq!(result.candidate_count, 0);
+            assert_eq!(result.preserved_by_reason.as_ref(), Some(&preserved));
             assert!(result.issues.is_empty());
+
+            let counts = serde_json::to_value(buildx_usage(wire).unwrap()).unwrap();
+            for (key, count) in ["total", "reclaimable", "shared", "mutable"]
+                .into_iter()
+                .zip(expected)
+            {
+                assert_eq!(counts[key], count);
+            }
+            assert_eq!(counts["candidate_count"], 0);
+            assert_eq!(counts["preserved_by_reason"], serde_json::json!(preserved));
+            assert!(!serde_json::to_string(&result).unwrap().contains("record-1"));
         }
     }
 
     #[test]
     fn buildx_discards_all_counts_for_malformed_limited_unavailable_or_changed_usage() {
-        let too_many = "true|true|true\n".repeat(MAX_BUILDX_RECORDS + 1);
+        let too_many = "\"id\"|true|true|true\n".repeat(MAX_BUILDX_RECORDS + 1);
         let too_large = " ".repeat(MAX_BUILDX_BYTES + 1);
         for (wire, recheck, stage, failure) in [
             (
-                Ok("true|false|true|raw marker"),
+                Ok("\"id\"|true|false|true|raw marker\n"),
                 None,
                 InventoryStage::BuildCache,
                 QueryFailure::Malformed,
             ),
             (
-                Ok("true|False|true"),
+                Ok("\"id\"|true|False|true\n"),
+                None,
+                InventoryStage::BuildCache,
+                QueryFailure::Malformed,
+            ),
+            (
+                Ok("\"id\"|true|false|true"),
+                None,
+                InventoryStage::BuildCache,
+                QueryFailure::Malformed,
+            ),
+            (
+                Ok("\"id\"|true|false|true\n\"id\"|true|false|false\n"),
+                None,
+                InventoryStage::BuildCache,
+                QueryFailure::Malformed,
+            ),
+            (
+                Ok("\"id\\nforeign\"|true|false|false\n"),
+                None,
+                InventoryStage::BuildCache,
+                QueryFailure::Malformed,
+            ),
+            (
+                Ok("\"\"|true|false|false\n"),
                 None,
                 InventoryStage::BuildCache,
                 QueryFailure::Malformed,
@@ -387,7 +528,7 @@ mod tests {
                 QueryFailure::Timeout,
             ),
             (
-                Ok("true|false|true"),
+                Ok("\"id\"|true|false|true\n"),
                 Some(Ok("engine-changed")),
                 InventoryStage::EngineRecheck,
                 QueryFailure::Malformed,
@@ -407,6 +548,8 @@ mod tests {
             );
             assert_eq!(result.disposition, BuildCacheDisposition::Preserve);
             assert_eq!(result.reason, BuildCacheReason::IncompleteInventory);
+            assert_eq!(result.candidate_count, 0);
+            assert_eq!(result.preserved_by_reason, None);
             assert_eq!(result.issues, [InventoryIssue { stage, failure }]);
             assert!(!serde_json::to_string(&result)
                 .unwrap()

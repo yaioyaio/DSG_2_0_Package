@@ -25,7 +25,8 @@ const INVENTORY_TIMEOUT: Duration = Duration::from_secs(20);
 const POLL_INTERVAL: Duration = Duration::from_millis(5);
 const BUILD_CACHE_FORMAT: &str = r#"{{if eq .Type "Build Cache"}}{"total":{{json .TotalCount}},"active":{{json .Active}}}{{end}}"#;
 #[cfg(unix)]
-const BUILDX_USAGE_FORMAT: &str = "{{.Reclaimable}}|{{.Shared}}|{{.Mutable}}";
+const BUILDX_USAGE_FORMAT: &str =
+    r#"{{printf "%q" .ID}}|{{.Reclaimable}}|{{.Shared}}|{{.Mutable}}"#;
 // Docker may return a stub for an unreadable or missing context on success.
 const CONTEXT_NAME_FORMAT: &str = "{{if .Error}}null{{else}}{{json .Name}}{{end}}";
 

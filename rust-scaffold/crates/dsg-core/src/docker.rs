@@ -270,7 +270,7 @@ pub(crate) fn engine_id(value: &str) -> Option<String> {
     (legacy || safe_name(value, 128)).then(|| value.to_owned())
 }
 
-fn hex_id(value: &str) -> Option<String> {
+pub(crate) fn hex_id(value: &str) -> Option<String> {
     (value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
         .then(|| value.to_ascii_lowercase())
 }
@@ -279,7 +279,7 @@ pub(crate) fn image_id(value: &str) -> Option<String> {
     hex_id(value.strip_prefix("sha256:").unwrap_or(value)).map(|id| format!("sha256:{id}"))
 }
 
-fn digest(value: &str) -> Option<String> {
+pub(crate) fn digest(value: &str) -> Option<String> {
     hex_id(value.strip_prefix("sha256:")?).map(|id| format!("sha256:{id}"))
 }
 
@@ -376,7 +376,7 @@ fn valid_destination(value: &str) -> bool {
         .any(|part| part == b"." || part == b"..")
 }
 
-fn sort_mounts(mounts: &mut [Mount]) -> Result<(), QueryFailure> {
+pub(crate) fn sort_mounts(mounts: &mut [Mount]) -> Result<(), QueryFailure> {
     if mounts.len() > MAX_MOUNTS {
         return Err(QueryFailure::TooLarge);
     }
@@ -708,6 +708,14 @@ impl Inventory {
 
     /// Assess the observed snapshot against a Compose instance's expected identity.
     pub fn assess_reuse(&self, request: &ReuseRequest<'_>) -> ReuseAssessment {
+        self.assess_reuse_with_platform(request, None)
+    }
+
+    pub(crate) fn assess_reuse_with_platform(
+        &self,
+        request: &ReuseRequest<'_>,
+        platform: Option<(&str, &str)>,
+    ) -> ReuseAssessment {
         use ReuseReason::*;
 
         let Some(engine) = engine_id(request.engine_id) else {
@@ -791,6 +799,9 @@ impl Inventory {
             return ReuseAssessment::unknown(UnverifiedImage);
         }
         if !image.digests.contains(&wanted_digest) {
+            return ReuseAssessment::reject(ImageChanged);
+        }
+        if platform.is_some_and(|(os, arch)| image.os != os || image.architecture != arch) {
             return ReuseAssessment::reject(ImageChanged);
         }
 
