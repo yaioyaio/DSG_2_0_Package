@@ -34,6 +34,8 @@ Docker 읽기 전용 단계에서는 Docker 명령 대역으로 컨텍스트 고
 
 같은 Compose 시험에서 엔진 ID와 단일 시험 컨테이너의 ID·라벨을 대조한 뒤 컨테이너의 `/dev/shm`에 상태 표식을 쓴다. 구성·이미지·마운트가 같은 컨테이너가 `unhealthy`가 된 경우 재사용은 `not_healthy`와 종료 코드 5를 반환해야 한다. 시험은 기존의 격리 컨테이너 회수 경로를 사용한다.
 
+이미지·마운트 실측에는 같은 명령에 `DSG_TEST_COMPOSE_IMAGE`를 추가하고 값으로 격리 엔진에 준비된 공식 `docker.io/library/alpine@sha256:…` 참조를 지정한다. 두 번째 컨테이너는 원래 이미지와 ID·digest가 다른 이미지와 64 KiB `tmpfs`를 사용한다. 실제 이미지와 마운트를 조회한 뒤 구성·이미지·마운트 기대값을 개별 대조해 두 관측에서 각각 `configuration_changed`, `image_changed`, `mount_changed`와 종료 코드 5를 확인한다. 관측과 같은 `tmpfs`를 기대값에 넣어도 두 관측은 `unknown/unverified_mount`와 종료 코드 5를 반환해야 한다. 실제 명명 볼륨은 사용하지 않으며 명명 볼륨 교체는 [합성 시험](../rust-scaffold/crates/dsg-core/src/docker.rs#L976)에서 확인한다.
+
 `DSG_TEST_BUILD_PROVIDERS=1 sh scripts/test-rust.sh`는 로컬 도구와 의존성 없는 임시 프로젝트로 등록된 빌드·테스트 작업을 실행한다. `DSG_TEST_PLAYWRIGHT_MODULES`에 준비한 공식 Playwright의 `node_modules` 경로를 추가하면 실제 성공·실패 추적 파일의 존재와 길이, 서로 다른 출력 경로, 기본 프로젝트 출력 보존도 확인한다. 감사 검증에는 실행 결과 코드와 해당 lease 참조만 사용한다.
 
 실제 Next.js 앱의 통합 검증에는 `DSG_TEST_BUILD_PROVIDERS=1`과 `DSG_TEST_NEXT_MODULES`를 함께 지정한다. 두 번째 값은 Next.js 16.4.6, React·React DOM 19.3.1과 실행 환경의 SWC가 준비된 `node_modules`의 절대 경로다. 의존성은 크기와 파일 수를 제한한 임시 복사본을 사용한다. `PATH`에는 임시 홈에서 바로 실행할 수 있는 Node와 pnpm을 둔다. 단독 검증은 `DSG_TEST_NEXT_MODULES`를 지정해 `python3 -IB scripts/check-build-providers.py <dsg> --next-only`로 실행한다. pnpm Provider의 `next build --webpack`, `BUILD_ID`, 사전 렌더 HTML, 관리형 `exec`의 `127.0.0.1` 응답·종료 및 두 lease의 감사 기록을 확인한다.
@@ -84,6 +86,8 @@ macOS에서 `DSG_TEST_WEBKIT=1 sh scripts/test-rust.sh`는 임시 WebKit 뷰를 
 
 WBS마다 구현과 검증 기록을 [작업 대조표](TASK.md)에서 대조한다. 성공 여부는 실행한 OS, 후보 버전, 실환경·시험 대역, 입출력 범위를 근거로 판정한다. 교차 링크는 컴파일·링크 증거이며, 합성 Docker 파이프는 해당 OS 서비스와 파이프 권한의 증거다. 대상 환경에서 실행하지 못한 항목은 별도의 검증으로 남긴다.
 
+- 현재 `681be1e`의 Windows ARM64 패키지는 기존 Parallels의 로컬 NTFS에서 실제 이전 후보를 새 후보로 교체하고 설치 파일별 해시, 진단·대시보드·제거를 검증했다. 현재 Linux ARM64 패키지는 macOS의 기존 격리 Linux ARM64 엔진에서 교체·진단·대시보드·제거, 관리형 타임아웃과 lease 재획득을 검증했다. Windows x64 네이티브 환경과 Linux Ubuntu Parallels의 현재 후보 실행은 별도 조건이다. [패키지 근거](RELEASE.md)
+
 - Docker 내장 빌더 총량·활성 집계, 기본 Buildx 빌더의 상태별 조회, 기존 이미지 보존은 조회·계획 검증에 해당한다. Buildx 상태별 항목은 서로 겹칠 수 있다. WBS 2.3에는 별도 Buildx 빌더, 캐시 소유권, 안전한 정리 범위의 증거가 필요하다. 이미지 적용 검증에는 승인된 적용 경로와 단독 제어를 확인한 격리 엔진이 필요하다.
-- macOS Compose 실험은 동일 컨테이너 재사용, 구성 해시 변경과 동일 컨테이너의 health 변화 거절을 실측했다. 이미지·마운트 차이는 합성 입력으로 대조했으며 실제 엔진 변경별 검증을 추적한다. pnpm 시험에는 일반 프로젝트 스크립트와 실제 Next.js 앱 빌드·루프백 응답을 포함한다.
+- macOS에서 격리 엔진·Buildx·Compose 이미지 옵션을 포함한 `sh scripts/test-rust.sh`는 종료 코드 0으로 완료됐고 Rust 시험 103개를 통과했다. Compose는 반복 실행 후 동일 ID 1개, 구성·health·실제 이미지·64 KiB `tmpfs` 변경 거절, 일치하는 `tmpfs`의 `unknown/unverified_mount` 판정, 소유 컨테이너 회수를 확인했다. 실제 명명 볼륨 사용은 0개였고 명명 볼륨 교체는 합성 검증 범위다. pnpm 시험에는 일반 프로젝트 스크립트와 실제 Next.js 앱 빌드·루프백 응답을 포함한다.
 - 프로세스 강제 종료와 재시작 근거는 [핸드오프](HANDOFF.md)에 기록한다. 전원 장애 복구와 전체 플랫폼의 감사 무손실은 독립된 출시 검증으로 추적한다.

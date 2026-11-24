@@ -13,6 +13,7 @@ import time
 
 
 HEALTH_MARKER = '/dev/shm/dsg-fixture-unhealthy'
+TMPFS_TARGET = '/dsg-fixture-mount'
 
 
 def call(arguments, timeout=8):
@@ -67,8 +68,8 @@ def compose_up(compose, project, timeout):
         raise RuntimeError('The isolated Compose fixture start exceeded its time limit.') from None
 
 
-def write_compose_fixture(path, image_id, tag, lifetime):
-    path.write_text(f'''services:
+def write_compose_fixture(path, image_id, tag, lifetime, mount_tmpfs=False):
+    configuration = f'''services:
   probe:
     image: "{image_id}"
     container_name: "{tag}"
@@ -92,12 +93,23 @@ def write_compose_fixture(path, image_id, tag, lifetime):
       interval: 1s
       timeout: 1s
       retries: 3
-''')
+'''
+    if mount_tmpfs:
+        configuration += f'''    volumes:
+      - type: tmpfs
+        target: "{TMPFS_TARGET}"
+        tmpfs:
+          size: 65536
+'''
+    path.write_text(configuration)
 
 
 def verify_reuse(cli, context, project, runner_deadline):
     if os.name != 'posix' or context not in {'dsg-test', 'dockerguard-test'}:
         raise RuntimeError('The Compose fixture requires a registered isolated POSIX Docker context.')
+    pinned_image = os.environ.get('DSG_TEST_COMPOSE_IMAGE')
+    if pinned_image is not None and not re.fullmatch(r'docker\.io/library/alpine@sha256:[0-9a-f]{64}', pinned_image):
+        raise RuntimeError('The optional Compose image must be an official Docker Hub Alpine digest reference.')
     docker = ['docker', '--context', context]
     overrides = {'DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_API_VERSION', 'DOCKER_DEFAULT_PLATFORM',
                  'DOCKER_TLS', 'DOCKER_TLS_VERIFY', 'DOCKER_CERT_PATH'}
@@ -117,14 +129,34 @@ def verify_reuse(cli, context, project, runner_deadline):
     if not inventory['complete'] or not inventory['engine_id']:
         raise RuntimeError('The isolated Docker inventory could not be verified.')
     images = {image['id']: image for image in inventory['images'] if image['digests']}
+    inspect_image = docker + ['image', 'inspect', '--format']
+    volume_count = '{{len .Config.Volumes}}'
+    replacement = None
+    replacement_digest = None
+    if pinned_image is not None:
+        replacement_digest = pinned_image.split('@', 1)[1]
+        replacement_id = docker_field(inspect_image + ['{{.ID}}', '--', pinned_image], budget(4))
+        replacement = images.get(replacement_id)
+        if (replacement is None or replacement_digest not in replacement['digests'] or replacement['os'] != 'linux'
+                or docker_field(inspect_image + [volume_count, '--', replacement_id], budget(4)) != '0'):
+            raise RuntimeError('The isolated engine needs the preloaded, digest-backed Alpine image without declared volumes.')
+
     source = None
     for reference in ('busybox:1.36', 'busybox:1.37', 'busybox:latest', 'alpine:3.20', 'alpine:3.22', 'alpine:latest'):
-        inspect = docker + ['image', 'inspect', '--format']
-        image_id = docker_field(inspect + ['{{.ID}}', '--', reference], budget(4))
-        if image_id in images and docker_field(inspect + ['{{len .Config.Volumes}}', '--', image_id], budget(4)) == '0':
-            source = images[image_id]
+        image_id = docker_field(inspect_image + ['{{.ID}}', '--', reference], budget(4))
+        candidate = images.get(image_id)
+        if candidate is None:
+            continue
+        if replacement is not None and (image_id == replacement['id'] or replacement_digest in candidate['digests']
+                                        or candidate['os'] != replacement['os']
+                                        or candidate['architecture'] != replacement['architecture']):
+            continue
+        if docker_field(inspect_image + [volume_count, '--', image_id], budget(4)) == '0':
+            source = candidate
             break
     if source is None:
+        if replacement is not None:
+            raise RuntimeError('The isolated engine needs a distinct preloaded fixture image for the same platform without declared volumes.')
         raise RuntimeError('The isolated engine needs a preloaded digest-backed BusyBox or Alpine image without declared volumes.')
 
     tag = 'dsg-runner-' + secrets.token_hex(6)
@@ -165,11 +197,11 @@ def verify_reuse(cli, context, project, runner_deadline):
         if removed.returncode or owned_container(remaining) is not None:
             raise RuntimeError('Isolated fixture removal could not be verified.')
 
-    def start(lifetime):
+    def start(lifetime, image, mount_tmpfs=False):
         nonlocal start_attempted
         if owned_container(budget) != container:
             raise RuntimeError('The observed isolated fixture ID changed before startup.')
-        write_compose_fixture(yaml_path, source['id'], tag, lifetime)
+        write_compose_fixture(yaml_path, image['id'], tag, lifetime, mount_tmpfs)
         timeout = budget(11)
         start_attempted = True
         if compose_up(compose, project, timeout):
@@ -190,6 +222,22 @@ def verify_reuse(cli, context, project, runner_deadline):
     def verify(expectation, exit_code):
         args = cli + ['docker-reuse', '--context', context, '--expectation-json', json.dumps(expectation)]
         return result(args, expected=exit_code, timeout=budget(22))
+
+    def expect_refusal(expectation, status, reason):
+        observed = verify(expectation, 5)
+        if (observed['verified'] or observed['assessment']['status'] != status
+                or observed['assessment']['reason'] != reason
+                or observed['reason'] != {'code': 'initial_unverified', 'assessment_reason': reason}):
+            raise RuntimeError(f'The isolated Compose fixture did not return {status}/{reason} in both observations.')
+
+    def confirm_changed_fixture(container_id, image_id):
+        confirm_owned(container_id, budget)
+        projection = ('{{.Image}} {{.State.Health.Status}}'
+                      '{{range .Mounts}} {{.Type}}:{{.Destination}}:{{.RW}}{{end}}')
+        observed = docker_field(docker + ['container', 'inspect', '--format', projection,
+                                          '--', container_id], budget(4))
+        if observed != f'{image_id} healthy tmpfs:{TMPFS_TARGET}:true':
+            raise RuntimeError('The isolated replacement container image, health or temporary mount could not be verified.')
 
     def trigger_unhealthy(container_id):
         # The marker lives in this container's private shared memory and is removed with it.
@@ -212,14 +260,14 @@ def verify_reuse(cli, context, project, runner_deadline):
     container = None
     start_attempted = False
     try:
-        container = start(45)
+        container = start(45, source)
         config_hash = read_config_hash(container)
         expectation = dict(engine_id=inventory['engine_id'], project=tag, service='probe', number=1,
                            config_hash=config_hash, image_id=source['id'], image_digest=source['digests'][0], mounts=[])
         observed = verify(expectation, 0)
         assert observed['verified'] and observed['assessment']['container_id'] == container
 
-        repeated = start(45)
+        repeated = start(45, source)
         assert repeated == container and read_config_hash(repeated) == config_hash
         observed = verify(expectation, 0)
         assert observed['verified'] and observed['assessment']['container_id'] == container
@@ -234,10 +282,23 @@ def verify_reuse(cli, context, project, runner_deadline):
         remove_owned(original, budget)
         container = None
         start_attempted = False
-        container = start(46)
-        assert container != original and read_config_hash(container) != config_hash
-        stale = verify(expectation, 5)
-        assert not stale['verified'] and stale['assessment']['reason'] == 'configuration_changed'
+        container = start(46, replacement or source, mount_tmpfs=replacement is not None)
+        changed_hash = read_config_hash(container)
+        assert container != original and changed_hash != config_hash
+        if replacement is None:
+            stale = verify(expectation, 5)
+            assert not stale['verified'] and stale['assessment']['reason'] == 'configuration_changed'
+        else:
+            expect_refusal(expectation, 'rejected', 'configuration_changed')
+            confirm_changed_fixture(container, replacement['id'])
+            mounted = {'kind': 'tmpfs', 'volume': None, 'destination': TMPFS_TARGET, 'read_only': False}
+            changed = dict(expectation, config_hash=changed_hash, image_id=replacement['id'],
+                           image_digest=replacement_digest)
+            expect_refusal(dict(changed, image_id=source['id'], image_digest=source['digests'][0], mounts=[mounted]),
+                           'rejected', 'image_changed')
+            expect_refusal(changed, 'rejected', 'mount_changed')
+            expect_refusal(dict(changed, mounts=[mounted]), 'unknown', 'unverified_mount')
+            confirm_owned(container, budget)
     finally:
         if start_attempted:
             cleanup_deadline = time.monotonic() + 10
@@ -252,6 +313,8 @@ def verify_reuse(cli, context, project, runner_deadline):
             if current is not None:
                 remove_owned(container or current, cleanup_budget)
     print('Isolated Compose reuse: repeated up retained one container; health and configuration changes were rejected.')
+    if replacement is not None:
+        print('Isolated Compose image and mount changes were rejected, and matching tmpfs stayed unverified.')
 
 
 if __name__ == '__main__':

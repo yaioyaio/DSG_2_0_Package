@@ -3,22 +3,24 @@
   "created": "2026-11-19",
   "validation": {
     "python_tests": "14 passed; POC CLI baseline and bytecode prevention passed",
-    "docker_runtime": "macOS isolated real inventory and repeated Compose up passed. Real configuration and health changes rejected. Default Buildx cache observed read-only (208 records); existing images preserved by dry-run.",
-    "rust_compiler": "Current macOS ARM64: 103 Rust tests and registered integration passed. Windows ARM64 NTFS: nine native fixture tests passed after MSVC cross-link.",
+    "docker_runtime": "macOS isolated real inventory, repeated Compose up, configuration and health, Alpine image replacement and tmpfs differences passed. Default Buildx cache observed read-only; existing images preserved by dry-run.",
+    "rust_compiler": "Current macOS ARM64: 103 Rust tests and registered integration with Compose changes and default Buildx passed. Windows ARM64 NTFS: nine native fixture tests passed after MSVC cross-link.",
     "html_parse": "passed",
     "agent_integration": "Current macOS binary from Rust tree 681be1e: nine real CLI cases with synthetic model replies and stub commands, plus read-only MCP verification. Project state remained unchanged in the read-only MCP case.",
     "dockerd_broker": "Rust tree 681be1e passed the macOS isolated live Docker boundary and temporary GUI launchd. Earlier Linux restricted UID/systemd ran with real Docker. Earlier Windows ARM64 native SCM and SID boundary used a fixture pipe.",
     "dashboard": "Rust tree 681be1e release API and both WebKit layouts matched isolated Docker counts. The latest source regression repeated the live inventory and WebKit integration.",
-    "release_packages": "macOS ARM64 0.1.1-rc.1 from Rust tree 681be1e: two clean builds matched archive SHA-256 and the real 0.1.0 upgrade, runtime and removal passed. Earlier Linux and Windows candidates have distinct qualification scopes.",
-    "windows_qualification": "Earlier Windows ARM64 0.1.1-rc.1 (Rust tree 35a30aa) passed native package and dashboard and SCM with a fixture pipe. Windows x64 native and live Windows Docker remain open.",
+    "release_packages": "Current Rust tree 681be1e: macOS ARM64 paired clean builds and package lifecycle passed. Windows ARM64 native NTFS and isolated Linux ARM64 each passed previous artifact to current 0.1.1-rc.1 upgrade, dashboard HTTP and removal. Same inputs reproduced Windows and Linux archive hashes.",
+    "windows_qualification": "Current 681be1e ARM64 passed same-version real upgrade, installed hashes, both executables, dashboard and removal in existing Parallels. Earlier SCM used a fixture pipe. Windows x64 native and live Windows Docker remain open.",
     "release_signature": "macOS ARM64 offline signer handoff, exact archive and manifest verification, rejected responses, publisher-gated local package rejection, and package lifecycle passed. Official signer qualification remains separate.",
     "build_providers": "macOS Cargo, Node, pnpm, Gradle, uv, Go and Playwright ran. Real Next.js 16.4.6 build and loopback response passed with two audited leases. Playwright success/failure and TTL retention were qualified separately.",
-    "documentation_traceability": "14 WBS rows, 8 DSG stages and 13 unchanged requirements matched. Latest macOS Python 14 and Rust 103 plus integration passed; four preserved platform archives matched target, version and hashes.",
+    "documentation_traceability": "14 WBS rows, 8 DSG stages and 13 requirement IDs match. Current macOS Python 14 and Rust 103 plus integrated Compose and Buildx passed. Remaining acceptance conditions are listed by WBS.",
     "windows_foundation": "Windows ARM64 MSVC cross-link and nine native NTFS filesystem tests passed on the existing Parallels guest. macOS Python 14 and Rust 98 plus registered integration passed.",
     "buildx_cache": "macOS Rust 102 and live isolated Buildx integration passed. Engine default Buildx totals 208 records, 208 reclaimable, 8 shared, 167 mutable; all preserved. Separate builder qualification remains open.",
     "next_and_compose_health": "macOS Rust 102 and integration passed with the real Next.js 16.4.6 pnpm build, loopback runtime and leases, plus real same-container Compose health rejection and bounded cleanup.",
     "gc_crash_recovery": "macOS Rust 103 and integration passed. Committed GC intent and staged artifact survived an owned child SIGKILL, restored identical identity/SHA-256 with zero deletion and retained exact audit events.",
-    "current_macos_qualification": "Rust tree 681be1e: all nine local agent CLI fixtures, temporary launchd and isolated Docker boundary, paired independent release archive builds, prior 0.1.0 upgrade, and live WebKit/API comparisons passed."
+    "current_macos_qualification": "Rust tree 681be1e: all nine local agent CLI fixtures, temporary launchd and isolated Docker boundary, paired independent release archive builds, prior 0.1.0 upgrade, and live WebKit/API comparisons passed.",
+    "compose_live_changes": "Existing isolated engine preserved one ID on repeat. Configuration, health, image and tmpfs changes rejected. Matching tmpfs remained unknown. Named volume replacement is covered by synthetic fixtures.",
+    "linux_arm64_qualification": "Current 681be1e static musl passed previous archive upgrade, managed success, timeout 124 and lease reacquisition, dashboard and removal in an isolated ARM64 Linux container. Existing Ubuntu Parallels lacked a verified transfer path."
   },
   "files": [
     {
@@ -108,13 +110,13 @@
     },
     {
       "path": "docs/RELEASE.md",
-      "sha256": "1c951da4dc7a4a68afdf004eb26e6c0a522f54f84fcbf5cd528690febe08fec4",
-      "bytes": 10262
+      "sha256": "77a5adb892f1a2930972a6ba7c262dba61dc2df73613c80b72eb06e5bd9f97c9",
+      "bytes": 11732
     },
     {
       "path": "docs/REQUIREMENTS.md",
-      "sha256": "f373517cdf2c51a61f4513fad07a1459f7aacea32a77b88641de44bee2d69d0b",
-      "bytes": 4155
+      "sha256": "22fca5f72837da3bbc1eddaad6d0202e3c3ca985b00bc0c1486f2f6b6ec40659",
+      "bytes": 4259
     },
     {
       "path": "docs/SECURITY.md",
@@ -128,13 +130,13 @@
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "69fd41b6cd86b7e5fe65b0c9b5a72d226c72351c16ac96e8859281431ea34642",
-      "bytes": 15880
+      "sha256": "6dfd483e0d8081dd7f95338d4904549abe44a4451983bcc5efd3caa285f9ad1c",
+      "bytes": 16338
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "58c8cb76b2dfec290578ad00e00ad6524e4c7a5ba7094c713f74874a49cc90ab",
-      "bytes": 13988
+      "sha256": "19f6ad5ea6f908c23c29ce33eeed017bbccfcdf5666edb5735eaab874d13c5f0",
+      "bytes": 15564
     },
     {
       "path": "docs/WBS.md",
@@ -448,8 +450,8 @@
     },
     {
       "path": "scripts/check-managed-execution.py",
-      "sha256": "ac6015d303b8cf5c8be021c807407612ea42507404adf35df1a34f09477473ad",
-      "bytes": 13190
+      "sha256": "52884e8df43019f8567f7d19b8612e793e7267b91e87650d246bd05f66f5a889",
+      "bytes": 17166
     },
     {
       "path": "scripts/check-release-package.py",
