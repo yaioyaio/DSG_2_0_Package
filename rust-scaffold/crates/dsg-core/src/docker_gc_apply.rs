@@ -221,7 +221,7 @@ impl<'a> DockerGcService<'a> {
             binding: observation.binding,
         };
         let payload = json!({ (MANAGED_DOCKER_TARGET): intent });
-        Ok(registry.save_plan(project, policy_digest, &payload, PLAN_TTL)?)
+        Ok(registry.save_managed_docker_gc_plan(project, policy_digest, &payload, PLAN_TTL)?)
     }
 
     pub fn approve(
