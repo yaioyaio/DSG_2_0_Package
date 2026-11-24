@@ -9,6 +9,8 @@
 | Windows ARM64 | Parallels Windows 11에서 `0.1.1-rc.1`의 설치·실행·업그레이드·제거, 아카이브 재현성, 대시보드 HTTP, 합성 상류의 실제 SCM 확인 |
 | Windows x64 | 이전 후보 `0.1.0-rc.3`의 교차 링크·PE·아카이브 검증 기록이 있다. x64 호스트에서 설치 수명 주기 확인 대기 |
 
+Rust 소스 트리 `681be1e`의 최신 macOS ARM64 검증 후보는 `dist/dsg-macos-qualification-681be1e/`에 있다. 이 후보는 독립 빌드 두 번의 아카이브 SHA-256 일치, 이전 `0.1.0`에서의 실제 업그레이드·제거, 격리 Docker 조회와 두 화면 폭의 WebKit 검증을 통과했다. 대상·소스·해시는 같은 디렉터리의 `QUALIFICATION.json`에 기록했다. [검증 기록](HANDOFF.md#dsg-0608-현재-소스의-macos-자격-검증)
+
 ## 패키지 만들기
 
 잠긴 의존성으로 대상 OS에 맞는 `dsg`와 `dsgd`를 빌드한다. 생성기는 입력 바이너리, `Cargo.lock`과 출처 고지를 담은 재현 가능한 `tar.gz` 및 SHA-256 파일을 만든다. `--adhoc`은 macOS 복사본에 로컬 서명을 적용하고 검증한다. Linux 패키지는 파일별 SHA-256과 아카이브 해시를 확인한다. 공인 배포 서명은 승인된 서명 환경에서 수행한다.
