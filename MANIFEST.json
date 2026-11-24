@@ -3,24 +3,26 @@
   "created": "2026-11-19",
   "validation": {
     "python_tests": "14 passed; POC CLI baseline and bytecode prevention passed",
-    "docker_runtime": "macOS isolated real inventory, repeated Compose up, configuration and health, Alpine image replacement and tmpfs differences passed. Default Buildx cache observed read-only; existing images preserved by dry-run.",
-    "rust_compiler": "Current macOS ARM64: 103 Rust tests and registered integration with Compose changes and default Buildx passed. Windows ARM64 NTFS: nine native fixture tests passed after MSVC cross-link.",
+    "docker_runtime": "macOS isolated inventory and Compose repeated up passed. Configuration, health, actual image, tmpfs and named volume name differences were checked. External test volumes were preserved.",
+    "rust_compiler": "macOS ARM64: 103 Rust tests and registered integration passed. Ubuntu Parallels ARM64: static musl application cross-linked and ran natively. Windows ARM64 NTFS: nine native fixture tests with the earlier qualified source.",
     "html_parse": "passed",
-    "agent_integration": "Current macOS binary from Rust tree 681be1e: nine real CLI cases with synthetic model replies and stub commands, plus read-only MCP verification. Project state remained unchanged in the read-only MCP case.",
+    "agent_integration": "Mac and native Ubuntu Parallels: nine actual CLI cases each using synthetic model replies and a tool stub. On hook error Claude kept the stub from running; Codex and Gemini ran it. Read-only MCP preserved project state.",
     "dockerd_broker": "Rust tree 681be1e passed the macOS isolated live Docker boundary and temporary GUI launchd. Earlier Linux restricted UID/systemd ran with real Docker. Earlier Windows ARM64 native SCM and SID boundary used a fixture pipe.",
     "dashboard": "Rust tree 681be1e release API and both WebKit layouts matched isolated Docker counts. The latest source regression repeated the live inventory and WebKit integration.",
-    "release_packages": "Current Rust tree 681be1e: macOS ARM64 paired clean builds and package lifecycle passed. Windows ARM64 native NTFS and isolated Linux ARM64 each passed previous artifact to current 0.1.1-rc.1 upgrade, dashboard HTTP and removal. Same inputs reproduced Windows and Linux archive hashes.",
+    "release_packages": "Linux ARM64 current Rust tree ada5a09 verified native in Ubuntu Parallels with archive SHA, live upgrade, successful and timed-out managed execution, reacquisition, dashboard and removal. Prior qualified macOS and Windows ARM64 are recorded by tree in RELEASE.md.",
     "windows_qualification": "Current 681be1e ARM64 passed same-version real upgrade, installed hashes, both executables, dashboard and removal in existing Parallels. Earlier SCM used a fixture pipe. Windows x64 native and live Windows Docker remain open.",
     "release_signature": "macOS ARM64 offline signer handoff, exact archive and manifest verification, rejected responses, publisher-gated local package rejection, and package lifecycle passed. Official signer qualification remains separate.",
     "build_providers": "macOS Cargo, Node, pnpm, Gradle, uv, Go and Playwright ran. Real Next.js 16.4.6 build and loopback response passed with two audited leases. Playwright success/failure and TTL retention were qualified separately.",
-    "documentation_traceability": "14 WBS rows, 8 DSG stages and 13 requirement IDs match. Current macOS Python 14 and Rust 103 plus integrated Compose and Buildx passed. Remaining acceptance conditions are listed by WBS.",
+    "documentation_traceability": "14 WBS rows, 8 DSG stages, 13 requirement IDs, local evidence and package inventory verified.",
     "windows_foundation": "Windows ARM64 MSVC cross-link and nine native NTFS filesystem tests passed on the existing Parallels guest. macOS Python 14 and Rust 98 plus registered integration passed.",
     "buildx_cache": "macOS Rust 102 and live isolated Buildx integration passed. Engine default Buildx totals 208 records, 208 reclaimable, 8 shared, 167 mutable; all preserved. Separate builder qualification remains open.",
     "next_and_compose_health": "macOS Rust 102 and integration passed with the real Next.js 16.4.6 pnpm build, loopback runtime and leases, plus real same-container Compose health rejection and bounded cleanup.",
     "gc_crash_recovery": "macOS Rust 103 and integration passed. Committed GC intent and staged artifact survived an owned child SIGKILL, restored identical identity/SHA-256 with zero deletion and retained exact audit events.",
     "current_macos_qualification": "Rust tree 681be1e: all nine local agent CLI fixtures, temporary launchd and isolated Docker boundary, paired independent release archive builds, prior 0.1.0 upgrade, and live WebKit/API comparisons passed.",
     "compose_live_changes": "Existing isolated engine preserved one ID on repeat. Configuration, health, image and tmpfs changes rejected. Matching tmpfs remained unknown. Named volume replacement is covered by synthetic fixtures.",
-    "linux_arm64_qualification": "Current 681be1e static musl passed previous archive upgrade, managed success, timeout 124 and lease reacquisition, dashboard and removal in an isolated ARM64 Linux container. Existing Ubuntu Parallels lacked a verified transfer path."
+    "linux_arm64_qualification": "Current 681be1e static musl passed previous archive upgrade, managed success, timeout 124 and lease reacquisition, dashboard and removal in an isolated ARM64 Linux container. Existing Ubuntu Parallels lacked a verified transfer path.",
+    "standalone_buildkit": "Linux ARM64 on existing Ubuntu Parallels: product and official BuildKit v0.35.1 matched counts 0 and 4. Wrong PID, wrong client digest and socket symlink were rejected; all cache preserved.",
+    "named_volume_reuse": "Real isolated Compose reused identical named volume A and one ID. Replacing A with B rejected the old name and accepted the expected new mount. Read-only, nocopy and both volumes preserved verified."
   },
   "files": [
     {
@@ -70,8 +72,8 @@
     },
     {
       "path": "docs/API_SPEC.md",
-      "sha256": "d0cafc64fa8eab8d6653aab1915d67cfd855efbb072afed2b278d05c3b14a829",
-      "bytes": 14041
+      "sha256": "c866d85a60872ab6e68e92edf50db5b5788acff6d7dad42c4e1dcc5f9bf06c82",
+      "bytes": 14949
     },
     {
       "path": "docs/ARCHITECTURE.md",
@@ -110,13 +112,13 @@
     },
     {
       "path": "docs/RELEASE.md",
-      "sha256": "77a5adb892f1a2930972a6ba7c262dba61dc2df73613c80b72eb06e5bd9f97c9",
-      "bytes": 11732
+      "sha256": "99217efe0471e01a7a7190631b3431767b3edb5fb64f401eaa8d9c418451a95d",
+      "bytes": 12404
     },
     {
       "path": "docs/REQUIREMENTS.md",
-      "sha256": "22fca5f72837da3bbc1eddaad6d0202e3c3ca985b00bc0c1486f2f6b6ec40659",
-      "bytes": 4259
+      "sha256": "659d9a56771700b55a20210dd94d7c06334aeb703a28f8e4478d03ff705d367e",
+      "bytes": 4589
     },
     {
       "path": "docs/SECURITY.md",
@@ -130,13 +132,13 @@
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "6dfd483e0d8081dd7f95338d4904549abe44a4451983bcc5efd3caa285f9ad1c",
-      "bytes": 16338
+      "sha256": "28e8081b28edf76c911d8928bbfdf34a6a5204cbee985203a6adf1fa1a9c5070",
+      "bytes": 16643
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "19f6ad5ea6f908c23c29ce33eeed017bbccfcdf5666edb5735eaab874d13c5f0",
-      "bytes": 15564
+      "sha256": "91099319ef548b1a4c7505df84e75fdd5bb9c69e4a8c5ef4f89d5f6eabde82f7",
+      "bytes": 17922
     },
     {
       "path": "docs/WBS.md",
@@ -305,8 +307,8 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/src/main.rs",
-      "sha256": "2b0ae4a6a4e4b015011488808615b40ceac2363706bdfb6bcbd62de12b793381",
-      "bytes": 24714
+      "sha256": "63f7b9c7590073316e1351a1b241d9d852fbf77d0e2c5709ad9d8ca4db229182",
+      "bytes": 26669
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/src/mcp.rs",
@@ -344,14 +346,19 @@
       "bytes": 39541
     },
     {
+      "path": "rust-scaffold/crates/dsg-core/src/docker_buildkit_local.rs",
+      "bytes": 9252,
+      "sha256": "c845af6e6033fca387c78fb5d893f29aa8ac4a21e15afbef0683690fa02914b4"
+    },
+    {
       "path": "rust-scaffold/crates/dsg-core/src/docker_cache.rs",
-      "sha256": "057bcaacc7105f04fad28e17864c83ba0b2c180fed7bd69de02c00bd89c2389f",
-      "bytes": 18202
+      "sha256": "25157b580c91f4cceef58d4b108ba3860d0a85b77ce6e6e218930f24ed8a9b2c",
+      "bytes": 18232
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/docker_command.rs",
-      "sha256": "95b33021c0a2c4ed63e9b29f2ba126233c7523c0c8ea3cd9f77f4d54eeda2a7b",
-      "bytes": 26897
+      "sha256": "ce931ae90e065383d1f23e99864c3013bf64321f8235bf5fd3bbc1f0aff5934f",
+      "bytes": 26919
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/docker_image_gc.rs",
@@ -375,8 +382,8 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/lib.rs",
-      "sha256": "1c695ed05a6a1feda1643b4ff55a1080fae65da1e93aa2c6354a34f8c80867fc",
-      "bytes": 5535
+      "sha256": "c6fd58c985614dda1ed0462b0341261fccf234796422c877b789fa6b5f979436",
+      "bytes": 5624
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/policy.rs",
@@ -405,8 +412,8 @@
     },
     {
       "path": "scripts/check-agent-integration.py",
-      "sha256": "3cd4e88cf7837e730aec587d1ca7e265a699034dab7ae5bfb54be058ef557701",
-      "bytes": 18196
+      "sha256": "a386c7acae34d2c32b0e7bfb90b130e72b4c5b4867ff6d43cc85811156062546",
+      "bytes": 22349
     },
     {
       "path": "scripts/check-build-providers.py",
@@ -450,8 +457,8 @@
     },
     {
       "path": "scripts/check-managed-execution.py",
-      "sha256": "52884e8df43019f8567f7d19b8612e793e7267b91e87650d246bd05f66f5a889",
-      "bytes": 17166
+      "sha256": "7719e1308a30465f88074e8cbfc94e08bc68cf5e03e0c0962542164eeeaafad9",
+      "bytes": 21665
     },
     {
       "path": "scripts/check-release-package.py",

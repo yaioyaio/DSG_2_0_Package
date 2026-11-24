@@ -51,9 +51,9 @@ pub struct BuildxCacheInventory {
     pub issues: Vec<InventoryIssue>,
 }
 
-#[derive(Default)]
-struct BuildxUsage {
-    total: u64,
+#[derive(Default, Serialize)]
+pub struct BuildxUsage {
+    pub total: u64,
     reclaimable: u64,
     shared: u64,
     mutable: u64,
@@ -158,7 +158,7 @@ fn buildx_flag(value: &str) -> Result<u64, QueryFailure> {
     }
 }
 
-fn buildx_usage(response: &str) -> Result<BuildxUsage, QueryFailure> {
+pub(crate) fn buildx_usage(response: &str) -> Result<BuildxUsage, QueryFailure> {
     if response.len() > MAX_BUILDX_BYTES {
         return Err(QueryFailure::TooLarge);
     }

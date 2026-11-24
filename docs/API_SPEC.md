@@ -33,6 +33,8 @@ python3 -m dsg hook --agent codex
 
 `dsg --json docker-buildx-cache --context <context>`는 지정 엔진에 기본 제공되는 Buildx 빌더의 `total_count`, `reclaimable_count`, `shared_count`, `mutable_count`를 읽는다. 이 명령은 빈 임시 Buildx 설정을 사용하고 조회 전후에 엔진 ID를 대조한다. Buildx의 회수 가능 표시는 캐시 상태이며 프로젝트 소유권이나 삭제 승인과 별개다. 이 명령은 항상 `disposition=preserve`를 반환하며 조회 실패·초과 시 수치는 `null`, 종료 코드는 5다. [Docker Buildx 사용량 명령](https://docs.docker.com/reference/cli/docker/buildx/du/)
 
+Linux ARM64의 `dsg --json buildkit-local-cache --socket <절대 Unix 소켓> --expected-pid <데몬 PID> --buildctl <절대 실행 경로>`는 이미 실행 중인 별도 BuildKit의 사용량만 읽는다. 소켓이 속한 디렉터리는 현재 UID 소유의 권한 0700이어야 한다. 같은 PID 네임스페이스의 상대 PID·UID와 소켓 식별자를 조회 전후에 확인한다. 실행 가능 상태 및 SHA-256을 검사한 공식 v0.35.1 `buildctl`만 `du`에 사용한다. 성공 응답의 `counts`에 `total`, `reclaimable`, `shared`, `mutable`을 제공한다. 소유권 판정은 `unknown_ownership`이며 `disposition=preserve`를 유지한다. 검증이나 조회 실패는 `status=unknown`, `counts=null`, 종료 5로 반환한다. [공식 BuildKit 릴리스](https://github.com/moby/buildkit/releases/tag/v0.35.1) · [실측 근거](HANDOFF.md#별도-buildkit-읽기-전용-실측)
+
 ### 관리형 실행과 Compose 재사용
 
 `dsg exec --timeout 1~120 -- <argv...>`는 등록된 프로젝트의 정책과 호스트·프로젝트 예산을 확인한 뒤 직접 실행한다. 관리형 실행은 프로젝트별 lease 하나와 동일 상태 저장소의 전역 두 슬롯으로 제한한다. 조회가 불완전하거나 정책상 추가 확인이 필요하면 기존 판단 형식으로 반환한다. 성공 0, 정책 거부 3, 승인 필요 4, 제어 미확인 5, 시간 초과 124, 정상 중단 130을 사용한다. 자식이 실패하면 자식의 종료 코드를 반환한다. `--json`에서는 명령과 자식 원문 출력 없이 `run.outcome`, `run.exit_code`, `run.tree_confirmed_gone`과 `lease_released`를 제공한다.
