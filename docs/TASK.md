@@ -1,28 +1,27 @@
-# 개발 TASK / TODO 체크리스트
+# 개발 작업과 WBS 수용 기준 대조표
 
-## 현재 POC 확인
-- [x] `dsg init` 기초 정책
-- [x] `dsg doctor` 진단
-- [x] 생성 디렉터리 스캔 및 크기 합계
-- [x] Docker 읽기 전용 CLI 검사
-- [x] GC Plan 생성 및 보존
-- [x] 명시적 이중 승인 + 파일 상태 재검증
-- [x] 제한적 명령 실행 전 용량 검증
-- [x] Python unit tests
+2026-11-24 기준. 공식 계획의 Phase 1~6과 실행 계획 초안의 0~7단계는 번호 체계가 다르다. 실행 계획의 0~7단계는 작업 DSG-01~08에 순서대로 대응한다. 아래 표는 공식 WBS 한 항목에 한 행을 두고, 여러 단계에서 구현하거나 검증한 항목에는 관련 작업을 모두 표시한다. [공식 계획](PLAN.md) · [WBS 원문](WBS.md) · [실행 계획과 통과 기준](draft/IMPLEMENTATION-PLAN.md) · [작업별 백로그](BACKLOG.md)
 
-## Rust Core
-- [ ] 정책 스키마/상위 정책 병합
-- [ ] 정확한 파일시스템 사용량 및 소유권
-- [ ] process lease 구현
-- [ ] GC 원자성/격리/복구
-- [ ] Docker Engine Provider/Compose Provider
-- [ ] Build Providers
-- [ ] Mac launchd / Windows Service / Linux systemd
+**판정 기준.** ‘완료’는 표에 명시한 환경과 수용 기준에서 구현과 시험 기록을 확인한 경우다. ‘부분’은 해당 계획에 남은 구현이나 시험이 있는 경우다. 개별 플랫폼·엔진·패키지의 기존 실측과 이번 문서 정합에서 다시 실행한 회귀의 범위는 핸드오프에 기록한다. [이번 검증](HANDOFF.md#wbs-작업과-산출물-대조) · [검증 절차](TEST_PLAN.md)
 
-## AI 통합
-- [ ] Claude CLI actual smoke test
-- [ ] Codex CLI actual smoke test
-- [ ] Gemini CLI actual smoke test
-- [ ] MCP server contract
-- [ ] Skills 설치/제거
-- [ ] 직접 Docker 소켓 우회 방지
+| WBS | 관련 작업 | 계획 산출물·수용 기준 | 구현과 시험 근거 | 판정·남은 조건 |
+|---|---|---|---|---|
+| 1.1 | DSG-01·DSG-02 | 정책 스키마와 전역·프로젝트·세션 병합. 하위 정책의 보호 완화 및 잘못된 입력 거부 | [Python 정책](../poc/dsg/core.py)과 [Rust 정책](../rust-scaffold/crates/dsg-core/src/policy.rs)이 보호 목록을 유지한다. Rust는 버전·미정의 필드·잘못된 한도를 검사한다. [Python 보호 회귀](../poc/tests/test_core.py)와 [양 구현 대조](../scripts/check-foundation-parity.py)에서 보호 트리 보존과 정상 후보 선정을 확인했다. | **완료** · POC 보호 회귀와 Rust 정책 입력·병합 기준 통과. |
+| 1.2 | DSG-02·DSG-04·DSG-05 | 프로젝트 등록, SQLite 상태·감사 보존, 중복 등록 및 DB 마이그레이션 | [등록부와 단위 시험](../rust-scaffold/crates/dsg-core/src/registry.rs)이 같은 프로젝트 재등록, 충돌 거절, 동시 최초 등록을 검사한다. v1과 v2에서 각각 기존 프로젝트·계획·감사 및 lease·이벤트 보존을 검사한다. [CLI 통합 시험](../rust-scaffold/crates/dsg-cli/tests/cli.rs) | **완료** · 기반 등록부터 관리형 실행·GC 상태 추가까지 로컬 DB 회귀 통과. |
+| 1.3 | DSG-01·DSG-02 | 파일 스캔·크기 측정, 링크·권한 오류·작업량 한도 처리, 미확인 경로 제외 | [파일 스캐너와 단위 시험](../rust-scaffold/crates/dsg-core/src/filesystem.rs)에서 보호 하위 트리, 링크·특수 파일과 접근 불가 경로를 검사한다. [기반 대조 시험](../scripts/check-foundation-parity.py) 및 [실측 기록](HANDOFF.md#macos-및-기존-parallels-계획-보완)에서 dry-run 보존과 5 GiB 희소 파일의 논리 크기를 확인했다. | **완료** · macOS 스캔 기준 통과. 희소 파일은 논리 크기로 측정한다. |
+| 1.4 | DSG-01·DSG-02·DSG-05 | GC 계획·만료·승인·적용 직전 재검증과 감사. 상태가 바뀐 후보 거절 | [파일 GC](../rust-scaffold/crates/dsg-core/src/gc.rs), [등록부](../rust-scaffold/crates/dsg-core/src/registry.rs), [정리 시험](../scripts/check-cleanup.py)에서 보호·변경 후보 보존, 승인 재사용 거절, 승인 산출물 1개(23 B) 회수와 감사 기록 확인. [이미지 계획](../rust-scaffold/crates/dsg-core/src/docker_image_gc.rs)은 합성 후보의 계획·재검증과 실제 엔진 이미지 보존을 확인했다. [결과](HANDOFF.md) | **파일 승인 흐름 완료, Docker 적용 미완료** · 실제 이미지 삭제는 단독 제어 엔진·별도 승인과 적용 검증이 필요하다. 볼륨은 자동 삭제 대상에서 제외한다. |
+| 2.1 | DSG-03 | Docker 컨텍스트·엔진 및 이미지 인벤토리. 엔진 경계·참조·조회 불완전 상태 구분 | [조회 어댑터](../rust-scaffold/crates/dsg-core/src/docker_command.rs)와 [인벤토리 모델·fixture](../rust-scaffold/crates/dsg-core/src/docker.rs)가 컨테이너·이미지·볼륨 참조를 비교한다. macOS 지정 엔진에서 컨테이너 7개, 고유 이미지 5개, 볼륨 0개를 읽었다. [실측](HANDOFF.md#macos-및-기존-parallels-계획-보완) | **완료** · 지정 엔진 및 fixture 범위. Windows 브로커의 집계 범위와 실제 엔진 검증은 5.1 참조. |
+| 2.2 | DSG-03·DSG-04 | Compose 재사용 전후 재검사. 반복 실행 시 컨테이너 증가 0건, 구성·이미지·마운트·health 변경 시 오재사용 0건 | [재사용 검사](../rust-scaffold/crates/dsg-core/src/reuse.rs)는 기존 컨테이너의 ID를 반환한다. [모델 시험](../rust-scaffold/crates/dsg-core/src/docker.rs)에서 이미지·마운트·health 불일치와 불완전 상태를 검사한다. [격리 Compose 시험](../scripts/check-managed-execution.py)에서 Docker Compose가 `up`을 실행했고, 동일 ID 1개 유지와 구성 변경 뒤 이전 기대값 거절을 확인했다. [실측](HANDOFF.md#macos-및-기존-parallels-계획-보완) | **부분** · 실제 엔진에서 구성 변경까지 통과. 이미지·마운트·health 개별 변경 거절의 근거는 합성 시험이며 실제 엔진에서 각각 변경하는 시험이 남았다. |
+| 2.3 | DSG-03·DSG-05 | Buildx 캐시 Provider, 빌더별 소유권과 안전한 GC 범위 확인 | [캐시 집계와 시험](../rust-scaffold/crates/dsg-core/src/docker_cache.rs)에서 지정 엔진 내장 빌더의 캐시 208개·활성 0개를 읽었고, 소유권을 확인할 수 없어 전부 보존했다. [검증 기록](HANDOFF.md#macos-및-기존-parallels-계획-보완) | **부분** · 별도 Buildx 빌더 조회, 소유권 입증 및 캐시 GC 구현·실측이 남았다. |
+| 3.1 | DSG-04 | Node·Gradle·Cargo 실제 프로젝트 검증, 공식 계획의 pnpm/Next.js·uv·Go·Playwright로 확장 | [관리형 Provider](../rust-scaffold/crates/dsg-cli/src/build_provider.rs)와 [독립 프로젝트 시험](../scripts/check-build-providers.py)에서 Cargo·Node·pnpm·Gradle·uv·Go 및 Playwright를 실행했다. pnpm은 작은 Node 빌드 스크립트를 실행했다. [실측](HANDOFF.md#macos-및-기존-parallels-계획-보완) | **부분** · WBS에 명시된 세 스택의 실제 경로 통과. 공식 계획의 독립 Next.js 앱 빌드·실행 검증은 남았다. |
+| 3.2 | DSG-04·DSG-05 | 원자적 lease·heartbeat·만료, 동시 실행 제한, 시간 초과·비정상 종료 뒤 재획득 | [등록부의 lease 시험](../rust-scaffold/crates/dsg-core/src/registry.rs), [프로세스 감독](../rust-scaffold/crates/dsg-core/src/runner.rs), [관리형 실행 시험](../scripts/check-managed-execution.py)에서 충돌과 타임아웃을 검사한다. 감독자 강제 종료 후 만료 전 보존, 만료·자식 종료 후 같은 프로젝트의 재획득을 확인했다. [실측](HANDOFF.md#macos-및-기존-parallels-계획-보완) | **macOS 완료** · Linux 관리형 실행 실측이 남았고 Windows 관리형 `exec`는 미지원이다. Windows 서비스·패키지 시험은 5.1·6.1 참조. |
+| 3.3 | DSG-04·DSG-05 | 테스트 워커 수 제한, 성공·실패 trace 보관과 TTL, 등록된 실행·Git 완료 후 자동 회수 | [trace 선별](../rust-scaffold/crates/dsg-core/src/cleanup/local/success_trace.rs), [Provider 시험](../scripts/check-build-providers.py), [자동 정리 시험](../scripts/check-cleanup.py)에서 Playwright 단일 워커의 성공·실패 증거와 lease 감사를 확인했다. TTL 1초인 성공 trace 1개 회수, 정책 미설정·기대 실패 trace 보존, 성공 Cargo 산출물과 임시 Git worktree 회수를 확인했다. [결과](HANDOFF.md) | **완료** · 등록된 실행 경로와 검증된 산출물에 한해 적용. 실패·중단 증거는 보존한다. |
+| 4.1 | DSG-06 | 세 CLI 훅 JSON 계약, 프로젝트 설치·제거, 실제 허용·거부·오류 경로 | [훅 응답](../rust-scaffold/crates/dsg-cli/src/hooks.rs), [설치·제거 시험](../rust-scaffold/crates/dsg-cli/src/hook_install.rs) 및 [실제 CLI 시험](../scripts/check-agent-integration.py). macOS에서 Claude Code 2.1.330, Codex CLI 0.170.0, Gemini CLI 0.70.0의 9개 사례를 합성 모델 응답·대역 명령으로 확인했다. [호출 결과](HANDOFF.md) | **macOS 계약 완료** · 정상 훅은 세 CLI 모두 차단했다. 훅 오류 시 Claude는 차단했고 Codex·Gemini는 대역 명령을 실행했다. Linux 실제 CLI 미실측, Windows 훅 설치 미지원. |
+| 4.2 | DSG-06·DSG-08 | 공통 Skills, 읽기 전용 MCP, 승인 경계 검증. 실행 계획의 승인형 확장은 사용 사례 확정 후 진행 | [공통 스킬 5개와 연동 절차](../integrations/README.md), [MCP 서버](../rust-scaffold/crates/dsg-cli/src/mcp.rs), [실행·승인 조회](../rust-scaffold/crates/dsg-cli/src/mcp_state.rs). [통합 시험](../scripts/check-agent-integration.py)과 [실측](HANDOFF.md#macos-및-기존-parallels-계획-보완)에서 등록 프로젝트의 실행·승인 상태 조회와 상태 파일 변경 0건을 확인했다. | **읽기 전용 기준 완료** · 승인 발행·적용은 운영자 CLI가 담당한다. MCP 변경 기능은 후속 확장이다. 자동 설치·제거 검증은 4.1의 훅에 해당한다. |
+| 5.1 | DSG-07 | Docker 조회 프록시·OS 권한 경계. 직접 접근 거부, 서비스 장애 복구를 각 OS에서 실측 | [Unix 브로커](../rust-scaffold/crates/dsg-cli/src/daemon_socket.rs)·[Windows 서비스](../rust-scaffold/crates/dsg-cli/src/daemon_windows.rs). [macOS](../scripts/check-live-enforcement.py)는 실제 Docker Unix·TCP 직접 접근 거부, 조회와 임시 GUI launchd 재시작을 확인했다. [Linux ARM64](../scripts/check-linux-service.py)는 실제 Docker·제한 UID·systemd를 검증했다. [Windows ARM64](../scripts/check-windows-service.ps1)는 실제 SCM에서 서로 다른 SID의 허용·거부·재시작을 합성 상류 파이프로 검증했다. [결과](HANDOFF.md) | **부분** · macOS 별도 배포 계정과 운영 LaunchDaemon, Windows 실제 Docker 엔진에서의 직접 접근 차단·브로커 조회 실측이 남았다. |
+| 6.1 | DSG-08 | 플랫폼별 릴리스·서명·패키지, 설치·업그레이드·제거, 대시보드와 운영 진단 | [패키지 도구](../scripts/release-package.py), [패키지 시험](../scripts/check-release-package.py), [WebKit 렌더링 시험](../scripts/check-dashboard-rendering.swift). macOS ARM64 후보 0.1.1-rc.1 독립 빌드 해시 일치와 기존 0.1.0 실물 업그레이드·제거, API와 두 화면 폭의 실제 Docker 수치 일치를 확인했다. Linux ARM64 게스트의 설치 수명 주기, 기존 Windows ARM64 게스트의 같은 후보 설치·업그레이드·제거와 대시보드 HTTP도 통과했다. [플랫폼별 근거](HANDOFF.md) | **부분** · Windows x64는 0.1.0-rc.3 교차 링크·PE·아카이브까지 확인했고 x64 호스트 E2E가 남았다. 배포 서명 상태·수용 기준은 [릴리스 문서](RELEASE.md)에서 관리한다. |
+
+## 수용 기준 확정이 남은 항목
+
+- 4.1의 훅 오류 실측 결과는 위 표에 있다. 현재 운영 기준은 Docker 강제 통제를 OS 권한 경계에서 확인한다. 세 CLI 모두에 훅 실패 시 차단까지 요구하는 경우에는 수용 기준과 검증 대상을 먼저 확정한다. [에이전트 운영 기준](OPERATIONS.md#에이전트-연동-운영)
+- 실행 계획 7단계의 승인형 MCP와 서명·격리 지원 Provider SDK(REQ-013)는 사용 사례 확정 후 진행하는 미구현 확장이다. 3.1의 내장 Provider는 등록된 정형 작업의 검증 근거다. SDK의 검증은 별도 확장 과제로 추적한다. [요구사항](REQUIREMENTS.md) · [실행 계획](draft/IMPLEMENTATION-PLAN.md#단계별-산출물과-통과-기준)
