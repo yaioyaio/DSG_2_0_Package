@@ -5,13 +5,17 @@
 | 대상 | 검증한 후보 | 검증 결과 |
 |---|---|---|
 | macOS ARM64 | `0.1.1-rc.1`, Rust 트리 `681be1e` | 독립 빌드 두 번의 아카이브 SHA-256 일치, 로컬 서명, 실제 `0.1.0`에서의 업그레이드·실행·제거 확인 |
-| Linux ARM64 musl | 이전 `0.1.0` | Ubuntu 게스트에서 설치·업그레이드·실행·제거 및 SHA-256 확인 |
-| Windows ARM64 | 이전 `0.1.1-rc.1`, Rust 트리 `35a30aa` | 기존 Parallels에서 설치·실행·업그레이드·제거, 아카이브 재현성, 대시보드 HTTP, 합성 상류의 실제 SCM 확인 |
+| Linux ARM64 musl | 현재 `0.1.1-rc.1`, Rust 트리 `681be1e` | 기존 격리 Docker 엔진의 Linux ARM64에서 이전 `0.1.0` 실물 설치, 현재 후보 업그레이드, 실행·관리형 타임아웃·대시보드·제거 확인. 앞선 `0.1.0`의 Ubuntu 게스트 자격 검증은 별도 기록에 있다. |
+| Windows ARM64 | 현재 `0.1.1-rc.1`, Rust 트리 `681be1e` | 기존 Parallels의 로컬 NTFS에서 이전 `35a30aa` 실물 설치와 현재 후보로 교체, 두 실행 파일의 해시·실행, 대시보드 HTTP·제거 확인. 이전 후보의 합성 상류 SCM 시험은 별도 검증 기록에 있다. |
 | Windows x64 | 이전 `0.1.0-rc.3` | 교차 링크·PE·아카이브 검증 통과. x64 호스트에서 설치·업그레이드·제거 실측 대기 |
 
 Rust 소스 트리 `681be1e`의 최신 macOS ARM64 검증 후보는 `dist/dsg-macos-qualification-681be1e/`에 있다. 이 후보는 독립 빌드 두 번의 아카이브 SHA-256 일치, 이전 `0.1.0`에서의 실제 업그레이드·제거, 격리 Docker 조회와 두 화면 폭의 WebKit 검증을 통과했다. 대상·소스·해시는 같은 디렉터리의 `QUALIFICATION.json`에 기록했다. [검증 기록](HANDOFF.md#dsg-0608-현재-소스의-macos-자격-검증)
 
 Windows ARM64 로컬 NTFS의 파일시스템 시험 9개는 WBS 1.3의 별도 실측 기록이다. 패키지 수명 주기와 비교할 때는 위 표의 후보·소스 범위를 적용한다. [Windows NTFS 검증](HANDOFF.md#dsg-02-windows-ntfs-파일-식별-보완)
+
+현재 Windows ARM64 후보와 SHA-256 파일은 `dist/dsg-windows-arm64-qualification-681be1e/`에 보존한다. 동일한 교차 링크 입력으로 두 번 패키징해 같은 아카이브를 얻었다. 아카이브 SHA-256은 `1f3c9cb3370522a07121ec23d0520fc20ddf1df3fd2968afc96b92d2e0d3f23f`다. 이전 후보와 버전 문자열이 같으므로 네이티브 시험에서는 각 아카이브·실행 파일 해시, 설치 경로 교체, 이전 릴리스 회수로 업그레이드를 확인했다. [Windows 네이티브 시험](HANDOFF.md#macos-및-기존-parallels-잔여-수용-기준-재검증)
+
+현재 Linux ARM64 후보와 SHA-256 파일은 `dist/dsg-linux-arm64-qualification-681be1e/`에 보존한다. 두 정적 musl ELF 바이너리로 두 번 패키징해 SHA-256 `4847b388b8d2d97bb2e8f44dfe364d5f9c5cda0eb563f2fa862fb657fbf03e65`가 일치했다. 현재 후보의 시험 환경은 네트워크가 차단된 Linux ARM64 컨테이너다. 기존 Ubuntu Parallels 게스트에 이 후보를 전달해 실행하는 검증은 전송 경로 확보가 선행된다. [플랫폼별 시험 범위](HANDOFF.md#macos-및-기존-parallels-잔여-수용-기준-재검증)
 
 ## 패키지 만들기
 
