@@ -16,7 +16,8 @@
     "documentation_traceability": "WBS 14 rows, DSG 8 stages and 13 unchanged requirements reconciled. macOS Python 14 and Rust 98 tests passed, including isolated Docker reads and WebKit dashboard comparison; four preserved release candidates matched their inventories.",
     "windows_foundation": "Windows ARM64 MSVC cross-link and nine native NTFS filesystem tests passed on the existing Parallels guest. macOS Python 14 and Rust 98 plus registered integration passed.",
     "buildx_cache": "macOS Rust 102 and live isolated Buildx integration passed. Engine default Buildx totals 208 records, 208 reclaimable, 8 shared, 167 mutable; all preserved. Separate builder qualification remains open.",
-    "next_and_compose_health": "macOS Rust 102 and integration passed with the real Next.js 16.4.6 pnpm build, loopback runtime and leases, plus real same-container Compose health rejection and bounded cleanup."
+    "next_and_compose_health": "macOS Rust 102 and integration passed with the real Next.js 16.4.6 pnpm build, loopback runtime and leases, plus real same-container Compose health rejection and bounded cleanup.",
+    "gc_crash_recovery": "macOS Rust 103 and integration passed. Committed GC intent and staged artifact survived an owned child SIGKILL, restored identical identity/SHA-256 with zero deletion and retained exact audit events."
   },
   "files": [
     {
@@ -126,13 +127,13 @@
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "b1f2e8364fc3692231a8b8684134cd07d650b1dc5efe1b146a0daeb04611b6ac",
-      "bytes": 12052
+      "sha256": "f89584f2723ac26c3efe739692468a92ddb86cedbfca9528c1d1324107b97665",
+      "bytes": 12215
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "b62ee443eabe76a9007b651a136941c6e4ce88d6b6f7f5f564cd01c921d002b8",
-      "bytes": 13090
+      "sha256": "45738c12746e647e96b0df8ee8768b285aefc2c64787c2305cda71edea6ae2c6",
+      "bytes": 13586
     },
     {
       "path": "docs/WBS.md",
@@ -366,8 +367,8 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/gc.rs",
-      "sha256": "de0901d0a7ef842246a041a6be852d4ac53f00a3ace98953ca5d6a7e14382fc4",
-      "bytes": 25343
+      "sha256": "1b02131aab1059289b19229d327e8622ded0ad17466c1402a3e74a1527689e40",
+      "bytes": 33388
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/lib.rs",

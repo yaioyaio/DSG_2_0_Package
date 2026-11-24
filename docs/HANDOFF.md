@@ -163,3 +163,8 @@ DSG-08의 `f6397b2`를 PR #15로 `develop`, PR #16으로 `main`에 반영했다.
 - `feature/20261124-nextjs-provider-proof`, 기준 `4c33e8a`. WBS 3.1의 Next.js 16.4.6을 실제 `pnpm` Provider로 빌드했다. `BUILD_ID`, 임의 표식이 들어간 사전 렌더 HTML, 루프백 `next start` 응답, 종료와 해당 프로젝트의 서로 다른 빌드·실행 lease 두 건 및 감사 기록을 확인했다.
 - WBS 2.2의 실제 Compose fixture에서 반복 실행 뒤 확인한 동일 컨테이너에 전용 `/dev/shm` 표식을 썼다. 같은 ID·구성·이미지·마운트에서 health가 `unhealthy`로 바뀌면 재사용을 `not_healthy`로 거절했다. 기존 구성 변경 거절과 라벨·ID로 확인한 시험 컨테이너 회수도 통과했다. 실제 이미지·마운트 변경 실측은 남아 있다.
 - macOS `DSG_TEST_DOCKER_CONTEXT=dockerguard-test DSG_TEST_COMPOSE_FIXTURE=1 DSG_TEST_BUILD_PROVIDERS=1` 및 `DSG_TEST_NEXT_MODULES`를 지정한 `sh scripts/test-rust.sh`에서 Rust 102개와 통합 검증을 통과했다. 첫 시험에서 임시 홈의 pnpm 버전 관리자 shim과 공유 의존성 갱신 문제가 확인됐다. 독립 실행 pnpm, 파일 수·크기를 제한한 임시 복사본, 오프라인 설정으로 재검증했고 의존성 스테이지와 fixture를 회수했다. Docker Engine과 VM을 새로 시작하지 않았다. 보조 워크트리 생성 0개다. [검증 절차](TEST_PLAN.md#rust-foundation-검증)
+
+## DSG-05 격리 직후 강제 종료와 감사 복구
+
+- `feature/20261124-gc-crash-recovery`, 기준 `777f9a7`. WBS 1.4에서 임시 파일의 승인 적용 의도 커밋과 격리 이동 뒤 시험 자식만 `SIGKILL`했다. 새 등록부에서 만료 lease와 적용 의도를 되찾아 실제 복원 경로를 적용했다. 복원 파일의 ID·SHA-256이 일치하고, 회수 0바이트와 중복 복원 거절, SQLite 무결성·외래키 위반 0건, `GC_APPLY_INTENT`·`GC_PRESERVED` 각 1건을 확인했다. [시험 코드](../rust-scaffold/crates/dsg-core/src/gc.rs)
+- macOS `sh scripts/test-rust.sh`에서 Rust 103개와 통합 러너가 통과했다. 실제 사용자 데이터·Docker 자원 변경과 보조 워크트리 생성은 0회다. 호스트 전원 장애와 실제 Docker 이미지·Buildx 캐시 회수는 별도 수용 조건으로 남는다.
