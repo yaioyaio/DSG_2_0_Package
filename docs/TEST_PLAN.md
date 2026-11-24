@@ -80,13 +80,29 @@ WBS 1.4의 실측은 기존 Ubuntu ARM64의 독립 전용 Moby와 태그·레이
 
 승인된 실제 전용 Moby 시험 1건과 Docker 적용 회귀 8건이 통과했다. 영수증이 없는 등록부에서 복구 필요와 회수량 0 B, 추가 게스트 호출 0건을 확인했다. 읽기 전용 독립 검증에서 `quick_check=ok`, 열린 lease 0건과 적용 완료 감사 0건을 확인했다. [실측](HANDOFF.md#승인-후-전용-docker-엔진-영수증-기록-전-중단-검증)
 
+### 전용 Docker 엔진 삭제 응답 미수신 시험
+
+전용 Moby와 새 합성 이미지 1개에 대한 수동 시험이다. 시험 모드, 시험 식별자, 엔진·엔드포인트·세대, 스냅샷, 전체 이미지 ID 및 증거 지문을 현재 사전 증거와 대조하고, 그 증거에 대해 새 명시적 승인을 받은 뒤 실행한다. 이전의 HTTP 200 확인 후 영수증 유실 시험과 승인 범위를 구분한다.
+
+클라이언트는 단일 DELETE 송신 전에 읽기 방향을 `SHUT_RD`로 닫고 실제 응답 수신 바이트 0을 확인한다. 독립 읽기 연결에서 대상 전체 ID의 이미지가 1개에서 0개로 바뀌는지 관측한다. 복구는 등록부를 다시 열어 영수증 부재, `recovery_required`, 회수량 0 B, 복구 중 재삭제 0건과 경쟁 적용 차단을 확인한다. 이 시험의 승인 적용 실측은 대기 상태다. [전용 엔진 실행기](../scripts/check-dedicated-docker-apply.py) · [Rust 시험](../rust-scaffold/crates/dsg-core/src/docker_gc_apply/live_fixture.rs)
+
+### 정산 전 자식 프로세스 강제 종료 회귀
+
+별도 SQLite를 사용하는 캐시 제어 대역에서 자식이 적용 의도를 커밋하고 대역 삭제를 수행한 뒤 등록부 정산 전에 정지하도록 한다. 부모는 자신이 시작한 자식만 실제 `SIGKILL`로 종료하고 종료 신호를 확인한다. 새 SQLite 연결에서 새 lease를 획득하고 경쟁 적용을 차단하며, 제어 대역의 영속 영수증이 있으면 `applied`와 회수량 17 B를, 없으면 `recovery_required`와 0 B를 확인한다. 두 경우 모두 감사 이벤트와 대상 재호출 0건을 검사했다. macOS에서 두 분기가 통과했다. 실제 호스트 전원 장애는 별도 시험이다. [회귀 코드](../rust-scaffold/crates/dsg-core/src/docker_gc_apply/tests.rs)
+
 ### 현재 제품의 Linux ARM64 별도 BuildKit 네이티브 조회
 
 WBS 2.3은 실제 제품 CLI와 공식 v0.35.1 `buildkitd`·`buildctl`을 전용 소켓에서 비교한다. 독립 `buildctl du` 집계와 제품 JSON을 빈 캐시와 시험 캐시에서 대조한다. 자동 GC를 끈 임시 빌더에서 외부 입력 없이 `FROM scratch`와 `COPY`로 시험 캐시를 만들고 산출물을 검증한다. 조회는 `candidate_count=0`과 보존 판정을 유지해야 한다. 잘못된 PID, 클라이언트 해시, 소켓 링크는 종료 5와 미확인으로 거절하고, 대체 클라이언트의 실행 흔적이 없어야 한다. 부정 시험 후 독립 집계를 다시 비교하며 prune 요청은 0건이다. 종료 시 시험 데몬과 임시 작업 경로의 회수를 확인한다. [네이티브 시험 실행기](../scripts/check-buildkit-native.py)
 
+격리 단일 워커의 캐시 출처 검증은 기존 공식 전체 ID 목록을 저장하고, 독립 난수 페이로드의 직접 LLB 빌드와 OCI 레이어 해시를 확인한 뒤 전체 목록을 두 번 대조한다. 같은 워커·데몬 세대에서 변경되지 않은 기준 레코드와 새 캐시 ID 하나를 확인하고 공식 `du --filter id==<전체 ID>`로 그 레코드만 돌아오는지 확인한다. 표준 prune은 이미지 캐시 lease 취소, 워커 저장소 GC, 참조 없는 캐시 메타데이터 정리까지 도달할 수 있으므로 정확한 ID 조회가 통과해도 prune 0건과 후보 0개를 유지한다. [네이티브 시험 실행기](../scripts/check-buildkit-native.py) · [v0.35.1 제어기](https://github.com/moby/buildkit/blob/v0.35.1/control/control.go#L228-L266) · [v0.35.1 캐시 관리자](https://github.com/moby/buildkit/blob/v0.35.1/cache/manager.go#L1018-L1042)
+
+현재 Linux ARM64 제품의 Ubuntu 시험에서 기준 4개 불변과 새 레코드 1개를 독립 OCI 산출물과 대조했다. 공식 정확 ID 조회가 1개를 반환했고 회수 후보·prune 요청은 0개였다. [BuildKit 실측 집계](../dist/dsg-buildkit-native-69f9692b4210/QUALIFICATION.json)
+
 ### Linux ARM64 로컬 제어 서비스 프로브
 
 WBS 5.1의 로컬 읽기 확인은 보호된 root 소켓과 예상 프로세스의 프로토콜 선언을 검증한다. 등록한 서비스의 성공과 소켓 링크·권한·상대 PID·선언 불일치 거절을 확인하고, 성공과 실패 모두 `mutation_authorized=false`와 보존 게이트를 확인한다. 운영 제어기의 출처·권한·배타 변경 경계는 별도로 검증한다. [프로브 구현과 시험](../rust-scaffold/crates/dsg-core/src/docker_control_local.rs)
+
+보호된 배포 확인은 root 제어기·엔진과 서로 다른 비root 승인자·실행자의 피어를 분리하고 정책의 부팅 ID, 프로세스 세대, 실행 파일 해시와 소켓을 검증한다. 불일치 시 종료 5, 성공·실패 모두 변경 권한은 false이며 운영 게이트는 보존을 유지한다. [배포 확인 계약](API_SPEC.md#보호된-docker-제어기-배포-확인)
 
 ## 에이전트 연동 검증
 

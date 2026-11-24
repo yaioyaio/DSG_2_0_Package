@@ -13,6 +13,7 @@ use std::process::{Command, Stdio};
 const EVIDENCE: &str = "dist/dsg-dedicated-engine-cf83a703d2fd/PREAPPROVAL.json";
 const PROOF_DIGEST: &str = "ec0a07dcfd16b2e35fb7a98f4bdb133a243d7060927d125f9b965fc18ee29db8";
 const TRIAL: &str = "dsg-gc-cf83a703d2fd";
+const CONSUMED_RECEIPT_LOSS_TRIAL: &str = "dsg-gc-93292d9f465f";
 const ENGINE: &str = "3f0311f3-c456-43e5-a123-014f500108fd";
 const ENDPOINT: &str = "a89c4fafeca5767dd5ea0bae7b80cc29d3256b785bf3cd6400797e87636217a3";
 const GENERATION: &str = "91258d7a9be96b3a41320dc67c09329b0e81fa23d865cd059fffe37ad9296e50";
@@ -23,11 +24,14 @@ const ARTIFACT_LIMIT: u64 = 4096;
 const DISPATCH_FILE: &str = "DISPATCH.json";
 const RECEIPT_FILE: &str = "RECEIPT.json";
 const WITNESS_FILE: &str = "DELETE_RESPONSE_WITNESS.json";
+const RESPONSE_LOSS_WITNESS_FILE: &str = "DELETE_RESPONSE_LOSS_WITNESS.json";
+const DELETE_ATTEMPT_FILE: &str = "DELETE_ATTEMPT.json";
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum TrialMode {
     RetainReceipt,
     LoseReceipt,
+    LoseDeleteResponse,
 }
 
 #[derive(Deserialize)]
@@ -39,6 +43,7 @@ struct TrialIdentity {
     image_id: String,
     snapshot: String,
     author_fingerprint: String,
+    apply_trial: Option<String>,
 }
 
 struct Trial {
@@ -56,8 +61,16 @@ impl Trial {
             (TrialMode::RetainReceipt, true) => "apply",
             (TrialMode::LoseReceipt, false) => "observe-receipt-loss",
             (TrialMode::LoseReceipt, true) => "apply-receipt-loss",
+            (TrialMode::LoseDeleteResponse, false) => "observe-response-loss",
+            (TrialMode::LoseDeleteResponse, true) => "apply-response-loss",
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum DeleteResponseHandling {
+    ClientReadShutdown,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -74,11 +87,16 @@ struct GuestProof {
     effect: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     delete_http_status: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    delete_response_bytes_read: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    delete_response_handling: Option<DeleteResponseHandling>,
 }
 
 impl GuestProof {
     fn matches(&self, trial: &Trial, applied: bool) -> bool {
         let identity = &trial.identity;
+        let response_lost = trial.mode == TrialMode::LoseDeleteResponse && applied;
         self.verified
             && self.engine_id == identity.engine_id
             && self.generation == identity.generation
@@ -87,10 +105,13 @@ impl GuestProof {
             && self.author_fingerprint == identity.author_fingerprint
             && self.delete_http_status
                 == (trial.mode == TrialMode::LoseReceipt && applied).then_some(200)
+            && self.delete_response_bytes_read == response_lost.then_some(0)
+            && self.delete_response_handling
+                == response_lost.then_some(DeleteResponseHandling::ClientReadShutdown)
             && if applied {
                 self.delete_requests == 1
                     && self.after_images == Some(0)
-                    && self.effect.as_deref() == Some("applied")
+                    && self.effect.as_deref() == (!response_lost).then_some("applied")
             } else {
                 self.delete_requests == 0 && self.after_images.is_none() && self.effect.is_none()
             }
@@ -135,6 +156,22 @@ struct DeleteResponseWitness {
     delete_http_status: u16,
     delete_requests: u64,
     after_images: u64,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct DeleteResponseLossWitness {
+    delete_requests: u64,
+    delete_response_bytes_read: u64,
+    delete_response_handling: DeleteResponseHandling,
+    after_images: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DeleteAttempt {
+    intent_digest: String,
+    proof_digest: String,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -262,24 +299,41 @@ impl ControlledDockerGc for LiveFixture {
         let dispatch = Dispatch::new(intent, &self.trial.digest)?;
         write_new(&self.state, DISPATCH_FILE, &dispatch)?;
         let guest = self.guest(Some(intent))?;
-        if self.trial.mode == TrialMode::LoseReceipt {
-            write_new(
-                &self.state,
-                WITNESS_FILE,
-                &DeleteResponseWitness {
-                    delete_http_status: guest.delete_http_status?,
-                    delete_requests: guest.delete_requests,
-                    after_images: guest.after_images?,
-                },
-            )?;
-            resume_unwind(Box::new(InterruptedBeforeReceipt));
+        match self.trial.mode {
+            TrialMode::LoseReceipt => {
+                write_new(
+                    &self.state,
+                    WITNESS_FILE,
+                    &DeleteResponseWitness {
+                        delete_http_status: guest.delete_http_status?,
+                        delete_requests: guest.delete_requests,
+                        after_images: guest.after_images?,
+                    },
+                )?;
+                resume_unwind(Box::new(InterruptedBeforeReceipt));
+            }
+            TrialMode::LoseDeleteResponse => {
+                write_new(
+                    &self.state,
+                    RESPONSE_LOSS_WITNESS_FILE,
+                    &DeleteResponseLossWitness {
+                        delete_requests: guest.delete_requests,
+                        delete_response_bytes_read: guest.delete_response_bytes_read?,
+                        delete_response_handling: guest.delete_response_handling?,
+                        after_images: guest.after_images?,
+                    },
+                )?;
+                resume_unwind(Box::new(InterruptedBeforeReceipt));
+            }
+            TrialMode::RetainReceipt => {
+                write_new(
+                    &self.state,
+                    RECEIPT_FILE,
+                    &DurableReceipt { dispatch, guest },
+                )?;
+                resume_unwind(Box::new(InterruptedAfterReceipt))
+            }
         }
-        write_new(
-            &self.state,
-            RECEIPT_FILE,
-            &DurableReceipt { dispatch, guest },
-        )?;
-        resume_unwind(Box::new(InterruptedAfterReceipt))
     }
 
     fn receipt(&mut self, intent: &Intent) -> Option<Receipt> {
@@ -288,7 +342,8 @@ impl ControlledDockerGc for LiveFixture {
             serde_json::from_slice(&read_regular(&self.state.join(DISPATCH_FILE))?).ok()?;
         let receipt: DurableReceipt =
             serde_json::from_slice(&read_regular(&self.state.join(RECEIPT_FILE))?).ok()?;
-        (self.binding == intent.binding
+        (self.trial.mode != TrialMode::LoseDeleteResponse
+            && self.binding == intent.binding
             && dispatch.matches(intent, &self.trial.digest)
             && receipt.dispatch.matches(intent, &self.trial.digest)
             && receipt.guest.matches(&self.trial, true))
@@ -395,7 +450,7 @@ fn protected_directory(path: &Path, uid: u32, private: bool) -> Option<()> {
     .then_some(())
 }
 
-fn checked_receipt_loss_trial(repo: &Path) -> Option<Trial> {
+fn checked_approved_trial(repo: &Path, mode: TrialMode) -> Option<Trial> {
     let source = repo.join(PathBuf::from(env::var_os("DSG_DEDICATED_GC_EVIDENCE")?));
     let dist = repo.join("dist");
     let directory = source.parent()?;
@@ -432,7 +487,16 @@ fn checked_receipt_loss_trial(repo: &Path) -> Option<Trial> {
     let engine = env::var("DSG_DEDICATED_GC_APPROVED_ENGINE").ok()?;
     let generation = env::var("DSG_DEDICATED_GC_APPROVED_GENERATION").ok()?;
     let image = env::var("DSG_DEDICATED_GC_APPROVED_IMAGE").ok()?;
+    let approved_mode = match mode {
+        TrialMode::LoseReceipt => identity.apply_trial.is_none(),
+        TrialMode::LoseDeleteResponse => {
+            identity.apply_trial.as_deref() == Some("response-loss")
+                && identity.trial != CONSUMED_RECEIPT_LOSS_TRIAL
+        }
+        TrialMode::RetainReceipt => false,
+    };
     if identity.trial != format!("dsg-gc-{suffix}")
+        || !approved_mode
         || identity.engine_id != engine
         || identity.generation != generation
         || identity.image_id != image
@@ -453,7 +517,7 @@ fn checked_receipt_loss_trial(repo: &Path) -> Option<Trial> {
         "approval": { "proof_sha256": digest, "engine_id": engine, "generation": generation, "image_id": image },
     });
     Some(Trial {
-        mode: TrialMode::LoseReceipt,
+        mode,
         source,
         identity,
         digest,
@@ -642,9 +706,18 @@ fn assert_receipt_missing(backend: &LiveFixture) {
 #[test]
 #[ignore = "requires new explicit approval of the exact dedicated Docker receipt-loss trial"]
 fn controlled_docker_live_receipt_loss() {
+    run_missing_receipt_trial(TrialMode::LoseReceipt);
+}
+
+#[test]
+#[ignore = "requires new explicit approval of the exact dedicated Docker DELETE response-loss trial"]
+fn controlled_docker_live_response_loss() {
+    run_missing_receipt_trial(TrialMode::LoseDeleteResponse);
+}
+
+fn run_missing_receipt_trial(mode: TrialMode) {
     let repo = repository();
-    let trial =
-        checked_receipt_loss_trial(&repo).expect("exact approved receipt-loss trial required");
+    let trial = checked_approved_trial(&repo, mode).expect("exact approved trial required");
     let policy = trial.digest.clone();
     let image = trial.identity.image_id.clone();
     let (mut registry, mut backend) = open_fixture(&repo, trial);
@@ -679,13 +752,54 @@ fn controlled_docker_live_receipt_loss() {
         "expected interruption after verified deletion and before durable receipt"
     );
     assert_receipt_missing(&backend);
-    let witness: DeleteResponseWitness = serde_json::from_slice(
-        &read_regular(&backend.state.join(WITNESS_FILE)).expect("read synced deletion witness"),
-    )
-    .expect("parse deletion witness");
-    assert_eq!(witness.delete_http_status, 200);
-    assert_eq!(witness.delete_requests, 1);
-    assert_eq!(witness.after_images, 0);
+    let (result_label, witness) = match mode {
+        TrialMode::LoseReceipt => {
+            let witness: DeleteResponseWitness = serde_json::from_slice(
+                &read_regular(&backend.state.join(WITNESS_FILE))
+                    .expect("read synced deletion witness"),
+            )
+            .expect("parse deletion witness");
+            assert_eq!(witness.delete_http_status, 200);
+            assert_eq!(witness.delete_requests, 1);
+            assert_eq!(witness.after_images, 0);
+            (
+                "DSG_LIVE_GC_RECEIPT_LOSS_RESULT",
+                serde_json::to_value(witness),
+            )
+        }
+        TrialMode::LoseDeleteResponse => {
+            let witness: DeleteResponseLossWitness = serde_json::from_slice(
+                &read_regular(&backend.state.join(RESPONSE_LOSS_WITNESS_FILE))
+                    .expect("read synced response-loss witness"),
+            )
+            .expect("parse response-loss witness");
+            assert_eq!(witness.delete_requests, 1);
+            assert_eq!(witness.delete_response_bytes_read, 0);
+            assert_eq!(
+                witness.delete_response_handling,
+                DeleteResponseHandling::ClientReadShutdown
+            );
+            assert_eq!(witness.after_images, 0);
+            let dispatch: Dispatch = serde_json::from_slice(
+                &read_regular(&backend.state.join(DISPATCH_FILE)).expect("read synced dispatch"),
+            )
+            .expect("parse dispatch");
+            let attempt: DeleteAttempt = serde_json::from_slice(
+                &read_regular(&backend.state.join(DELETE_ATTEMPT_FILE))
+                    .expect("read synced one-use DELETE attempt"),
+            )
+            .expect("parse DELETE attempt");
+            assert_eq!(attempt.intent_digest, dispatch.intent_digest);
+            assert_eq!(attempt.proof_digest, dispatch.proof_digest);
+            assert_eq!(attempt.proof_digest, policy);
+            (
+                "DSG_LIVE_GC_RESPONSE_LOSS_RESULT",
+                serde_json::to_value(witness),
+            )
+        }
+        TrialMode::RetainReceipt => unreachable!(),
+    };
+    let witness = witness.expect("encode bounded deletion witness");
     let before_recovery = backend.calls;
     assert_eq!(before_recovery.mutations, 1);
     assert_eq!(before_recovery.guest_mutations, 1);
@@ -767,25 +881,24 @@ fn controlled_docker_live_receipt_loss() {
     registry
         .finish_lease(lease, AuditOutcome::Success, "FIXTURE_LEASE_CLOSED")
         .expect("close isolated trial lease");
-    println!(
-        "DSG_LIVE_GC_RECEIPT_LOSS_RESULT {}",
-        json!({
-            "status": status,
-            "reclaimed_bytes": bytes,
-            "delete_http_status": witness.delete_http_status,
-            "delete_requests": witness.delete_requests,
-            "after_images": witness.after_images,
-            "receipt_present": false,
-            "intent_events": events.iter().filter(|event| *event == "GC_APPLY_INTENT").count(),
-            "recovery_required_events": events.iter().filter(|event| *event == "GC_RECOVERY_REQUIRED").count(),
-            "mutation_calls": backend.calls.mutations,
-            "guest_mutation_calls": backend.calls.guest_mutations,
-            "guest_observation_calls": backend.calls.guest_observations,
-            "recovery_receipt_reads": after_recovery.receipt_reads - before_recovery.receipt_reads,
-            "recovery_observation_calls": after_recovery.observations - before_recovery.observations,
-            "recovery_mutation_calls": after_recovery.mutations - before_recovery.mutations,
-            "approval_reuse_rejected": true,
-            "competing_approval_claim_rejected": true,
-        })
-    );
+    let mut result = json!({
+        "status": status,
+        "reclaimed_bytes": bytes,
+        "receipt_present": false,
+        "intent_events": events.iter().filter(|event| *event == "GC_APPLY_INTENT").count(),
+        "recovery_required_events": events.iter().filter(|event| *event == "GC_RECOVERY_REQUIRED").count(),
+        "mutation_calls": backend.calls.mutations,
+        "guest_mutation_calls": backend.calls.guest_mutations,
+        "guest_observation_calls": backend.calls.guest_observations,
+        "recovery_receipt_reads": after_recovery.receipt_reads - before_recovery.receipt_reads,
+        "recovery_observation_calls": after_recovery.observations - before_recovery.observations,
+        "recovery_mutation_calls": after_recovery.mutations - before_recovery.mutations,
+        "approval_reuse_rejected": true,
+        "competing_approval_claim_rejected": true,
+    });
+    result
+        .as_object_mut()
+        .expect("encode recovery result")
+        .extend(witness.as_object().expect("encode witness fields").clone());
+    println!("{result_label} {result}");
 }

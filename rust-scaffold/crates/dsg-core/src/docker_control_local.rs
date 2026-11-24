@@ -13,6 +13,9 @@ use std::os::unix::net::UnixStream;
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant};
 
+mod admission;
+pub use admission::{verify_admission, AdmissionEvidence};
+
 const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_SOCKET_PATH_BYTES: usize = 4095;
 const MAX_REPLY_BYTES: usize = 512;
@@ -47,7 +50,7 @@ pub fn probe(path: &Path, expected_pid: u32) -> Result<ControllerEvidence> {
     // Keep the selected process instance pinned across the probe, including PID reuse.
     let process = owned_file(unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) as RawFd })?;
     let mut connection = connect(&socket)?;
-    check_peer(&connection, pid)?;
+    check_peer(&connection, pid, 0)?;
     let start = process_start(pid)?;
     let boot = fs::read_to_string("/proc/sys/kernel/random/boot_id").map_err(io_failure)?;
     check_alive(&process)?;
@@ -97,6 +100,10 @@ fn open_at(parent: RawFd, name: &OsStr, flags: i32) -> Result<File> {
 }
 
 fn open_socket(path: &Path) -> Result<File> {
+    open_protected(path, true)
+}
+
+fn open_protected(path: &Path, private_parent: bool) -> Result<File> {
     if !path.is_absolute()
         || path.as_os_str().as_bytes().len() > MAX_SOCKET_PATH_BYTES
         || path.as_os_str() != path.components().collect::<PathBuf>().as_os_str()
@@ -113,7 +120,7 @@ fn open_socket(path: &Path) -> Result<File> {
             return Err(QueryFailure::InvalidSelector);
         }
         if components.peek().is_none() {
-            if info.mode() & 0o7777 != 0o700 {
+            if private_parent && info.mode() & 0o7777 != 0o700 {
                 return Err(QueryFailure::InvalidSelector);
             }
             return open_at(parent.as_raw_fd(), name, 0);
@@ -164,7 +171,7 @@ fn connect(socket: &File) -> Result<UnixStream> {
     Ok(stream)
 }
 
-fn check_peer(stream: &UnixStream, pid: i32) -> Result<()> {
+fn check_peer(stream: &UnixStream, pid: i32, uid: u32) -> Result<()> {
     let mut peer = libc::ucred {
         pid: 0,
         uid: 0,
@@ -184,7 +191,7 @@ fn check_peer(stream: &UnixStream, pid: i32) -> Result<()> {
     {
         return Err(io_failure(io::Error::last_os_error()));
     }
-    if size as usize != std::mem::size_of_val(&peer) || peer.pid != pid || peer.uid != 0 {
+    if size as usize != std::mem::size_of_val(&peer) || peer.pid != pid || peer.uid != uid {
         return Err(QueryFailure::InvalidSelector);
     }
     Ok(())
@@ -324,11 +331,14 @@ mod tests {
     fn unix_stream_peer_must_have_the_expected_pid_and_root_uid() {
         let (stream, _peer) = UnixStream::pair().unwrap();
         let pid = i32::try_from(std::process::id()).unwrap();
-        assert_eq!(check_peer(&stream, 0), Err(QueryFailure::InvalidSelector));
+        assert_eq!(
+            check_peer(&stream, 0, 0),
+            Err(QueryFailure::InvalidSelector)
+        );
         // A socket pair records this process as the peer when it is created.
         let root = unsafe { libc::geteuid() } == 0;
         assert_eq!(
-            check_peer(&stream, pid),
+            check_peer(&stream, pid, 0),
             if root {
                 Ok(())
             } else {

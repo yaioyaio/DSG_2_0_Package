@@ -1,23 +1,33 @@
 """Compare native Linux ARM64 BuildKit observations inside a disposable guest scope."""
 
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import signal
+import socket
 import stat
+import struct
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 from contextlib import contextmanager
 
 
 BUILDCTL_SHA256 = "cb57dfdc462d2d2ea1ca2f6b81b801520582ba536513228eb0e5213244626814"
+BUILDKITD_SHA256 = "b26e07e38e071c29896830376bcf6c939781f4dcf3d90eff10208b5ed4436566"
 MAX_BINARY_BYTES = 128 * 1024 * 1024
 MAX_OUTPUT_BYTES = 64 * 1024
 SYSTEM_PATH = "/usr/sbin:/usr/bin:/sbin:/bin"
+CACHE_ID = re.compile(r"[a-z0-9]{25}")
+OCI_MANIFEST = "application/vnd.oci.image.manifest.v1+json"
+OCI_LAYER = "application/vnd.oci.image.layer.v1.tar"
+OWNED_FILE = "dsg-owned-payload"
 
 
 class CheckFailed(RuntimeError):
@@ -59,15 +69,18 @@ def preflight(arguments):
                            for line in mountinfo if line.split()[4] == "/"), None)
     require(root_mount == [], "mount_isolation")
 
-    with client.open("rb") as binary:
-        require(hashlib.file_digest(binary, "sha256").hexdigest() == BUILDCTL_SHA256, "official_client_hash")
+    for path, expected, step in ((daemon, BUILDKITD_SHA256, "official_daemon_hash"),
+                                 (client, BUILDCTL_SHA256, "official_client_hash")):
+        with path.open("rb") as binary:
+            require(hashlib.file_digest(binary, "sha256").hexdigest() == expected, step)
     return workdir, dsg, daemon, client
 
 
 @contextmanager
-def process(argv, directory, environment, output, *, error_output=subprocess.DEVNULL):
+def process(argv, directory, environment, output, *, stdin=subprocess.DEVNULL,
+            error_output=subprocess.DEVNULL):
     child = subprocess.Popen(argv, cwd=directory, env=environment, start_new_session=True,
-                             stdin=subprocess.DEVNULL, stdout=output, stderr=error_output)
+                             stdin=stdin, stdout=output, stderr=error_output)
     try:
         yield child
     finally:
@@ -86,9 +99,10 @@ def process(argv, directory, environment, output, *, error_output=subprocess.DEV
                 child.stdout.close()
 
 
-def command(directory, environment, step, argv, *, timeout=8, exit_code=0, capture=True):
+def command(directory, environment, step, argv, *, timeout=8, exit_code=0, capture=True,
+            stdin=subprocess.DEVNULL):
     output = subprocess.PIPE if capture else subprocess.DEVNULL
-    with process(argv, directory, environment, output) as child:
+    with process(argv, directory, environment, output, stdin=stdin) as child:
         try:
             stdout, _ = child.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
@@ -106,22 +120,41 @@ def document(raw, step):
         raise CheckFailed(step + "_json") from None
 
 
-def official_usage(raw):
+def official_inventory(raw):
     records = document(raw, "official_du")
     if records is None:  # The Go template serializes an empty nil slice as null.
-        records = []
+        return {}
     require(isinstance(records, list), "official_du_shape")
-    counts = dict(total=len(records), reclaimable=0, shared=0, mutable=0, candidate_count=0)
-    reasons = dict(active=0, shared=0, mutable=0, unknown_ownership=0)
-    ids = set()
+    inventory = {}
     for record in records:
         require(isinstance(record, dict), "official_du_record")
         identifier = record.get("id")
-        flags = [record.get(key) for key in ("inUse", "shared", "mutable")]
-        require(isinstance(identifier, str) and identifier and identifier not in ids
-                and all(type(flag) is bool for flag in flags), "official_du_fields")
-        ids.add(identifier)
-        in_use, shared, mutable = flags
+        require(isinstance(identifier, str) and CACHE_ID.fullmatch(identifier)
+                and identifier not in inventory, "official_du_id")
+        require(all(type(record.get(key)) is bool for key in ("inUse", "shared", "mutable"))
+                and isinstance(record.get("recordType"), str) and record["recordType"]
+                and type(record.get("size")) is int and record["size"] >= 0
+                and type(record.get("usageCount")) is int and record["usageCount"] >= 0
+                and isinstance(record.get("createdAt"), str) and "lastUsedAt" in record
+                and (record["lastUsedAt"] is None or isinstance(record["lastUsedAt"], str)),
+                "official_du_fields")
+        require("parents" in record, "official_du_parents")
+        parents = [] if record["parents"] is None else record["parents"]
+        require(isinstance(parents, list)
+                and all(isinstance(parent, str) and CACHE_ID.fullmatch(parent) for parent in parents),
+                "official_du_parents")
+        inventory[identifier] = {key: record[key] for key in (
+            "inUse", "shared", "mutable", "recordType", "size", "usageCount", "createdAt", "lastUsedAt"
+        )}
+        inventory[identifier]["parents"] = sorted(parents)
+    return inventory
+
+
+def official_counts(inventory):
+    counts = dict(total=len(inventory), reclaimable=0, shared=0, mutable=0, candidate_count=0)
+    reasons = dict(active=0, shared=0, mutable=0, unknown_ownership=0)
+    for record in inventory.values():
+        in_use, shared, mutable = flags = [record[key] for key in ("inUse", "shared", "mutable")]
         counts["reclaimable"] += int(not in_use)
         counts["shared"] += int(shared)
         counts["mutable"] += int(mutable)
@@ -130,6 +163,131 @@ def official_usage(raw):
         reasons[reason] += 1
     counts["preserved_by_reason"] = reasons
     return counts
+
+
+def socket_generation(path, pid):
+    directory = path.parent.stat()
+    node = path.lstat()
+    require(directory.st_uid == 0 and stat.S_IMODE(directory.st_mode) == 0o700
+            and stat.S_ISSOCK(node.st_mode) and node.st_uid == 0, "fixture_socket_identity")
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as peer:
+        peer.settimeout(2)
+        peer.connect(str(path))
+        peer_pid, peer_uid, _ = struct.unpack("3i", peer.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+    remaining_fields = Path(f"/proc/{pid}/stat").read_text(encoding="ascii").rsplit(")", 1)[1].split()
+    require(peer_pid == pid and peer_uid == 0 and len(remaining_fields) >= 20
+            and remaining_fields[19].isdecimal(), "fixture_peer_identity")
+    current = path.lstat()
+    require((node.st_dev, node.st_ino) == (current.st_dev, current.st_ino), "fixture_socket_changed")
+    return {"pid": pid, "start_ticks": int(remaining_fields[19]), "socket_device": node.st_dev,
+            "socket_inode": node.st_ino}
+
+
+def varint(value):
+    encoded = bytearray()
+    value &= (1 << 64) - 1
+    while value >= 128:
+        encoded.append((value & 127) | 128)
+        value >>= 7
+    encoded.append(value)
+    return bytes(encoded)
+
+
+def protobuf_bytes(field, data):
+    return varint((field << 3) | 2) + varint(len(data)) + data
+
+
+def protobuf_integer(field, value):
+    return varint(field << 3) + varint(value)
+
+
+def scratch_definition(payload):
+    # v0.35.1 solver/pb/ops.proto: one FileActionMkFile without primary or secondary inputs.
+    mkfile = (protobuf_bytes(1, ("/" + OWNED_FILE).encode("ascii"))
+              + protobuf_integer(2, 0o644) + protobuf_bytes(3, payload))
+    action = protobuf_integer(1, -1) + protobuf_integer(2, -1) + protobuf_bytes(5, mkfile)
+    operation = protobuf_bytes(4, protobuf_bytes(2, action))
+    # client/llb/state.go: the last Op selects output index zero of the FileOp by digest.
+    digest = ("sha256:" + hashlib.sha256(operation).hexdigest()).encode("ascii")
+    output = protobuf_bytes(1, protobuf_bytes(1, digest))
+    return protobuf_bytes(1, operation) + protobuf_bytes(1, output)
+
+
+def archive_bytes(archive, name):
+    members = [member for member in archive.getmembers() if member.name.removeprefix("./") == name]
+    require(len(members) == 1 and members[0].isfile() and members[0].size <= MAX_OUTPUT_BYTES,
+            "owned_archive_member")
+    with archive.extractfile(members[0]) as file:
+        return file.read(MAX_OUTPUT_BYTES + 1)
+
+
+def oci_blob(archive, descriptors, media_type):
+    require(isinstance(descriptors, list) and len(descriptors) == 1 and isinstance(descriptors[0], dict),
+            "owned_oci_descriptor")
+    descriptor = descriptors[0]
+    digest = descriptor.get("digest")
+    size = descriptor.get("size")
+    require(descriptor.get("mediaType") == media_type and isinstance(digest, str)
+            and re.fullmatch(r"sha256:[a-f0-9]{64}", digest) and type(size) is int
+            and 0 < size <= MAX_OUTPUT_BYTES, "owned_oci_blob")
+    data = archive_bytes(archive, "blobs/sha256/" + digest[7:])
+    require(len(data) == size and hashlib.sha256(data).hexdigest() == digest[7:], "owned_oci_integrity")
+    return data
+
+
+def object_document(raw, step):
+    data = document(raw, step)
+    require(isinstance(data, dict), step + "_shape")
+    return data
+
+
+def verify_owned_export(path, payload):
+    info = path.lstat()
+    require(stat.S_ISREG(info.st_mode) and 0 < info.st_size <= MAX_OUTPUT_BYTES, "owned_archive_size")
+    try:
+        with tarfile.open(path, mode="r:") as archive:
+            index = object_document(archive_bytes(archive, "index.json"), "owned_oci_index")
+            manifest = object_document(oci_blob(archive, index.get("manifests"), OCI_MANIFEST),
+                                       "owned_oci_manifest")
+            layer = oci_blob(archive, manifest.get("layers"), OCI_LAYER)
+        with tarfile.open(fileobj=io.BytesIO(layer), mode="r:") as archive:
+            require(archive_bytes(archive, OWNED_FILE) == payload, "owned_oci_payload")
+    except (tarfile.TarError, EOFError):
+        raise CheckFailed("owned_archive_invalid") from None
+    return hashlib.sha256(layer).hexdigest()
+
+
+def single_worker(raw):
+    workers = document(raw, "official_workers")
+    require(isinstance(workers, list) and len(workers) == 1 and isinstance(workers[0], dict),
+            "fixture_one_worker")
+    identifier = workers[0].get("id")
+    require(isinstance(identifier, str) and CACHE_ID.fullmatch(identifier), "fixture_worker_id")
+    require("gcPolicy" in workers[0] and workers[0]["gcPolicy"] in (None, []), "fixture_worker_gc_enabled")
+    return identifier
+
+
+def owned_record_rejection(baseline, current):
+    if any(current.get(identifier) != record for identifier, record in baseline.items()):
+        return "baseline_changed"
+    added = current.keys() - baseline.keys()
+    if len(added) != 1:
+        return "producer_did_not_add_exactly_one_visible_id"
+    identifier = next(iter(added))
+    record = current[identifier]
+    if record["inUse"]:
+        return "record_in_use"
+    if record["shared"]:
+        return "record_shared"
+    if record["mutable"]:
+        return "record_mutable"
+    if record["recordType"] != "regular":
+        return "record_not_regular"
+    if record["parents"] or any(identifier in item["parents"] for item in current.values()):
+        return "record_has_dependency"
+    if record["size"] == 0:
+        return "record_size_unproven"
+    return None
 
 
 def product_result(raw):
@@ -195,9 +353,14 @@ def observe(arguments, evidence):
             evidence["daemon_started"] = True
             await_socket(daemon, path, diagnostics, evidence)
 
-            def official(step):
-                return official_usage(command(directory, environment, step,
-                                              (*ctl, "du", "--format", "{{json .}}"), timeout=17))
+            def official(step, *options):
+                return official_inventory(command(directory, environment, step,
+                                                  (*ctl, "du", "--format", "{{json .}}", *options),
+                                                  timeout=17))
+
+            def worker(step):
+                return single_worker(command(directory, environment, step,
+                                             (*ctl, "debug", "workers", "--format", "{{json .}}"), timeout=17))
 
             def product(step, *, socket=path, pid=daemon.pid, client=buildctl, exit_code=0):
                 argv = (dsg, "--json", "buildkit-local-cache", "--socket", socket,
@@ -210,7 +373,9 @@ def observe(arguments, evidence):
                                           "disposition": "preserve", "reason": "unknown_ownership"},
                         step + "_mismatch")
 
-            before = official("official_before")
+            generation = socket_generation(path, daemon.pid)
+            worker_id = worker("official_worker_before")
+            before = official_counts(official("official_before"))
             require(before["total"] == 0, "initial_cache_not_empty")
             compare("product_before", before)
             evidence["before"] = before
@@ -224,10 +389,10 @@ def observe(arguments, evidence):
             exported = output / "payload"
             require(exported.stat().st_size == len(payload) and exported.read_bytes() == payload, "fixture_output")
             evidence["build_completed"] = True
-            after = official("official_after")
+            after = official_counts(official("official_after"))
             require(after["total"] > 0, "cache_still_empty")
             compare("product_after", after)
-            require(official("official_recheck") == after, "cache_changed_during_observation")
+            require(official_counts(official("official_recheck")) == after, "cache_changed_during_observation")
             evidence["after"] = after
 
             wrong_client_dir = directory / "wrong-client"
@@ -246,7 +411,49 @@ def observe(arguments, evidence):
                 require(product(step, exit_code=5, **overrides) == rejected, step + "_mismatch")
                 evidence["rejected"].append(step)
             require(not marker.exists(), "wrong_client_executed")
-            require(official("official_final") == after, "cache_changed_after_rejections")
+            baseline = official("official_final")
+            require(official_counts(baseline) == after, "cache_changed_after_rejections")
+
+            owned = evidence["owned_fixture"]
+            owned.update({"scope": "disposable_single_worker", "worker_id": worker_id,
+                          "daemon_generation": generation, "before_ids": sorted(baseline)})
+            payload = b"DSG synthetic project cache " + os.urandom(16).hex().encode("ascii") + b"\n"
+            definition = scratch_definition(payload)
+            llb = directory / "owned.llb"
+            llb.write_bytes(definition)
+            image = directory / "owned.oci.tar"
+            owned["producer_attempted"] = True
+            with llb.open("rb") as definition_file:
+                command(directory, environment, "owned_producer",
+                        (*ctl, "build", "--output", f"type=oci,dest={image},compression=uncompressed",
+                         "--progress", "plain"), timeout=25, capture=False, stdin=definition_file)
+            owned["layer_sha256"] = verify_owned_export(image, payload)
+            owned["definition_sha256"] = hashlib.sha256(definition).hexdigest()
+            owned["producer_completed"] = True
+
+            current = official("official_owned_after")
+            compare("product_owned_after", official_counts(current))
+            stable = current == official("official_owned_recheck")
+            require(worker("official_worker_after") == worker_id and socket_generation(path, daemon.pid) == generation,
+                    "fixture_daemon_generation_changed")
+            owned["after_ids"] = sorted(current)
+            owned["full_inventory_stable"] = stable
+            reason = owned_record_rejection(baseline, current) if stable else "inventory_changed_during_observation"
+            if reason is None:
+                identifier = next(iter(current.keys() - baseline.keys()))
+                # ParseAll in v0.35.1 ORs separate filter strings. One exact ID is the entire filter.
+                selector = f"id=={identifier}"
+                filtered = official("official_owned_exact_id", "--filter", selector)
+                final = official("official_owned_final")
+                require(socket_generation(path, daemon.pid) == generation, "fixture_daemon_generation_changed")
+                if filtered != {identifier: current[identifier]} or final != current:
+                    reason = "exact_id_readback_mismatch"
+                else:
+                    owned.update({"ownership_proof": "verified", "exact_id_selector": selector,
+                                  "record": {"id": identifier, **current[identifier]}})
+                    # control.Prune cancels image cache leases and runs unfiltered solver metadata cleanup.
+                    reason = "stock_prune_global_cache_effects"
+            owned["reason"] = reason
         evidence["daemon_stopped"] = daemon.returncode is not None
     evidence["fixture_removed"] = not directory.exists()
 
@@ -261,9 +468,12 @@ def main():
     signal.signal(signal.SIGALRM, interrupt)
     os.umask(0o077)
     evidence = {"status": "failed", "daemon_started": False, "build_attempted": False,
-                "build_completed": False, "rejected": []}
+                "build_completed": False, "rejected": [], "prune_requests": 0,
+                "owned_fixture": {"producer_attempted": False, "producer_completed": False,
+                                  "ownership_proof": "unverified", "disposition": "preserve",
+                                  "reason": "fixture_incomplete"}}
     try:
-        signal.alarm(95)
+        signal.alarm(120)
         observe(sys.argv[1:], evidence)
         evidence["status"] = "passed"
     except CheckFailed as error:

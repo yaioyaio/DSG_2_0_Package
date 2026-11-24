@@ -82,6 +82,13 @@ enum Command {
         #[arg(long)]
         expected_pid: u32,
     },
+    /// Linux ARM64의 보호된 제어기·엔진과 승인·실행 계정을 읽기 전용으로 확인합니다.
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    DockerControllerAdmission {
+        /// root 소유 0444 docker-controller-admission.json의 절대 경로
+        #[arg(long)]
+        policy: PathBuf,
+    },
     /// 소유권을 확인한 생성 폴더를 정리 대상으로 등록합니다.
     GcOwn {
         #[arg(long)]
@@ -331,6 +338,28 @@ fn run(cli: &Cli) -> Result<Output, CliError> {
             exit,
         });
     }
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    if let Command::DockerControllerAdmission { policy } = &cli.command {
+        let apply_gate = dsg_core::docker_gc_apply::DockerGcService::external().apply_gate();
+        let (data, text, exit) = match dsg_core::docker_control_local::verify_admission(policy) {
+            Ok(evidence) => (
+                json!({"status":"verified", "controller":evidence.controller, "engine":evidence.engine, "role_separation":"verified", "engine_boundary":"protected_unix_socket", "mutation_authorized":false, "apply_gate":apply_gate}),
+                "제어기 연결과 보호된 엔진 소켓, 승인·실행 계정 분리 확인".to_owned(),
+                0,
+            ),
+            Err(failure) => (
+                json!({"status":"unknown", "mutation_authorized":false, "apply_gate":apply_gate, "failure":failure}),
+                "Docker 제어기 운영 경계 미확인 · 보존".to_owned(),
+                5,
+            ),
+        };
+        return Ok(Output {
+            command: "docker-controller-admission",
+            data,
+            text,
+            exit,
+        });
+    }
     if let Command::DockerContexts { max_contexts } = &cli.command {
         let inventory = discover_contexts(*max_contexts);
         let (text, exit) = match &inventory.contexts {
@@ -443,9 +472,9 @@ fn run(cli: &Cli) -> Result<Output, CliError> {
             ))
         }
         #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
-        Command::BuildkitLocalCache { .. } | Command::DockerControllerProbe { .. } => {
-            unreachable!()
-        }
+        Command::BuildkitLocalCache { .. }
+        | Command::DockerControllerProbe { .. }
+        | Command::DockerControllerAdmission { .. } => unreachable!(),
         Command::Hook { .. }
         | Command::Agents { .. }
         | Command::Mcp
