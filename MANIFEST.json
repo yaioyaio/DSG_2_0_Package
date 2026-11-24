@@ -15,7 +15,8 @@
     "build_providers": "Cargo, Node, pnpm, Gradle, uv, Go and Playwright ran on macOS. Playwright retained success and failure traces, opt-in TTL reclaimed one expired success and preserved expected failure.",
     "documentation_traceability": "WBS 14 rows, DSG 8 stages and 13 unchanged requirements reconciled. macOS Python 14 and Rust 98 tests passed, including isolated Docker reads and WebKit dashboard comparison; four preserved release candidates matched their inventories.",
     "windows_foundation": "Windows ARM64 MSVC cross-link and nine native NTFS filesystem tests passed on the existing Parallels guest. macOS Python 14 and Rust 98 plus registered integration passed.",
-    "buildx_cache": "macOS Rust 102 and live isolated Buildx integration passed. Engine default Buildx totals 208 records, 208 reclaimable, 8 shared, 167 mutable; all preserved. Separate builder qualification remains open."
+    "buildx_cache": "macOS Rust 102 and live isolated Buildx integration passed. Engine default Buildx totals 208 records, 208 reclaimable, 8 shared, 167 mutable; all preserved. Separate builder qualification remains open.",
+    "next_and_compose_health": "macOS Rust 102 and integration passed with the real Next.js 16.4.6 pnpm build, loopback runtime and leases, plus real same-container Compose health rejection and bounded cleanup."
   },
   "files": [
     {
@@ -125,13 +126,13 @@
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "213c61d4139c6a21023729b3c99161645ede5b217ab9f592db3accdf1b803970",
-      "bytes": 12150
+      "sha256": "b1f2e8364fc3692231a8b8684134cd07d650b1dc5efe1b146a0daeb04611b6ac",
+      "bytes": 12052
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "765ab0472c69f2d0cadb1418a3724ee76b9ed1141ee3ca55a44d27f947783eee",
-      "bytes": 12012
+      "sha256": "b62ee443eabe76a9007b651a136941c6e4ce88d6b6f7f5f564cd01c921d002b8",
+      "bytes": 13090
     },
     {
       "path": "docs/WBS.md",
@@ -405,8 +406,8 @@
     },
     {
       "path": "scripts/check-build-providers.py",
-      "sha256": "5aa5ac5ff79afca0075e899c7a4981ec23c586e90c59c12e0a9fc0354395c498",
-      "bytes": 7684
+      "sha256": "04a3605255044f0483ec6b9e640dfdd5ec30e2804e7851fb37acc8dfa8ff4057",
+      "bytes": 15209
     },
     {
       "path": "scripts/check-cleanup.py",
@@ -445,8 +446,8 @@
     },
     {
       "path": "scripts/check-managed-execution.py",
-      "sha256": "b5a6221264757b5ff635f58340eee92712b2e083718fa33fe13d108dc5e486b1",
-      "bytes": 11754
+      "sha256": "ac6015d303b8cf5c8be021c807407612ea42507404adf35df1a34f09477473ad",
+      "bytes": 13190
     },
     {
       "path": "scripts/check-release-package.py",
