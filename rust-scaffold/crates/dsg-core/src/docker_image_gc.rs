@@ -2,6 +2,7 @@ use crate::docker::{
     engine_id, image_id, inventory, query_engine, valid_context_name, ContainerState,
     DockerOperation, DockerRead, MountKind,
 };
+use crate::docker_gc_apply::{DockerApplyGate, DockerGcService};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -40,6 +41,8 @@ pub struct ImageGcPlan {
     pub disposition: ImageGcDisposition,
     pub reason: ImageGcReason,
     pub fingerprint: Option<String>,
+    #[serde(default)]
+    pub apply_gate: DockerApplyGate,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -95,6 +98,7 @@ pub fn plan_image(
         disposition: ImageGcDisposition::Preserve,
         reason: InvalidSelector,
         fingerprint: None,
+        apply_gate: DockerGcService::external().apply_gate(),
     };
     if plan.context.is_empty()
         || plan.image_id.is_empty()

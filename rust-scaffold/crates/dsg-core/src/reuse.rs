@@ -27,8 +27,17 @@ pub fn verify_reuse(
     max_resources: usize,
     expected: &ReuseRequest<'_>,
 ) -> ReuseVerification {
-    let initial = inventory(query, max_resources).assess_reuse(expected);
-    let assessment = inventory(query, max_resources).assess_reuse(expected);
+    verify_reuse_with_platform(query, max_resources, expected, None)
+}
+
+pub(crate) fn verify_reuse_with_platform(
+    query: &impl DockerRead,
+    max_resources: usize,
+    expected: &ReuseRequest<'_>,
+    platform: Option<(&str, &str)>,
+) -> ReuseVerification {
+    let initial = inventory(query, max_resources).assess_reuse_with_platform(expected, platform);
+    let assessment = inventory(query, max_resources).assess_reuse_with_platform(expected, platform);
     let reason = match (candidate_id(&initial), candidate_id(&assessment)) {
         (None, _) => ReuseVerificationReason::InitialUnverified {
             assessment_reason: initial.reason,

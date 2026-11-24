@@ -4,14 +4,16 @@
 
 | 대상 | 검증한 후보 | 검증 결과 |
 |---|---|---|
-| macOS ARM64 | 최신 `0.1.1-rc.1`, Rust 트리 `ada5a09` | 독립 빌드 두 번의 아카이브 SHA-256 일치. 실제 `0.1.0`에서 업그레이드·롤백·재업그레이드·제거, 설치본 진단과 대시보드 API·WebKit 확인 |
+| macOS ARM64 | 최신 `0.1.1-rc.1`, Rust 트리 `a44f0ca` | 독립 빌드 두 번의 아카이브 SHA-256 일치. 실제 `0.1.0`에서 업그레이드·롤백·재업그레이드·제거, 설치본 진단과 대시보드 API·WebKit 확인 |
 | Linux ARM64 musl | 최신 `0.1.1-rc.1`, Rust 트리 `ada5a09` | 기존 Ubuntu Parallels에서 이전 `0.1.0` 실물을 업그레이드했다. 두 실행 파일, 관리형 타임아웃 124와 lease 재획득, 대시보드 HTTP, 제거와 시험 파일 보존 및 별도 BuildKit 조회를 통과했다. `681be1e` 후보는 격리 Linux 엔진과 기존 Ubuntu VM에서도 검증했다. |
 | Windows ARM64 | 최신 `0.1.1-rc.1`, Rust 트리 `ada5a09` | 기존 Parallels의 로컬 NTFS에서 이전 `681be1e` 실물 설치와 교체, 설치 파일의 해시·실행, 대시보드 HTTP·제거와 사용자 파일 보존 확인 |
 | Windows x64 | 최신 `0.1.1-rc.1`, Rust 트리 `ada5a09` | 교차 링크·PE·아카이브 검증과 ARM64 게스트의 x64 에뮬레이션 실행·대시보드 HTTP 확인. ARM64 게스트의 네이티브 ARM64 Python과 에뮬레이션 x64 Python 각각에서 공식 설치기의 x64 설치·업그레이드가 종료 코드 1로 거절됐다. 설치 경로, 기존 ARM64 설치 포인터와 실행 파일 SHA-256, 사용자 시험 파일을 보존했다. 등록된 Windows VM이 ARM64이므로 Windows x64 운영체제 설치 수명 주기는 이번 범위에서 제외했다. [설치기 경계 재검증](HANDOFF.md#parallels-x64-설치기-경계-재검증) |
 
-현재 후보의 Rust 소스 트리는 `ada5a09f9d59e00b8c2aa70a5143464d01450f2c`다. 아래 후보별 디렉터리에 아카이브, SHA-256 파일과 `QUALIFICATION.json` 검증 요약을 보존한다.
+현재 보완의 macOS ARM64 후보는 Rust 트리 `a44f0ca6f668bf6effb8d48815d20740c9418c34`에서 만들었다. Linux·Windows의 기존 검증은 Rust 트리 `ada5a09`에 해당한다. 후보별 디렉터리에 아카이브, SHA-256 파일과 `QUALIFICATION.json` 검증 요약을 보존한다.
 
-macOS ARM64 후보는 `dist/dsg-macos-qualification-ada5a09/`에 있다. 두 독립 빌드에서 SHA-256 `a367fc58fb16bf209dd4ec8259d83a0877de89a2eca33e9b2d32e626ce682730`이 일치했다. 설치본의 대시보드 API와 WebKit 1060px·390px 화면은 격리 Docker의 컨테이너 7개, 고유 이미지 ID 8개, 명명 볼륨 2개, 중복 그룹 0개와 일치했다. 기존 `681be1e` 후보와 당시 검증 근거는 `dist/dsg-macos-qualification-681be1e/`에 보존한다. [현재 후보 검증](HANDOFF.md#8단계-현재-후보-제품화-검증) · [이전 후보 검증](HANDOFF.md#dsg-0608-현재-소스의-macos-자격-검증)
+새 macOS ARM64 후보는 `dist/dsg-macos-qualification-a44f0ca/`에 보존한다. 독립 빌드 두 번의 아카이브 SHA-256은 `67c1fb2045dba5709c4e1b4858c5cb9c922732fedc53b5f3f32cccd50f29c7f4`로 일치했다. `0.1.0` 실물에서 설치·업그레이드·롤백·재업그레이드·제거와 사용자 시험 파일 보존을 확인했다. 설치한 후보에서 Docker 조회와 WebKit 1060px·390px 집계를 확인했다. 롤백은 패키지 교체를 검증했으며 SQLite v4 상태의 이전 버전 이관은 별도다. [보완 검증](HANDOFF.md#compose-캐시-관리형-실행-및-승인-정리-보완)
+
+이전 macOS ARM64 후보는 `dist/dsg-macos-qualification-ada5a09/`에 보존한다. 두 독립 빌드에서 SHA-256 `a367fc58fb16bf209dd4ec8259d83a0877de89a2eca33e9b2d32e626ce682730`이 일치했다. 설치본의 대시보드 API와 WebKit 1060px·390px 화면은 격리 Docker의 컨테이너 7개, 고유 이미지 ID 8개, 명명 볼륨 2개, 중복 그룹 0개와 일치했다. 기존 `681be1e` 후보와 당시 검증 근거는 `dist/dsg-macos-qualification-681be1e/`에 보존한다. [현재 후보 검증](HANDOFF.md#8단계-현재-후보-제품화-검증) · [이전 후보 검증](HANDOFF.md#dsg-0608-현재-소스의-macos-자격-검증)
 
 Windows ARM64 로컬 NTFS의 파일시스템 시험 9개는 WBS 1.3의 별도 실측 기록이다. 패키지 수명 주기와 비교할 때는 위 표의 후보·소스 범위를 적용한다. [Windows NTFS 검증](HANDOFF.md#dsg-02-windows-ntfs-파일-식별-보완)
 

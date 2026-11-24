@@ -1,12 +1,16 @@
 pub mod cleanup;
+pub mod compose;
 pub mod docker;
 #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
 pub mod docker_buildkit_local;
 pub mod docker_cache;
 pub mod docker_command;
+pub mod docker_gc_apply;
 pub mod docker_image_gc;
 pub mod filesystem;
 pub mod gc;
+#[cfg(target_os = "macos")]
+mod mac_process;
 pub mod policy;
 pub mod registry;
 pub mod reuse;
