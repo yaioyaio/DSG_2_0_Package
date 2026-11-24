@@ -89,6 +89,24 @@ enum Command {
         #[arg(long)]
         policy: PathBuf,
     },
+    /// Linux ARM64의 보호된 저장소 연결과 정확한 프로젝트 자원 등록을 확인합니다.
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    DockerBackendPreflight {
+        /// root 소유 0444 docker-controller-admission.json의 절대 경로
+        #[arg(long)]
+        policy: PathBuf,
+        /// root 소유 0444 docker-backend-ownership.json의 절대 경로
+        #[arg(long)]
+        ownership: PathBuf,
+        /// 보호된 --state-dir 등록부에 기록된 프로젝트 번호
+        #[arg(long, value_parser = clap::value_parser!(i64).range(1..))]
+        project: i64,
+        #[arg(long, value_parser = parse_backend_kind)]
+        kind: dsg_core::docker_gc_apply::DockerGcKind,
+        /// 해당 자원의 전체 ID
+        #[arg(long)]
+        resource: String,
+    },
     /// 소유권을 확인한 생성 폴더를 정리 대상으로 등록합니다.
     GcOwn {
         #[arg(long)]
@@ -310,6 +328,17 @@ fn main() -> ExitCode {
     }
 }
 
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+fn parse_backend_kind(value: &str) -> Result<dsg_core::docker_gc_apply::DockerGcKind, String> {
+    use dsg_core::docker_gc_apply::DockerGcKind;
+
+    match value {
+        "image" => Ok(DockerGcKind::Image),
+        "build_cache" => Ok(DockerGcKind::BuildCache),
+        _ => Err("image 또는 build_cache를 지정하세요".to_owned()),
+    }
+}
+
 fn run(cli: &Cli) -> Result<Output, CliError> {
     #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
     if let Command::DockerControllerProbe {
@@ -355,6 +384,46 @@ fn run(cli: &Cli) -> Result<Output, CliError> {
         };
         return Ok(Output {
             command: "docker-controller-admission",
+            data,
+            text,
+            exit,
+        });
+    }
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    if let Command::DockerBackendPreflight {
+        policy,
+        ownership,
+        project,
+        kind,
+        resource,
+    } = &cli.command
+    {
+        use dsg_core::docker_control_local::verify_backend_ownership;
+        use dsg_core::docker_gc_apply::DockerGcService;
+
+        let state_dir = cli.state_dir.as_deref().ok_or_else(|| {
+            CliError::new(
+                "CONFIG_INVALID",
+                "보호 등록부의 --state-dir 절대 경로를 지정하세요",
+            )
+        })?;
+        let apply_gate = DockerGcService::external().apply_gate();
+        let (data, text, exit) = match verify_backend_ownership(
+            policy, ownership, state_dir, *project, *kind, resource,
+        ) {
+            Ok(evidence) => (
+                json!({"status":"verified", "evidence":evidence, "project_ownership":"protected_assignment", "store_binding":"controller_directory_descriptor", "engine_boundary":"protected_unix_socket", "exclusive_mutation":"unverified", "mutation_authorized":false, "apply_gate":apply_gate}),
+                "보호된 프로젝트 자원 등록과 저장소·엔진 연결 확인 · 변경 보존".to_owned(),
+                0,
+            ),
+            Err(failure) => (
+                json!({"status":"unknown", "exclusive_mutation":"unverified", "mutation_authorized":false, "apply_gate":apply_gate, "failure":failure}),
+                "프로젝트 자원 등록 또는 전용 백엔드 연결 미확인 · 보존".to_owned(),
+                5,
+            ),
+        };
+        return Ok(Output {
+            command: "docker-backend-preflight",
             data,
             text,
             exit,
@@ -474,7 +543,8 @@ fn run(cli: &Cli) -> Result<Output, CliError> {
         #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
         Command::BuildkitLocalCache { .. }
         | Command::DockerControllerProbe { .. }
-        | Command::DockerControllerAdmission { .. } => unreachable!(),
+        | Command::DockerControllerAdmission { .. }
+        | Command::DockerBackendPreflight { .. } => unreachable!(),
         Command::Hook { .. }
         | Command::Agents { .. }
         | Command::Mcp

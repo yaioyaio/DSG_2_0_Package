@@ -29,7 +29,7 @@ pub enum DockerApplyGate {
     Controlled,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DockerGcKind {
     Image,
@@ -37,7 +37,7 @@ pub enum DockerGcKind {
 }
 
 impl DockerGcKind {
-    fn valid_id(self, id: &str) -> bool {
+    pub(crate) fn valid_id(self, id: &str) -> bool {
         match self {
             Self::Image => valid_full_image_id(id),
             Self::BuildCache => valid_cache_record_id(id),
