@@ -77,7 +77,7 @@ DSG-06의 `a62830b`를 PR #11로 `develop`, PR #12로 `main`에 반영했다. �
 
 ### 재개 후 플랫폼 실측
 
-- `DSG_TEST_LIVE_ENFORCEMENT=1 DSG_TEST_LAUNCHD=1 sh scripts/test-rust.sh`에서 Rust 테스트 82개와 macOS 통합 검증을 통과했다. 실제 `dockerguard-test` 엔진에서 동일 UID의 제한 프로세스는 원본 Unix 소켓 및 TCP를 직접 사용할 수 없었고, 브로커 조회는 성공했다. 변경 요청 전달은 0건이다. 배포 계정 분리 실측은 별도 조건이다.
+- `DSG_TEST_LIVE_ENFORCEMENT=1 DSG_TEST_LAUNCHD=1 sh scripts/test-rust.sh`에서 Rust 테스트 82개와 macOS 통합 검증을 통과했다. 실제 `dockerguard-test` 엔진에서 동일 UID의 제한 프로세스는 시험용 Unix 릴레이 소켓과 엔진의 루프백 TCP를 직접 사용할 수 없었고, 브로커 조회는 성공했다. 변경 요청 전달은 0건이다. 배포 계정 분리 실측은 별도 조건이다.
 - Windows SCM 서비스와 고정 named pipe 어댑터를 추가했다. MSVC ARM64·x64 교차 컴파일 및 링크를 확인했다. Windows 동작과 배포 자격은 실제 SCM·계정·엔진 테스트 전까지 미검증으로 표시한다.
 - Linux ARM64의 musl 링크에서 발견한 `renameat2` 라이브러리 차이를 커널 호출로 해결했다. 별도의 QEMU 게스트에서 `systemd`가 실행됐다. 첫 Docker 엔진 기동 종료는 새 게스트의 임시 유닛 진단으로 좁힌다. 기존 시스템 VM·Docker 설정과 데이터는 보존했다.
 - 계획의 플랫폼별 수용 조건에 따라 실제 검증을 마친 macOS 로컬 제품화에 진입한다. 다른 플랫폼의 지원 범위와 전체 목표의 완료 판정은 각 실측이 끝난 뒤 기록한다.
@@ -125,7 +125,7 @@ DSG-08의 `f6397b2`를 PR #15로 `develop`, PR #16으로 `main`에 반영했다.
 - DSG-04에서 실제 Compose `up`을 반복해 동일 ID 한 개를 확인했고, 구성 변경 후 이전 기대값을 거절했다. Cargo·Node·pnpm·Gradle·uv·Go의 독립 프로젝트와 Playwright 1.65.0 테스트 실행, 성공·실패 trace 보존 및 해당 lease의 감사 기록을 확인했다. Gradle의 파일 디스크립터 상한은 해당 Provider에만 1024개로 조정했다.
 - DSG-05에서 기존 격리 엔진 이미지의 보존 판정을 확인했다. 후보 검사와 재검증은 합성 이미지로 확인했으며 실제 Docker 자원은 이 이미지 계획으로 변경되지 않았다. Playwright 보관 기간을 1초로 설정한 시험에서 만료 성공 trace 1개를 회수하고 미설정 실행과 기대 실패 trace를 보존했다.
 - DSG-06의 macOS MCP에서 실행 상태와 승인 기록을 세션 프로젝트에 한정해 조회했고 상태 파일 변경 0건을 확인했다. 승인 발급과 적용은 관리형 CLI에 둔다.
-- DSG-07의 macOS 실제 Docker Unix·TCP 직접 접근 차단, 브로커 조회, 임시 launchd의 비정상 종료·재시작·해제를 재검증했다. 훅 오류와 무관하게 Docker 접근을 통제하는 기준은 OS가 적용한 경계다. 호스트의 비대화형 관리자 접근을 사용할 수 없어 별도 macOS 배포 계정 설정과 LaunchDaemon 검증은 미실측이다.
+- DSG-07의 macOS 시험용 Unix 릴레이와 기존 Docker 엔진의 TCP 직접 접근 차단, 브로커 조회, 임시 launchd의 비정상 종료·재시작·해제를 재검증했다. 훅 오류와 무관하게 Docker 접근을 통제하는 기준은 OS가 적용한 경계다. 호스트의 비대화형 관리자 접근을 사용할 수 없어 별도 macOS 배포 계정 설정과 LaunchDaemon 검증은 미실측이다.
 - DSG-08에서 macOS ARM64의 `0.1.1-rc.1`을 각각 새 빌드 대상에서 두 번 생성해 아카이브 SHA-256이 일치했다. 보존 중인 `0.1.0` 실물에서 새 후보로 업그레이드하고 CLI 버전, 로컬 서명, 제거 후 기존 파일 보존을 확인했다. Azure나 Apple 등 공식 게시자 서명은 별도 승인 환경이 필요하다.
 - 최종 macOS 통합에서 독립적으로 수집한 실제 Docker 건수가 API, WebKit 1060px·390px 화면에 모두 동일했다. 임시 관리형 감독자를 강제 종료한 시험에서 만료 전 lease를 보존하고 만료·자식 종료 확인 뒤 같은 프로젝트가 다시 실행됐다.
 - 전체 로컬 러너에서 Python 14개와 Rust 98개, Docker·Compose·Provider·TTL·MCP·launchd·WebKit 및 로컬 Ed25519 검증을 통과했다. 소스 트리 `35a30aa`로 만든 `0.1.1-rc.1` ARM64 후보와 SHA-256 파일을 `dist/`에 보존했다. macOS와 Windows용 아카이브는 각각 이름에 대상이 들어 있다.
@@ -172,7 +172,7 @@ DSG-08의 `f6397b2`를 PR #15로 `develop`, PR #16으로 `main`에 반영했다.
 ## DSG-06~08 현재 소스의 macOS 자격 검증
 
 - `feature/20261124-macos-qualification`, 기준 `b7d94d6`, Rust 소스 트리 `681be1efa0ed4136f47fb6d4c5c6a7122b503519`. 최적화 빌드한 현재 바이너리의 임시 설치본으로 `DSG_TEST_AGENT_NATIVE=all`의 실제 Claude·Codex·Gemini 9개 사례와 MCP 대조를 통과했다. 네트워크와 쓰기를 제한한 시험에서 합성 응답과 대역 도구를 사용했다. [에이전트 검증](TEST_PLAN.md#에이전트-연동-검증)
-- 현재 `dsgd`의 임시 GUI launchd 등록·재시작·해제와 기존 격리 Docker의 실제 Unix·TCP 직접 접근 차단 및 브로커 조회가 통과했다. 별도 macOS 운영 계정·공식 LaunchDaemon은 관리자 경로가 필요하다. 기존 Parallels Ubuntu ARM64의 기본 게스트 명령을 확인하고 일시정지로 복귀했다. 당시 남은 Linux 관리형 실행은 기존 Ubuntu 게스트에서 후속 검증했다. Windows 실제 Docker 엔진은 별도 수용 조건이다. [현재 Ubuntu 실측](#별도-buildkit-읽기-전용-실측) [플랫폼 검증](TEST_PLAN.md#브로커와-서비스-검증)
+- 현재 `dsgd`의 임시 GUI launchd 등록·재시작·해제와 시험용 Unix 릴레이와 기존 격리 Docker의 루프백 TCP 직접 접근 차단 및 브로커 조회가 통과했다. 별도 macOS 운영 계정·공식 LaunchDaemon은 관리자 경로가 필요하다. 기존 Parallels Ubuntu ARM64의 기본 게스트 명령을 확인하고 일시정지로 복귀했다. 당시 남은 Linux 관리형 실행은 기존 Ubuntu 게스트에서 후속 검증했다. Windows 실제 Docker 엔진은 별도 수용 조건이다. [현재 Ubuntu 실측](#별도-buildkit-읽기-전용-실측) [플랫폼 검증](TEST_PLAN.md#브로커와-서비스-검증)
 - macOS `0.1.1-rc.1`을 독립 대상 디렉터리에서 두 번 최적화 빌드했다. `tar.gz` SHA-256이 일치했고 보존된 `0.1.0`에서 업그레이드·실행·제거를 통과했다. 기존 Docker 엔진에서 독립 조회한 컨테이너 7개, 이미지 ID 5개, 볼륨 0개가 현재 패키지의 API·WebKit 1060px·390px 화면에 일치했다. 첫 대시보드 호출은 실행 래퍼의 컨텍스트 변수가 누락돼 실패했고, 동일 패키지를 명시 컨텍스트로 재검증해 통과했다. `dist/dsg-macos-qualification-681be1e/`에 패키지·SHA-256·검증 요약을 보존했다. 임시 설치·서비스와 보조 워크트리 잔여는 0개다. [제품 검증](RELEASE.md)
 
 ## 최신 계획과 산출물 정합성 검증
@@ -229,3 +229,11 @@ DSG-08의 `f6397b2`를 PR #15로 `develop`, PR #16으로 `main`에 반영했다.
 - macOS에서 `sh scripts/test.sh`로 Python 14개, `DSG_TEST_DOCKER_CONTEXT=dockerguard-test DSG_TEST_BUILDX=1 DSG_TEST_WEBKIT=1 sh scripts/test-rust.sh`로 Rust 103개와 등록 통합 시험을 재실행했다. 둘 다 종료 코드 0이다. 지정 엔진의 컨테이너 7개, 고유 이미지 ID 8개, 명명 볼륨 2개, 중복 그룹 0개를 확인했다. 내장 빌더 208개 중 활성 0개, 기본 Buildx 208개 중 회수 가능 표시 208개·공유 8개·변경 가능 167개를 확인했고 모두 보존했다. 이미지 계획은 보존을 판정했고 WebKit 1060px·390px 검증도 통과했다. [시험 조건](TEST_PLAN.md#rust-foundation-검증) · [대시보드 시험](TEST_PLAN.md#대시보드와-릴리스-검증)
 - Rust 트리 `ada5a09`의 `0.1.1-rc.1` 보존 후보 4개는 대상·버전과 아카이브·구성 파일 SHA-256이 각 배포 매니페스트, SHA-256 파일, 검증 요약 및 릴리스 기록과 일치했다. 플랫폼별 설치 수명 주기와 실제 CLI·서비스 근거는 각 후보·환경의 기존 실측을 적용했다. 이번 회귀에서 VM 또는 Docker 데몬 시작과 실제 Docker 자원 변경은 0건이다. 보조 워크트리 생성·회수·잔여는 각각 0개다. [배포 파일과 검증 범위](RELEASE.md)
 - 재개 시 Compose 구성 자체 정규화·재빌드 필요 판정과 캐시 소유권 검증을 해당 WBS의 선행 작업과 대조한다. 이미지 삭제 적용, 그룹 경계, 승인형 확장, 각 OS 운영 실측의 잔여 조건을 유지한다. Windows x64 OS 설치 수명 주기는 기존 Mac·Parallels 범위에서 제외했으며 공식 출시 상태는 미검증이다. [재개 조건과 환경 제외](BACKLOG.md#환경승인-조건이-남은-항목) · [출시 게이트](TEST_PLAN.md#출시-게이트)
+
+## 현재 시스템에서 8단계 재검증
+
+- 2026-11-24, `feature/20261124-verify-current-system-evidence`, 기준 HEAD `3508d07`, Rust 트리 `ada5a09`. WBS 14개 행, 실행 8단계, 요구사항 13개를 제품 진입점과 기존 실측에 다시 연결했다. 변경은 작업 대조표·백로그·핸드오프, 테스트 계획과 요구사항의 현황, 패키지 매니페스트에 적용했다. 공식 PLAN·WBS와 실행 계획의 통과 기준, 제품 코드와 패키지는 유지했다. [작업 대조표](TASK.md)
+- macOS의 `sh scripts/test.sh`에서 Python 14개가 통과했다. `sh scripts/test-rust.sh`에 `DSG_TEST_DOCKER_CONTEXT=dockerguard-test`와 `DSG_TEST_BUILDX`·`DSG_TEST_WEBKIT`·`DSG_TEST_BUILD_PROVIDERS`·`DSG_TEST_LAUNCHD`·`DSG_TEST_LIVE_ENFORCEMENT`의 값 `1`, `DSG_TEST_AGENT_NATIVE=all` 및 로컬 Node·Gemini 번들 경로를 지정했다. 종료 코드 0으로 Rust 103개, 등록된 통합 시험과 WebKit 1060px·390px를 통과했다. 현재 사용자 권한에서 임시 모드 000 디렉터리의 열거가 실제 거부됨을 확인했다. Docker 집계는 컨테이너 7개, 고유 이미지 ID 8개, 명명 볼륨 2개, 중복 0건이었다. 빌더 캐시 208개를 보존했고 선택한 기존 이미지 1개의 보존 판정을 확인했다. [시험 절차](TEST_PLAN.md#rust-foundation-검증)
+- 등록 작업 6개인 Cargo·Node·pnpm·Gradle·uv·Go를 로컬 도구와 최소 임시 프로젝트에서 다시 실행했다. Playwright·Next.js 확장, 실제 Compose 변경과 Parallels 시험은 앞선 실측을 적용한다. 현재 macOS의 Claude 2.1.331·Codex 0.172.0·Gemini 0.67.0은 합성 모델 응답과 대역 명령으로 9개 사례를 통과했다. 정상 거부에서 대역 실행 0건이었다. 훅 오류 시 Claude는 대역 실행을 막고 Codex·Gemini는 실행했다. 읽기 전용 MCP 회귀도 통과했다. [Provider 근거](TASK.md) · [실제 CLI 시험](TEST_PLAN.md#에이전트-연동-검증)
+- 현재 소스에서 임시 GUI launchd 등록, 단일 재시작과 해제를 재검증했다. 동일 UID 샌드박스에서 시험용 Unix 릴레이와 기존 엔진의 루프백 TCP 직접 접근을 차단하고, 브로커 경유 조회와 변경 요청의 상류 전달 0건을 확인했다. 비대화형 관리자 실행 경로는 확인되지 않았다. 현재 후보 아카이브 4개에서 버전·대상과 아카이브 SHA-256이 검증 요약·릴리스 기록과 일치했다. 내부 파일 SHA-256은 패키지 매니페스트와 일치했다. [브로커 시험](TEST_PLAN.md#브로커와-서비스-검증) · [후보와 해시](RELEASE.md)
+- 현재 Parallels 인벤토리는 일시정지 2개, 정지 1개였다. 이번 검증에서 VM과 Docker 데몬을 시작한 건수, 실제 Docker 자원을 변경한 건수, 보조 워크트리 생성·회수·잔여는 모두 0이다. 독립 운영 계정, Windows 실제 엔진, Windows x64 운영체제 시험의 제외 이유는 백로그에 기록했다. 재개 항목은 공식 WBS에 연결한 구현·검증 잔여를 선행 순서로 확인한다. [환경 제외와 재개 조건](BACKLOG.md#현재-시스템에서-제외한-검증)
