@@ -48,6 +48,16 @@ impl TestBackend {
                 .execute("INSERT INTO resources VALUES (?1)", [id])
                 .unwrap();
         }
+        Self::with_connection(state, registry_path, project, owner, kind)
+    }
+
+    fn with_connection(
+        state: Connection,
+        registry_path: PathBuf,
+        project: i64,
+        owner: String,
+        kind: DockerGcKind,
+    ) -> Self {
         let binding = Binding {
             project,
             owner,
@@ -632,6 +642,195 @@ fn interruption_recovers_from_bound_receipt_and_missing_receipt_stays_unknown() 
             scenario.audit(plan),
             ["PLAN_SAVED", "GC_APPROVED", "GC_APPLY_INTENT", last]
         );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn abrupt_worker_exit_reopens_durable_intent_and_reclaims_lease() {
+    use std::os::unix::process::ExitStatusExt;
+    use std::process::{Child, Command, Stdio};
+    use std::thread;
+    use std::time::Instant;
+
+    const WORKER: &str = "__dsg_mock_docker_crash_worker";
+    const NO_RECEIPT: &str = "__dsg_mock_docker_no_receipt";
+    const LEASE_TTL: Duration = Duration::from_secs(1);
+
+    struct StalledTestController(TestBackend);
+
+    impl ControlledDockerGc for StalledTestController {
+        fn observe(&mut self, owner: &str, kind: DockerGcKind, id: &str) -> Option<Observation> {
+            self.0.observe(owner, kind, id)
+        }
+
+        fn apply_if_current(&mut self, intent: &Intent) -> Option<Receipt> {
+            self.0.apply_if_current(intent);
+            thread::sleep(Duration::from_secs(12));
+            panic!("parent did not stop the worker after its mock transaction");
+        }
+
+        fn receipt(&mut self, intent: &Intent) -> Option<Receipt> {
+            self.0.receipt(intent)
+        }
+    }
+
+    if std::env::args_os().any(|arg| arg == WORKER) {
+        let project = serde_json::from_reader(std::io::stdin().lock()).unwrap();
+        let mut registry = Registry::open(Path::new("state")).unwrap();
+        let backend = TestBackend::with_connection(
+            Connection::open("resources.sqlite3").unwrap(),
+            "state/registry.sqlite3".into(),
+            project,
+            registry.docker_gc_project_owner(project).unwrap(),
+            DockerGcKind::BuildCache,
+        );
+        let mut controller = StalledTestController(backend);
+        controller.0.lose_receipt = std::env::args_os().any(|arg| arg == NO_RECEIPT);
+        let mut service = DockerGcService {
+            controller: Some(&mut controller),
+        };
+        let plan = service
+            .plan(
+                &mut registry,
+                project,
+                POLICY,
+                DockerGcKind::BuildCache,
+                CACHE,
+            )
+            .unwrap()
+            .plan_id;
+        let approval = service
+            .approve(&mut registry, project, plan, POLICY)
+            .unwrap();
+        let lease = registry
+            .acquire_lease(project, POLICY, LEASE_TTL, |_| false)
+            .unwrap();
+        registry.attach_lease_owner(&lease).unwrap();
+        service
+            .apply(&mut registry, &lease, plan, POLICY, &approval)
+            .unwrap();
+        panic!("worker did not stop between dispatch and settlement");
+    }
+
+    struct OwnedWorker(Child);
+
+    impl Drop for OwnedWorker {
+        fn drop(&mut self) {
+            if !matches!(self.0.try_wait(), Ok(Some(_))) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+    }
+
+    let test = concat!(
+        module_path!(),
+        "::abrupt_worker_exit_reopens_durable_intent_and_reclaims_lease"
+    );
+    let test = test.split_once("::").unwrap().1;
+    for lose_receipt in [false, true] {
+        let mut scenario = Scenario::new(DockerGcKind::BuildCache);
+        let competing = scenario.plan();
+        let competing_approval = scenario.approve(competing);
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command.args(["--exact", test, "--skip", WORKER]);
+        if lose_receipt {
+            command.args(["--skip", NO_RECEIPT]);
+        }
+        let mut worker = OwnedWorker(
+            command
+                .current_dir(scenario.temp.path())
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap(),
+        );
+        let worker_pid = worker.0.id();
+        serde_json::to_writer(worker.0.stdin.take().unwrap(), &scenario.project).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(6);
+        while scenario.backend.contains(CACHE) {
+            assert!(
+                worker.0.try_wait().unwrap().is_none(),
+                "worker exited before mock dispatch"
+            );
+            assert!(Instant::now() < deadline, "mock dispatch deadline expired");
+            thread::sleep(Duration::from_millis(10));
+        }
+        worker.0.kill().unwrap();
+        assert_eq!(worker.0.wait().unwrap().signal(), Some(libc::SIGKILL));
+
+        scenario.registry = Registry::open(&scenario.temp.path().join("state")).unwrap();
+        scenario.backend.state =
+            Connection::open(scenario.temp.path().join("resources.sqlite3")).unwrap();
+        let plan = scenario
+            .ledger()
+            .query_row(
+                "SELECT id FROM gc_plan WHERE status = 'applying'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            scenario.audit(plan),
+            ["PLAN_SAVED", "GC_APPROVED", "GC_APPLY_INTENT"]
+        );
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let lease = loop {
+            match scenario
+                .registry
+                .acquire_lease(scenario.project, POLICY, LEASE_TTL, |pid| pid == worker_pid)
+            {
+                Ok(lease) => break lease,
+                Err(RegistryError::LeaseConflict) if Instant::now() < deadline => {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) => panic!("bounded worker lease recovery failed: {error}"),
+            }
+        };
+        assert!(matches!(
+            scenario.apply(&lease, competing, &competing_approval),
+            Err(DockerGcError::Registry(
+                RegistryError::DockerGcRecoveryPending
+            ))
+        ));
+        let result = scenario.recover(&lease, plan).unwrap();
+        let (status, bytes, event) = if lose_receipt {
+            (GcApplyStatus::RecoveryRequired, 0, "GC_RECOVERY_REQUIRED")
+        } else {
+            (GcApplyStatus::Applied, 17, "GC_APPLIED")
+        };
+        assert_eq!(
+            result,
+            DockerGcResult {
+                status,
+                reclaimed_bytes: bytes
+            }
+        );
+        assert_eq!(
+            scenario.audit(plan),
+            ["PLAN_SAVED", "GC_APPROVED", "GC_APPLY_INTENT", event]
+        );
+        assert_eq!(scenario.backend.attempts, 0);
+        assert!(scenario.backend.contains("untouched"));
+        scenario
+            .registry
+            .finish_lease(lease, AuditOutcome::Success, "FIXTURE_WORKER_CLOSED")
+            .unwrap();
+        let ledger = scenario.ledger();
+        let reclaimed: i64 = ledger
+            .query_row(
+                "SELECT count(*) FROM audit_event WHERE reason_code = 'LEASE_RECLAIMED'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let integrity: String = ledger
+            .query_row("PRAGMA quick_check", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!((reclaimed, integrity.as_str()), (1, "ok"));
+        assert!(!scenario.registry.has_open_execution_lease().unwrap());
     }
 }
 
