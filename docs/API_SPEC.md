@@ -37,6 +37,12 @@ Linux ARM64의 `dsg --json buildkit-local-cache --socket <절대 Unix 소켓> --
 
 두 조회에서 회수 가능·공유·변경 가능 상태의 집계는 서로 겹칠 수 있다. `preserved_by_reason`은 각 레코드에 사유 하나를 부여한다. 회수 가능 표시가 없으면 `active`, 다음으로 공유면 `shared`, 변경 가능이면 `mutable`, 나머지는 `unknown_ownership`에 집계한다. 정상적인 빈 응답의 상태와 보존 사유는 모두 0으로 집계한다. 중복 ID, 마지막 줄이 잘린 출력과 한도 초과는 부분 수치를 폐기하고 조회 실패로 처리한다. 캐시 ID는 중복 확인에만 사용한다.
 
+### 로컬 Docker 제어 서비스 읽기 확인
+
+Linux ARM64의 `dsg --json docker-controller-probe --socket <절대 Unix 소켓> --expected-pid <서비스 PID>`는 로컬 Unix 소켓과 상대 프로세스가 선언한 프로토콜을 확인한다. 경로 구성 요소는 심볼릭 링크 없이 열고, 상위 경로의 root 소유와 그룹·기타 쓰기 제한, 소켓 부모의 0700 권한, root 소유 단일 링크 소켓의 0600 권한을 확인한다. 예상 PID와 root 상대 자격을 대조하고, pidfd로 고정한 프로세스의 생존·시작 시각과 소켓 식별자를 요청 전후에 확인한다. 연결에는 2초 기한과 512바이트 응답 한도를 적용한다.
+
+프로토콜 1의 `probe` 요청에 `dedicated` 및 `read_only` 선언이 정확히 돌아오면 `status=verified`, `declared_boundary=dedicated`, `endpoint`, `generation`과 종료 코드 0을 반환한다. 실패 시 `status=unknown`, `failure`와 종료 코드 5를 반환한다. 두 경우 모두 `mutation_authorized=false`, `apply_gate=preserve_unverified_control`이다. 운영 적용에는 별도로 신뢰할 수 있는 권한 제어기, 요청별 승인, 프로젝트 자원의 출처와 소유권, 엔진 또는 빌더의 배타 변경 경계가 필요하다. [프로브 구현](../rust-scaffold/crates/dsg-core/src/docker_control_local.rs)
+
 ### 관리형 실행과 Compose 재사용
 
 `dsg exec --timeout 1~120 -- <argv...>`는 등록된 프로젝트의 정책과 호스트·프로젝트 예산을 확인한 뒤 직접 실행한다. 관리형 실행은 프로젝트별 lease 하나와 동일 상태 저장소의 전역 두 슬롯으로 제한한다. 조회가 불완전하거나 정책상 추가 확인이 필요하면 기존 판단 형식으로 반환한다. 성공 0, 정책 거부 3, 승인 필요 4, 제어 미확인 5, 시간 초과 124, 정상 중단 130을 사용한다. 자식이 실패하면 자식의 종료 코드를 반환한다. `--json`에서는 명령과 자식 원문 출력 없이 `run.outcome`, `run.exit_code`, `run.tree_confirmed_gone`과 `lease_released`를 제공한다.
@@ -60,6 +66,8 @@ macOS에서는 관리형 실행 중 확인한 리더와 자손을 PID와 시작 
 `gc-plan --docker-context <context> --docker-engine <ID> --docker-image <sha256:전체ID>`는 파일 정리 계획과 별도로 `plan.docker_images`에 이미지 후보 또는 보존 사유를 기록한다. 후보는 선택한 엔진, 프로젝트의 소유 표식 `io.dsg.gc.owner`(정규 경로의 SHA-256), 전체 이미지 ID가 일치하며 태그·digest·컨테이너 참조·활성 lease가 없어야 한다. 관측 한도 초과와 이미지 마운트의 참조 불명은 보존한다. `docker-image-recheck --plan <번호>`는 유효기간과 정책을 확인하고 같은 엔진에서 후보 지문을 비교한다. 공개 이미지 경로의 계획과 재확인은 적용 게이트를 기본값인 `preserve_unverified_control`로 반환한다.
 
 내부 Docker GC 서비스의 제어 대역은 이미지 또는 빌드 캐시 한 건을 프로젝트 ID, 프로젝트 루트 SHA-256, 정책 digest, 엔드포인트 지문, 세대 지문, 자원 종류, 전체 ID, 관측 스냅샷에 묶는다. 승인에는 계획과 만료 시각이 연결되며 적용은 레지스트리 슬롯을 배타적으로 확보하고 일회 승인을 소비하면서 적용 의도를 커밋한다. 제어 백엔드는 동일한 상태를 확인하는 경계에서 단일 대상 변경과 결과 영수증의 기록을 원자적으로 처리해야 한다. 복구에서는 적용 의도와 정확히 일치하는 영수증을 조회해 결과를 확정한다. 영수증이 없거나 불일치하면 `recovery_required`로 처리하며 변경을 재실행하지 않는다. 이 내부 경로는 공개 파일 GC 명령과 MCP 도구에서 분리돼 있다.
+
+제어 경계 밖에서 삭제 결과의 관측 자료만 확인돼도 복구는 영수증을 별도로 조회한다. 유효한 영수증이 없으면 삭제 완료를 추정하지 않고 `recovery_required`와 정산 0바이트를 기록한다. 적용에 사용한 승인은 소비 상태로 보존되며, 같은 계획의 재적용과 복구 대기 중인 동일 자원에 대한 경쟁 적용을 차단한다.
 
 `exec --auto-clean-cargo -- cargo check …`는 자동 회수 대상인 전용 Cargo 산출물 디렉터리를 만든다. 실행 결과의 `cleanup`에서 회수·보존 건수와 확인된 바이트를 읽는다. Git 완료는 `scripts/git-completion.sh`로 전달한다. 이 경로는 여섯 참조의 파일 일치 후 사용자 원본과 브랜치를 보존하면서 등록된 보조 워크트리만 검사한다.
 
