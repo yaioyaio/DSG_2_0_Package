@@ -5,6 +5,8 @@ pub mod docker;
 pub mod docker_buildkit_local;
 pub mod docker_cache;
 pub mod docker_command;
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+pub mod docker_control_local;
 pub mod docker_gc_apply;
 pub mod docker_image_gc;
 pub mod filesystem;
