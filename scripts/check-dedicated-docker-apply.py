@@ -1,5 +1,6 @@
 """Observe or apply one explicitly approved live Docker GC trial."""
 
+import errno
 import hashlib
 import http.client
 import json
@@ -48,7 +49,7 @@ GUEST_SECONDS = 8
 ERRORS = frozenset({
     "E_INPUT", "E_BINDING", "E_VM", "E_UNIT", "E_PROOF", "E_ISOLATION", "E_PEER",
     "E_INVENTORY", "E_SNAPSHOT", "E_TIME", "E_DELETE_STATUS", "E_DELETE_RESULT",
-    "E_AFTER", "E_TRANSPORT", "E_RUNTIME", "E_RESPONSE_LOSS", "E_DISPATCH",
+    "E_AFTER", "E_TRANSPORT", "E_RUNTIME", "E_RESPONSE_LOSS", "E_DISPATCH", "E_OBSERVE_TRANSIENT",
 })
 
 
@@ -221,6 +222,8 @@ def verified_result(mode, proof, trial, delete_http_status=200):
     if mode == "apply-response-loss":
         result.update(delete_requests=1, after_images=0, delete_response_bytes_read=0,
                       delete_response_handling="client_read_shutdown")
+    elif mode == "observe-response-loss":
+        result["guest_delete_attempt_absent"] = True
     elif mode in APPLY_MODES:
         result.update(delete_requests=1, after_images=0, effect="applied")
     if mode == "apply-receipt-loss":
@@ -228,11 +231,13 @@ def verified_result(mode, proof, trial, delete_http_status=200):
     return result
 
 
-def result_from(result, expected, code):
+def result_from(result, expected, code, mismatch_code=None):
     value = decode(result.stdout, code)
     if result.returncode == 0:
-        require(encode(value) == encode(expected), code)
+        require(encode(value) == encode(expected), mismatch_code or code)
         return expected
+    if mismatch_code is not None and isinstance(value, dict) and "verified" in value:
+        raise Failed(mismatch_code)
     if isinstance(value, dict) and isinstance(value.get("error"), str) and value["error"] in ERRORS:
         status = value.get("status")
         if value["error"] == "E_DELETE_STATUS" and type(status) is int and 100 <= status <= 599:
@@ -400,6 +405,14 @@ def reserve_guest_delete_attempt(trial):
     os.close(fd)
 
 
+def require_guest_delete_attempt_absent(trial):
+    try:
+        (trial.store / "response-loss-delete-attempt").lstat()
+    except FileNotFoundError:
+        return
+    raise Failed("E_DISPATCH")
+
+
 def observe_delete_effect(trial):
     # The server may still be processing the DELETE while the first GET arrives.
     # Poll only the exact image inventory under the existing guest time limit.
@@ -418,12 +431,26 @@ def guest_inner(mode, envelope, pid, start, target, deadline):
     read_proof(trial, proof)
     isolation(trial, proof, pid, start, target)
     delete_http_status = None
+    observing_response_loss = mode == "observe-response-loss"
+    if observing_response_loss:
+        require_guest_delete_attempt_absent(trial)
     with socket.socket(socket.AF_UNIX) as conn:
         conn.settimeout(1.5)
-        conn.connect(str(trial.socket))
+        try:
+            conn.connect(str(trial.socket))
+        except OSError as exc:
+            if observing_response_loss and (isinstance(exc, TimeoutError)
+                    or exc.errno in (errno.EAGAIN, errno.ECONNREFUSED, errno.EINTR)):
+                raise Failed("E_OBSERVE_TRANSIENT") from None
+            raise
         peer_generation(conn, trial, proof, target)
-        inventory(trial, [trial.image], "E_INVENTORY")
-        api_version = snapshot(trial, proof)
+        try:
+            inventory(trial, [trial.image], "E_INVENTORY")
+            api_version = snapshot(trial, proof)
+        except Failed as exc:
+            if observing_response_loss and exc.code == "E_TIME":
+                raise Failed("E_OBSERVE_TRANSIENT") from None
+            raise
         peer_generation(conn, trial, proof, target)
         if mode in APPLY_MODES:
             require(deadline - monotonic_us() >= 4_000_000 and proc_start(pid) == start, "E_TIME")
@@ -435,6 +462,8 @@ def guest_inner(mode, envelope, pid, start, target, deadline):
                 delete_http_status = delete_once(conn, api_version, trial.image)
                 inventory(trial, [], "E_AFTER")
             peer_generation(conn, trial, proof, target)
+    if observing_response_loss:
+        require_guest_delete_attempt_absent(trial)
 
     return verified_result(mode, proof, trial, delete_http_status)
 
@@ -533,7 +562,8 @@ def host_main():
         if mode == "apply-response-loss":
             consume_response_loss_dispatch(directory, envelope)
         reply = run((prlctl, "exec", VM, "/usr/bin/python3", "-IB", "-"), 12, "E_TRANSPORT", input=payload)
-        result = result_from(reply, verified_result(mode, proof, trial), "E_TRANSPORT")
+        mismatch_code = "E_PROOF" if mode == "observe-response-loss" else None
+        result = result_from(reply, verified_result(mode, proof, trial), "E_TRANSPORT", mismatch_code)
         print(encode(result).decode("ascii"))
     except Exception as exc:
         print(encode(error_payload(exc)).decode("ascii"), file=sys.stderr)

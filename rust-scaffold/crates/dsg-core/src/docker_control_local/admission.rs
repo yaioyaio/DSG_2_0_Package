@@ -1,5 +1,11 @@
 use super::*;
 
+mod write_request;
+pub use write_request::{
+    configure_write_request_listener, with_authorized_write_request, AuthorizedWriteRequest,
+    WriteRequest,
+};
+
 const ADMISSION_TIMEOUT: Duration = Duration::from_secs(8);
 const POLICY_FILENAME: &str = "docker-controller-admission.json";
 const MAX_POLICY_BYTES: u64 = 8192;
@@ -87,60 +93,64 @@ fn valid_hash(value: &str) -> bool {
 /// per-resource authorization, or create a mutation-capable adapter.
 pub fn verify_admission(path: &Path) -> Result<AdmissionEvidence> {
     let deadline = Instant::now() + ADMISSION_TIMEOUT;
-    let (policy, policy_identity) = read_policy(path)?;
-    let boot_id = fs::read_to_string("/proc/sys/kernel/random/boot_id").map_err(io_failure)?;
-    policy.validate(&boot_id)?;
-
-    let controller = PinnedPeer::open(&policy.controller, deadline)?;
-    let engine = PinnedPeer::open(&policy.engine, deadline)?;
-    let approver = PinnedPeer::open(&policy.approver, deadline)?;
-    let executor = PinnedPeer::open(&policy.executor, deadline)?;
-    let peers = [&controller, &engine, &approver, &executor];
-    for (index, peer) in peers.iter().enumerate() {
-        if peers[..index]
-            .iter()
-            .any(|other| other.socket_identity == peer.socket_identity)
-        {
-            return Err(QueryFailure::InvalidSelector);
-        }
-    }
-
-    let mut connection = controller.connect()?;
-    engine.connect()?;
-    approver.connect()?;
-    executor.connect()?;
+    let policy = ProtectedPolicy::open(path)?;
+    let peers = PinnedPeers::open(&policy.value, deadline)?;
+    let mut connection = peers.controller.connect()?;
+    peers.engine.connect()?;
+    peers.approver.connect()?;
+    peers.executor.connect()?;
     exchange(&mut connection, deadline)?;
-
-    for peer in peers {
-        peer.check_current()?;
-    }
-    compare_metadata(
-        &policy_identity,
-        &open_protected(path, false)?
-            .metadata()
-            .map_err(io_failure)?,
-    )?;
+    peers.check_current(deadline)?;
+    policy.check_current()?;
     remaining(deadline)?;
 
     Ok(AdmissionEvidence {
-        controller: controller.evidence(b"controller", &boot_id),
-        engine: engine.evidence(b"engine", &boot_id),
+        controller: peers.controller.evidence(b"controller", &policy.boot_id),
+        engine: peers.engine.evidence(b"engine", &policy.boot_id),
     })
 }
 
-fn read_policy(path: &Path) -> Result<(Policy, fs::Metadata)> {
-    if path.file_name() != Some(OsStr::new(POLICY_FILENAME)) {
-        return Err(QueryFailure::InvalidSelector);
+struct ProtectedPolicy<'a> {
+    path: &'a Path,
+    value: Policy,
+    identity: fs::Metadata,
+    boot_id: String,
+    digest: String,
+}
+
+impl<'a> ProtectedPolicy<'a> {
+    fn open(path: &'a Path) -> Result<Self> {
+        if path.file_name() != Some(OsStr::new(POLICY_FILENAME)) {
+            return Err(QueryFailure::InvalidSelector);
+        }
+        let descriptor = open_protected(path, false)?;
+        let info = descriptor.metadata().map_err(io_failure)?;
+        if !info.is_file() || info.uid() != 0 || info.mode() & 0o7777 != 0o444 || info.nlink() != 1
+        {
+            return Err(QueryFailure::InvalidSelector);
+        }
+        let bytes = bounded_read(readable(&descriptor)?, MAX_POLICY_BYTES)?;
+        compare_metadata(&info, &descriptor.metadata().map_err(io_failure)?)?;
+        let value: Policy = serde_json::from_slice(&bytes).map_err(|_| QueryFailure::Malformed)?;
+        let boot_id = fs::read_to_string("/proc/sys/kernel/random/boot_id").map_err(io_failure)?;
+        value.validate(&boot_id)?;
+        Ok(Self {
+            path,
+            value,
+            identity: info,
+            boot_id,
+            digest: format!("{:x}", Sha256::digest(&bytes)),
+        })
     }
-    let descriptor = open_protected(path, false)?;
-    let info = descriptor.metadata().map_err(io_failure)?;
-    if !info.is_file() || info.uid() != 0 || info.mode() & 0o7777 != 0o444 || info.nlink() != 1 {
-        return Err(QueryFailure::InvalidSelector);
+
+    fn check_current(&self) -> Result<()> {
+        compare_metadata(
+            &self.identity,
+            &open_protected(self.path, false)?
+                .metadata()
+                .map_err(io_failure)?,
+        )
     }
-    let bytes = bounded_read(readable(&descriptor)?, MAX_POLICY_BYTES)?;
-    compare_metadata(&info, &descriptor.metadata().map_err(io_failure)?)?;
-    let policy = serde_json::from_slice(&bytes).map_err(|_| QueryFailure::Malformed)?;
-    Ok((policy, info))
 }
 
 fn readable(descriptor: &File) -> Result<File> {
@@ -181,6 +191,51 @@ struct PinnedPeer<'a> {
     socket: File,
     socket_identity: (u64, u64),
     executable: fs::Metadata,
+}
+
+struct PinnedPeers<'a> {
+    controller: PinnedPeer<'a>,
+    engine: PinnedPeer<'a>,
+    approver: PinnedPeer<'a>,
+    executor: PinnedPeer<'a>,
+}
+
+impl<'a> PinnedPeers<'a> {
+    fn open(policy: &'a Policy, deadline: Instant) -> Result<Self> {
+        let peers = Self {
+            controller: PinnedPeer::open(&policy.controller, deadline)?,
+            engine: PinnedPeer::open(&policy.engine, deadline)?,
+            approver: PinnedPeer::open(&policy.approver, deadline)?,
+            executor: PinnedPeer::open(&policy.executor, deadline)?,
+        };
+        let all = peers.all();
+        for (index, peer) in all.iter().enumerate() {
+            if all[..index]
+                .iter()
+                .any(|other| other.socket_identity == peer.socket_identity)
+            {
+                return Err(QueryFailure::InvalidSelector);
+            }
+        }
+        Ok(peers)
+    }
+
+    fn all(&self) -> [&PinnedPeer<'a>; 4] {
+        [
+            &self.controller,
+            &self.engine,
+            &self.approver,
+            &self.executor,
+        ]
+    }
+
+    fn check_current(&self, deadline: Instant) -> Result<()> {
+        for peer in self.all() {
+            remaining(deadline)?;
+            peer.check_current()?;
+        }
+        Ok(())
+    }
 }
 
 impl<'a> PinnedPeer<'a> {
@@ -346,7 +401,7 @@ mod tests {
         }
     }
 
-    fn policy() -> Policy {
+    pub(super) fn policy() -> Policy {
         Policy {
             version: 1,
             boot_id: BOOT_ID.to_owned(),

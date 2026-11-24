@@ -47,6 +47,10 @@ Linux ARM64의 `dsg --json docker-controller-probe --socket <절대 Unix 소켓>
 
 Linux ARM64의 `dsg --json docker-controller-admission --policy <절대 경로>/docker-controller-admission.json`은 배포 정책과 현재 로컬 피어를 읽기 전용으로 대조한다. 정책은 root 소유의 심볼릭 링크 없는 보호 경로에 둔 단일 링크 일반 파일이어야 하며 권한은 0444, 크기 상한은 8 KiB다. 버전 1 정책에 현재 `boot_id`와 `controller`, `engine`, `approver`, `executor`를 지정한다. 각 역할은 `socket`, `pid`, `uid`, `start_ticks`, `executable`, 소문자 16진수 `executable_sha256`을 받는다. 제어기와 엔진은 root 피어이고 승인자와 실행자는 서로 다른 비root UID다. 네 PID와 소켓은 각각 구분된다.
 
+운영 쓰기 어댑터가 사용할 Linux ARM64 코어의 `with_authorized_write_request`는 보호된 제어기 프로세스에서 `SOCK_SEQPACKET` 연결 한 건을 받는다. 리스너 준비 시 `SO_PASSCRED`와 `SO_PASSPIDFD`를 설정하며 Linux 6.5 이상을 요구한다. 버전 1 메시지의 최대 크기는 512바이트다. 승인자는 프로젝트·계획 번호가 매인 `approve`만, 실행자는 같은 범위의 `apply`와 프로젝트·의도 ID가 매인 `recover`를 요청할 수 있다. 요청 JSON의 역할·UID 선언, 연결 피어와 메시지 송신자의 불일치, 종료된 피어, 전달 FD와 잘린 메시지는 거절한다.
+
+디스패치에 전달하는 값은 보호 정책 지문, 제어기·엔진·요청 역할의 세대, 정확한 요청에 묶인다. 후속 어댑터는 같은 배타 변경 경계에서 승인과 의도를 재검증하고, 정책·역할 교체 뒤에도 미확정 의도의 잠금을 같은 엔진에 유지해야 한다. 공개 CLI와 `dsgd`는 이 진입점에 운영 쓰기 요청을 전달하지 않는다. [코어 구현](../rust-scaffold/crates/dsg-core/src/docker_control_local/admission/write_request.rs)
+
 Unix 피어 자격증명, pidfd, 프로세스 시작 시각, 실행 파일 식별자와 해시, 소켓 식별자를 대조하고 읽기 프로브는 제어기에만 보낸다. 성공 시 `status=verified`, 제어기와 엔진의 `endpoint`·`generation`, `role_separation=verified`, `engine_boundary=protected_unix_socket`과 종료 코드 0을 반환한다. 불일치는 `status=unknown`, `failure`와 종료 코드 5를 반환한다. 두 경우 모두 `mutation_authorized=false`, `apply_gate=preserve_unverified_control`을 유지한다. 운영 쓰기에는 제어기 배포 출처·신뢰, 프로젝트 자원 출처·소유권, 요청별 승인, 배타 변경 경계와 공개 운영 어댑터 검증이 필요하다. [구현](../rust-scaffold/crates/dsg-core/src/docker_control_local/admission.rs)
 
 ### 관리형 실행과 Compose 재사용

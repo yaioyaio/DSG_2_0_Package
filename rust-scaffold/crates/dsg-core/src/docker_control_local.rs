@@ -1,4 +1,4 @@
-//! Read-only protocol probe for one operator-selected Linux ARM64 controller.
+//! Local identity checks for one operator-selected Linux ARM64 controller.
 use crate::docker::QueryFailure;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -14,7 +14,10 @@ use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant};
 
 mod admission;
-pub use admission::{verify_admission, AdmissionEvidence};
+pub use admission::{
+    configure_write_request_listener, verify_admission, with_authorized_write_request,
+    AdmissionEvidence, AuthorizedWriteRequest, WriteRequest,
+};
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_SOCKET_PATH_BYTES: usize = 4095;
@@ -172,6 +175,14 @@ fn connect(socket: &File) -> Result<UnixStream> {
 }
 
 fn check_peer(stream: &UnixStream, pid: i32, uid: u32) -> Result<()> {
+    let peer = peer_credentials(stream.as_raw_fd())?;
+    if peer.pid != pid || peer.uid != uid {
+        return Err(QueryFailure::InvalidSelector);
+    }
+    Ok(())
+}
+
+fn peer_credentials(fd: RawFd) -> Result<libc::ucred> {
     let mut peer = libc::ucred {
         pid: 0,
         uid: 0,
@@ -181,7 +192,7 @@ fn check_peer(stream: &UnixStream, pid: i32, uid: u32) -> Result<()> {
     // The credential buffer is writable and size matches the Linux SO_PEERCRED structure.
     if unsafe {
         libc::getsockopt(
-            stream.as_raw_fd(),
+            fd,
             libc::SOL_SOCKET,
             libc::SO_PEERCRED,
             (&mut peer as *mut libc::ucred).cast(),
@@ -191,10 +202,10 @@ fn check_peer(stream: &UnixStream, pid: i32, uid: u32) -> Result<()> {
     {
         return Err(io_failure(io::Error::last_os_error()));
     }
-    if size as usize != std::mem::size_of_val(&peer) || peer.pid != pid || peer.uid != uid {
+    if size as usize != std::mem::size_of_val(&peer) {
         return Err(QueryFailure::InvalidSelector);
     }
-    Ok(())
+    Ok(peer)
 }
 
 fn check_alive(process: &File) -> Result<()> {
