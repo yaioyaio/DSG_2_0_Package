@@ -168,6 +168,9 @@ enum Command {
         context: String,
         #[arg(long)]
         expectation_json: String,
+        /// 기준 및 희망 서비스의 비민감 설정 투영 JSON을 표준 입력으로 받습니다.
+        #[arg(long)]
+        compose_projection_stdin: bool,
     },
     /// AI CLI에서 전달한 도구 사용 이벤트를 평가합니다.
     Hook {
@@ -573,7 +576,15 @@ fn run(cli: &Cli) -> Result<Output, CliError> {
         Command::DockerReuse {
             context,
             expectation_json,
-        } => execution::reuse(cli, &root, &settings, context, expectation_json),
+            compose_projection_stdin,
+        } => execution::reuse(
+            cli,
+            &root,
+            &settings,
+            context,
+            expectation_json,
+            *compose_projection_stdin,
+        ),
         Command::GcOwn {
             candidate,
             confirm_generated: true,

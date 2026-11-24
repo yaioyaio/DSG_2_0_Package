@@ -15,7 +15,7 @@ use crate::policy::is_direct_child;
 
 const DATABASE_NAME: &str = "registry.sqlite3";
 const APPLICATION_ID: i64 = 0x4453_4732;
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 const BUSY_TIMEOUT: Duration = Duration::from_millis(500);
 const OPEN_RETRY_WINDOW: Duration = Duration::from_secs(3);
 const MAX_REASON_CODE_BYTES: usize = 64;
@@ -24,6 +24,13 @@ const MAX_PLAN_BYTES: usize = 1024 * 1024;
 const LEASE_SLOTS: i64 = 2;
 const MAX_LEASE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 const MAX_APPROVAL_TTL: Duration = Duration::from_secs(15 * 60);
+pub(crate) const MANAGED_DOCKER_TARGET: &str = "managed_docker_target";
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum GcPurpose {
+    File,
+    ManagedDocker,
+}
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -110,6 +117,19 @@ const LEASE_SCHEMA: &str = "
         WHERE released_at_ms IS NULL;
     CREATE UNIQUE INDEX active_lease_scope ON execution_lease(scope_key) WHERE released_at_ms IS NULL;
     ALTER TABLE audit_event ADD COLUMN lease_id INTEGER REFERENCES execution_lease(id);
+";
+
+const PROCESS_OBSERVATION_SCHEMA: &str = "
+    -- NULL is group-only, zero preserves incomplete samples, and one has a committed sample.
+    ALTER TABLE execution_lease ADD COLUMN mac_observation_complete INTEGER
+        CHECK (mac_observation_complete IN (0, 1));
+    CREATE TABLE execution_lease_process (
+        lease_id INTEGER NOT NULL REFERENCES execution_lease(id),
+        pid INTEGER NOT NULL CHECK (pid BETWEEN 2 AND 2147483647),
+        started_seconds INTEGER NOT NULL CHECK (started_seconds > 0),
+        started_microseconds INTEGER NOT NULL CHECK (started_microseconds BETWEEN 0 AND 999999),
+        PRIMARY KEY (lease_id, pid, started_seconds, started_microseconds)
+    ) STRICT;
 ";
 
 const GC_APPROVAL_SCHEMA: &str = "
@@ -379,7 +399,7 @@ pub fn observe_state(
         return Err(RegistryError::UnrecognizedDatabase);
     }
     let version: i64 = snapshot.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    if version != SCHEMA_VERSION {
+    if !(3..=SCHEMA_VERSION).contains(&version) {
         return Err(RegistryError::UnsupportedSchema(version));
     }
     let mode: String = snapshot.pragma_query_value(None, "journal_mode", |row| row.get(0))?;
@@ -423,8 +443,14 @@ fn observe_snapshot(
                         EXISTS (SELECT 1 FROM gc_output o WHERE o.project_id = p.project_id
                                 AND o.relative_path = a.relative_path AND o.identity = a.identity)
                  FROM gc_plan p LEFT JOIN gc_application a ON a.plan_id = p.id
-                 WHERE p.id = ?1 AND p.project_id = ?2",
-                params![plan_id, project_id, policy_digest],
+                 WHERE p.id = ?1 AND p.project_id = ?2
+                   AND json_type(p.payload_json, ?4) IS NULL",
+                params![
+                    plan_id,
+                    project_id,
+                    policy_digest,
+                    format!("$.{MANAGED_DOCKER_TARGET}")
+                ],
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
@@ -761,6 +787,37 @@ impl Registry {
         )?)
     }
 
+    pub(crate) fn docker_gc_project_owner(&self, project: i64) -> Result<String, RegistryError> {
+        let root: String = self
+            .connection
+            .query_row(
+                "SELECT root_path FROM project WHERE id = ?1",
+                [project],
+                |row| row.get(0),
+            )
+            .optional()?
+            .ok_or(RegistryError::ProjectNotFound)?;
+        Ok(format!("{:x}", Sha256::digest(root.as_bytes())))
+    }
+
+    pub(crate) fn lock_docker_gc_slots(&self, lease: &Lease) -> Result<Vec<File>, RegistryError> {
+        self.validate_lease_owner(lease)?;
+        require_active_lease(&self.connection, lease)?;
+        let mut locks = Vec::new();
+        for slot in (0..LEASE_SLOTS).filter(|slot| *slot != lease.slot) {
+            locks.push(try_lock_slot(&self.state_dir, slot)?.ok_or(RegistryError::LeaseConflict)?);
+        }
+        let other_open: bool = self.connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM execution_lease WHERE id != ?1 AND released_at_ms IS NULL)",
+            [lease.id],
+            |row| row.get(0),
+        )?;
+        if other_open {
+            return Err(RegistryError::LeaseConflict);
+        }
+        Ok(locks)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn approve_gc(
         &mut self,
@@ -773,6 +830,51 @@ impl Registry {
         ttl: Duration,
     ) -> Result<(), RegistryError> {
         let identity = gc_output_identity(relative, identity)?;
+        self.approve_gc_subject(
+            project_id,
+            plan_id,
+            relative,
+            policy_digest,
+            &identity,
+            token_digest,
+            ttl,
+            GcPurpose::File,
+        )
+    }
+
+    pub(crate) fn approve_managed_docker_gc(
+        &mut self,
+        project_id: i64,
+        plan_id: i64,
+        policy_digest: &str,
+        identity: &str,
+        token_digest: &str,
+        ttl: Duration,
+    ) -> Result<(), RegistryError> {
+        self.approve_gc_subject(
+            project_id,
+            plan_id,
+            "",
+            policy_digest,
+            identity,
+            token_digest,
+            ttl,
+            GcPurpose::ManagedDocker,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn approve_gc_subject(
+        &mut self,
+        project_id: i64,
+        plan_id: i64,
+        relative: &str,
+        policy_digest: &str,
+        identity: &str,
+        token_digest: &str,
+        ttl: Duration,
+        purpose: GcPurpose,
+    ) -> Result<(), RegistryError> {
         let policy_digest =
             normalized_digest(policy_digest).ok_or(RegistryError::InvalidPolicyDigest)?;
         let token_digest =
@@ -791,8 +893,14 @@ impl Registry {
         if plan.status != "planned" {
             return Err(RegistryError::GcStateConflict);
         }
-        require_gc_ownership(&tx, project_id, relative, &identity)?;
-        require_gc_candidate(&plan.payload()?, relative, &identity)?;
+        require_gc_subject(
+            &tx,
+            project_id,
+            &plan.payload()?,
+            relative,
+            identity,
+            purpose,
+        )?;
         let duplicate_token: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM gc_application WHERE token_digest = ?1)",
             [&token_digest],
@@ -839,31 +947,81 @@ impl Registry {
         policy_digest: &str,
         token_digest: &str,
     ) -> Result<GcClaim, RegistryError> {
+        self.claim_gc_subject(
+            lease,
+            plan_id,
+            policy_digest,
+            token_digest,
+            GcPurpose::File,
+            None,
+        )
+    }
+
+    pub(crate) fn check_managed_docker_gc_approval(
+        &self,
+        lease: &Lease,
+        plan_id: i64,
+        policy_digest: &str,
+        token_digest: &str,
+    ) -> Result<GcClaim, RegistryError> {
         self.validate_lease_owner(lease)?;
-        let token_digest =
-            normalized_digest(token_digest).ok_or(RegistryError::GcApprovalInvalid)?;
-        let policy_digest =
-            normalized_digest(policy_digest).ok_or(RegistryError::InvalidPolicyDigest)?;
+        require_active_lease(&self.connection, lease)?;
+        approved_gc_claim(
+            &self.connection,
+            lease.project_id,
+            plan_id,
+            policy_digest,
+            token_digest,
+            lease_now_ms()?,
+            GcPurpose::ManagedDocker,
+        )
+    }
+
+    pub(crate) fn claim_managed_docker_gc(
+        &mut self,
+        lease: &Lease,
+        plan_id: i64,
+        policy_digest: &str,
+        token_digest: &str,
+        identity: &str,
+    ) -> Result<GcClaim, RegistryError> {
+        self.claim_gc_subject(
+            lease,
+            plan_id,
+            policy_digest,
+            token_digest,
+            GcPurpose::ManagedDocker,
+            Some(identity),
+        )
+    }
+
+    fn claim_gc_subject(
+        &mut self,
+        lease: &Lease,
+        plan_id: i64,
+        policy_digest: &str,
+        token_digest: &str,
+        purpose: GcPurpose,
+        identity: Option<&str>,
+    ) -> Result<GcClaim, RegistryError> {
+        self.validate_lease_owner(lease)?;
         let tx = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         require_active_lease(&tx, lease)?;
         let now_ms = lease_now_ms()?;
-        let plan = gc_plan_row(&tx, lease.project_id, plan_id)?;
-        if plan.status != "approved" {
-            return Err(RegistryError::GcStateConflict);
+        let claim = approved_gc_claim(
+            &tx,
+            lease.project_id,
+            plan_id,
+            policy_digest,
+            token_digest,
+            now_ms,
+            purpose,
+        )?;
+        if identity.is_some_and(|expected| claim.identity != expected) {
+            return Err(RegistryError::GcCandidateMismatch);
         }
-        plan.require_current(&policy_digest, now_ms)?;
-        let approval = gc_application_row(&tx, plan_id)?;
-        if approval.claimed || approval.token_digest != token_digest {
-            return Err(RegistryError::GcApprovalInvalid);
-        }
-        if approval.expires_at_ms <= now_ms {
-            return Err(RegistryError::GcExpired);
-        }
-        let claim = approval.into_claim(plan_id, plan.payload()?);
-        require_gc_ownership(&tx, lease.project_id, &claim.relative_path, &claim.identity)?;
-        require_gc_candidate(&claim.payload, &claim.relative_path, &claim.identity)?;
         let claimed = tx.execute(
             "UPDATE gc_application SET claimed_at_ms = ?1
              WHERE plan_id = ?2 AND claimed_at_ms IS NULL",
@@ -887,9 +1045,26 @@ impl Registry {
     }
 
     pub fn pending_gc(&self, lease: &Lease, plan_id: i64) -> Result<GcClaim, RegistryError> {
+        self.pending_gc_subject(lease, plan_id, GcPurpose::File)
+    }
+
+    pub(crate) fn pending_managed_docker_gc(
+        &self,
+        lease: &Lease,
+        plan_id: i64,
+    ) -> Result<GcClaim, RegistryError> {
+        self.pending_gc_subject(lease, plan_id, GcPurpose::ManagedDocker)
+    }
+
+    fn pending_gc_subject(
+        &self,
+        lease: &Lease,
+        plan_id: i64,
+        purpose: GcPurpose,
+    ) -> Result<GcClaim, RegistryError> {
         self.validate_lease_owner(lease)?;
         require_active_lease(&self.connection, lease)?;
-        pending_gc_claim(&self.connection, lease.project_id, plan_id)
+        pending_gc_claim(&self.connection, lease.project_id, plan_id, purpose)
     }
 
     pub fn finish_gc(
@@ -898,6 +1073,27 @@ impl Registry {
         plan_id: i64,
         status: GcApplyStatus,
         bytes: u64,
+    ) -> Result<(), RegistryError> {
+        self.finish_gc_subject(lease, plan_id, status, bytes, GcPurpose::File)
+    }
+
+    pub(crate) fn finish_managed_docker_gc(
+        &mut self,
+        lease: &Lease,
+        plan_id: i64,
+        status: GcApplyStatus,
+        bytes: u64,
+    ) -> Result<(), RegistryError> {
+        self.finish_gc_subject(lease, plan_id, status, bytes, GcPurpose::ManagedDocker)
+    }
+
+    fn finish_gc_subject(
+        &mut self,
+        lease: &Lease,
+        plan_id: i64,
+        status: GcApplyStatus,
+        bytes: u64,
+        purpose: GcPurpose,
     ) -> Result<(), RegistryError> {
         self.validate_lease_owner(lease)?;
         let bytes = i64::try_from(bytes).map_err(|_| RegistryError::InvalidGcBytes)?;
@@ -908,7 +1104,7 @@ impl Registry {
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         require_active_lease(&tx, lease)?;
-        pending_gc_claim(&tx, lease.project_id, plan_id)?;
+        pending_gc_claim(&tx, lease.project_id, plan_id, purpose)?;
         let (status, outcome, reason_code) = status.audit_fields();
         let now = timestamp()?;
         let updated = tx.execute(
@@ -965,7 +1161,8 @@ impl Registry {
             };
             let current = tx
                 .query_row(
-                    "SELECT id, project_id, process_id, expires_at_ms FROM execution_lease
+                    "SELECT id, project_id, process_id, expires_at_ms, mac_observation_complete
+                     FROM execution_lease
                      WHERE slot = ?1 AND released_at_ms IS NULL",
                     [slot],
                     |row| {
@@ -974,13 +1171,23 @@ impl Registry {
                             row.get::<_, i64>(1)?,
                             row.get::<_, Option<u32>>(2)?,
                             row.get::<_, i64>(3)?,
+                            row.get::<_, Option<bool>>(4)?,
                         ))
                     },
                 )
                 .optional()?;
-            if let Some((id, owner, process_id, expires_at_ms)) = current {
+            if let Some((id, owner, process_id, expires_at_ms, observation_complete)) = current {
                 // Without a registered PID, the start/attach gap is ambiguous.
-                if expires_at_ms > now_ms || !process_id.is_some_and(&can_reclaim) {
+                let Some(pid) = process_id else { continue };
+                if expires_at_ms > now_ms {
+                    continue;
+                }
+                let ended = match observation_complete {
+                    Some(false) => false,
+                    Some(true) => mac_processes_gone(&tx, id, pid)?,
+                    None => can_reclaim(pid),
+                };
+                if !ended {
                     continue;
                 }
                 release_lease(
@@ -1029,19 +1236,110 @@ impl Registry {
     }
 
     pub fn attach_lease_process(&mut self, lease: &Lease, pid: u32) -> Result<(), RegistryError> {
+        self.attach_lease_pid(lease, pid, None)
+    }
+
+    fn attach_lease_pid(
+        &mut self,
+        lease: &Lease,
+        pid: u32,
+        observation_complete: Option<bool>,
+    ) -> Result<(), RegistryError> {
         self.validate_lease_owner(lease)?;
         if pid == 0 {
             return Err(RegistryError::InvalidLeaseProcess);
         }
         let updated = self.connection.execute(
-            "UPDATE execution_lease SET process_id = ?1
+            "UPDATE execution_lease SET process_id = ?1, mac_observation_complete = ?5
              WHERE id = ?2 AND project_id = ?3 AND slot = ?4
-             AND released_at_ms IS NULL AND (process_id IS NULL OR process_id = ?1)",
-            params![pid, lease.id, lease.project_id, lease.slot],
+             AND released_at_ms IS NULL AND (process_id IS NULL OR process_id = ?1)
+             AND mac_observation_complete IS NULL",
+            params![
+                pid,
+                lease.id,
+                lease.project_id,
+                lease.slot,
+                observation_complete
+            ],
         )?;
         if updated != 1 {
             return Err(RegistryError::InvalidLeaseProcess);
         }
+        Ok(())
+    }
+
+    pub fn attach_lease_owner(&mut self, lease: &Lease) -> Result<(), RegistryError> {
+        #[cfg(target_os = "macos")]
+        {
+            let owner = crate::mac_process::current_process()
+                .map_err(|_| RegistryError::InvalidLeaseProcess)?;
+            self.attach_watched_lease_process(lease, owner.pid)?;
+            self.commit_lease_observation(lease, &[owner])
+        }
+        #[cfg(not(target_os = "macos"))]
+        self.attach_lease_process(lease, std::process::id())
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn attach_watched_lease_process(
+        &mut self,
+        lease: &Lease,
+        pid: u32,
+    ) -> Result<(), RegistryError> {
+        // A crash between spawning and the first complete sample preserves the lease.
+        self.attach_lease_pid(lease, pid, Some(false))
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn begin_lease_observation(&mut self, lease: &Lease) -> Result<(), RegistryError> {
+        self.validate_lease_owner(lease)?;
+        let changed = self.connection.execute(
+            "UPDATE execution_lease SET mac_observation_complete = 0
+             WHERE id = ?1 AND project_id = ?2 AND slot = ?3 AND released_at_ms IS NULL
+               AND mac_observation_complete = 1",
+            params![lease.id, lease.project_id, lease.slot],
+        )?;
+        if changed != 1 {
+            return Err(RegistryError::InvalidLeaseProcess);
+        }
+        Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn commit_lease_observation(
+        &mut self,
+        lease: &Lease,
+        observed: &[crate::mac_process::ProcessIdentity],
+    ) -> Result<(), RegistryError> {
+        self.validate_lease_owner(lease)?;
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        {
+            let mut insert = tx.prepare_cached(
+                "INSERT INTO execution_lease_process
+                 (lease_id, pid, started_seconds, started_microseconds) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT (lease_id, pid, started_seconds, started_microseconds) DO NOTHING",
+            )?;
+            for identity in observed {
+                insert.execute(params![
+                    lease.id,
+                    identity.pid,
+                    identity.started_seconds,
+                    identity.started_microseconds
+                ])?;
+            }
+        }
+        let changed = tx.execute(
+            "UPDATE execution_lease SET mac_observation_complete = 1
+             WHERE id = ?1 AND project_id = ?2 AND slot = ?3 AND released_at_ms IS NULL
+               AND mac_observation_complete = 0",
+            params![lease.id, lease.project_id, lease.slot],
+        )?;
+        if changed != 1 {
+            return Err(RegistryError::InvalidLeaseProcess);
+        }
+        tx.commit()?;
         Ok(())
     }
 
@@ -1096,6 +1394,42 @@ impl Registry {
             return Err(RegistryError::InvalidLeaseOwner);
         }
         Ok(())
+    }
+}
+
+fn mac_processes_gone(tx: &Connection, lease_id: i64, leader: u32) -> Result<bool, RegistryError> {
+    #[cfg(target_os = "macos")]
+    {
+        use crate::mac_process::{gone, ProcessIdentity, MAX_IDENTITIES};
+
+        if !crate::runner::process_group_absent(leader) {
+            return Ok(false);
+        }
+        let mut statement = tx.prepare_cached(
+            "SELECT pid, started_seconds, started_microseconds FROM execution_lease_process
+             WHERE lease_id = ?1 LIMIT ?2",
+        )?;
+        let mut rows = statement.query(params![lease_id, MAX_IDENTITIES as i64 + 1])?;
+        let mut count = 0;
+        let mut has_leader = false;
+        while let Some(row) = rows.next()? {
+            let identity = ProcessIdentity {
+                pid: row.get(0)?,
+                started_seconds: row.get(1)?,
+                started_microseconds: row.get(2)?,
+            };
+            count += 1;
+            has_leader |= identity.pid == leader;
+            if count > MAX_IDENTITIES || !gone(identity) {
+                return Ok(false);
+            }
+        }
+        Ok(has_leader)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (tx, lease_id, leader);
+        Ok(false)
     }
 }
 
@@ -1238,7 +1572,7 @@ fn migrate(connection: &mut Connection) -> Result<(), RegistryError> {
             tx.commit()?;
             return Ok(());
         }
-        (APPLICATION_ID, 1 | 2) => {}
+        (APPLICATION_ID, 1..=3) => {}
         (APPLICATION_ID, version) => return Err(RegistryError::UnsupportedSchema(version)),
         (0, 0) => {
             let has_objects: bool =
@@ -1256,7 +1590,16 @@ fn migrate(connection: &mut Connection) -> Result<(), RegistryError> {
     if version < 2 {
         tx.execute_batch(LEASE_SCHEMA)?;
     }
-    tx.execute_batch(GC_APPROVAL_SCHEMA)?;
+    if version < 3 {
+        tx.execute_batch(GC_APPROVAL_SCHEMA)?;
+    }
+    tx.execute_batch(PROCESS_OBSERVATION_SCHEMA)?;
+    #[cfg(target_os = "macos")]
+    tx.execute(
+        "UPDATE execution_lease SET mac_observation_complete = 0
+         WHERE released_at_ms IS NULL AND process_id IS NOT NULL",
+        [],
+    )?;
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()?;
     Ok(())
@@ -1444,10 +1787,47 @@ fn gc_application_row(
         .ok_or(RegistryError::GcApprovalInvalid)
 }
 
+fn approved_gc_claim(
+    connection: &Connection,
+    project_id: i64,
+    plan_id: i64,
+    policy_digest: &str,
+    token_digest: &str,
+    now_ms: i64,
+    purpose: GcPurpose,
+) -> Result<GcClaim, RegistryError> {
+    let token_digest = normalized_digest(token_digest).ok_or(RegistryError::GcApprovalInvalid)?;
+    let policy_digest =
+        normalized_digest(policy_digest).ok_or(RegistryError::InvalidPolicyDigest)?;
+    let plan = gc_plan_row(connection, project_id, plan_id)?;
+    if plan.status != "approved" {
+        return Err(RegistryError::GcStateConflict);
+    }
+    plan.require_current(&policy_digest, now_ms)?;
+    let approval = gc_application_row(connection, plan_id)?;
+    if approval.claimed || approval.token_digest != token_digest {
+        return Err(RegistryError::GcApprovalInvalid);
+    }
+    if approval.expires_at_ms <= now_ms {
+        return Err(RegistryError::GcExpired);
+    }
+    let claim = approval.into_claim(plan_id, plan.payload()?);
+    require_gc_subject(
+        connection,
+        project_id,
+        &claim.payload,
+        &claim.relative_path,
+        &claim.identity,
+        purpose,
+    )?;
+    Ok(claim)
+}
+
 fn pending_gc_claim(
     connection: &Connection,
     project_id: i64,
     plan_id: i64,
+    purpose: GcPurpose,
 ) -> Result<GcClaim, RegistryError> {
     let plan = gc_plan_row(connection, project_id, plan_id)?;
     if !matches!(plan.status.as_str(), "applying" | "recovery_required") {
@@ -1458,13 +1838,14 @@ fn pending_gc_claim(
         return Err(RegistryError::GcApprovalInvalid);
     }
     let claim = approval.into_claim(plan_id, plan.payload()?);
-    require_gc_ownership(
+    require_gc_subject(
         connection,
         project_id,
+        &claim.payload,
         &claim.relative_path,
         &claim.identity,
+        purpose,
     )?;
-    require_gc_candidate(&claim.payload, &claim.relative_path, &claim.identity)?;
     Ok(claim)
 }
 
@@ -1515,6 +1896,44 @@ fn require_gc_ownership(
         return Err(RegistryError::GcOwnershipConflict);
     }
     Ok(())
+}
+
+fn require_gc_subject(
+    connection: &Connection,
+    project_id: i64,
+    payload: &Value,
+    relative: &str,
+    identity: &str,
+    purpose: GcPurpose,
+) -> Result<(), RegistryError> {
+    match purpose {
+        GcPurpose::File => {
+            if payload.get(MANAGED_DOCKER_TARGET).is_some() || !is_direct_child(relative) {
+                return Err(RegistryError::GcCandidateMismatch);
+            }
+            require_gc_ownership(connection, project_id, relative, identity)?;
+            require_gc_candidate(payload, relative, identity)
+        }
+        GcPurpose::ManagedDocker => {
+            // The legacy NOT NULL file column is unused by this scope. An empty
+            // file name alone does not grant access to a Docker intent.
+            if !relative.is_empty() || managed_docker_identity(payload)? != identity {
+                return Err(RegistryError::GcCandidateMismatch);
+            }
+            Ok(())
+        }
+    }
+}
+
+pub(crate) fn managed_docker_identity(payload: &Value) -> Result<String, RegistryError> {
+    let target = payload
+        .as_object()
+        .filter(|fields| fields.len() == 1)
+        .and_then(|fields| fields.get(MANAGED_DOCKER_TARGET))
+        .filter(|target| target.is_object())
+        .ok_or(RegistryError::GcCandidateMismatch)?;
+    let encoded = serde_json::to_vec(target).map_err(|_| RegistryError::GcCandidateMismatch)?;
+    Ok(format!("{:x}", Sha256::digest(encoded)))
 }
 
 fn require_gc_candidate(
@@ -2168,7 +2587,7 @@ mod tests {
             .connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 3);
+        assert_eq!(version, SCHEMA_VERSION);
         let existing: (u32, String) = registry
             .connection
             .query_row(
@@ -2179,6 +2598,82 @@ mod tests {
             )
             .unwrap();
         assert_eq!(existing, (7, "EXECUTION_COMPLETED".into()));
+    }
+
+    #[test]
+    fn v3_migration_keeps_leases_audit_and_gc_state() {
+        let temp = tempdir().unwrap();
+        let connection = Connection::open(temp.path().join(DATABASE_NAME)).unwrap();
+        for schema in [INITIAL_SCHEMA, LEASE_SCHEMA, GC_APPROVAL_SCHEMA] {
+            connection.execute_batch(schema).unwrap();
+        }
+        connection
+            .pragma_update(None, "application_id", APPLICATION_ID)
+            .unwrap();
+        connection.pragma_update(None, "user_version", 3).unwrap();
+        connection
+            .execute_batch(
+                "INSERT INTO project VALUES (1, 'fixture', 'project', 2, 3, 4);
+             INSERT INTO execution_lease VALUES (2, 1, printf('%064d', 0), 0, 7, 3, 4, 5, NULL);
+             INSERT INTO audit_event VALUES
+                 (3, 1, NULL, 'local_cli', 'managed_execution', 'incomplete', 'RUN_UNKNOWN', 5, 2);
+             INSERT INTO gc_output VALUES (1, 'target', printf('%064d', 5), 4);",
+            )
+            .unwrap();
+        drop(connection);
+
+        let registry = Registry::open(temp.path()).unwrap();
+        let existing: (u32, String, String, Option<bool>) = registry
+            .connection
+            .query_row(
+                "SELECT process_id, reason_code, relative_path, mac_observation_complete
+             FROM execution_lease JOIN audit_event ON execution_lease.id = audit_event.lease_id
+             JOIN gc_output ON gc_output.project_id = execution_lease.project_id",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        let expected_observation = if cfg!(target_os = "macos") {
+            Some(false)
+        } else {
+            None
+        };
+        assert_eq!(
+            existing,
+            (
+                7,
+                "RUN_UNKNOWN".into(),
+                "target".into(),
+                expected_observation
+            )
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn watched_lease_preserves_live_identity_and_interrupted_observation() {
+        let ttl = Duration::from_secs(30);
+        let scope = "a".repeat(64);
+        for interrupted in [false, true] {
+            let temp = tempdir().unwrap();
+            let mut registry = Registry::open(&temp.path().join("state")).unwrap();
+            let [project, _, _] = lease_fixture_projects(temp.path(), &mut registry);
+            let lease = registry
+                .acquire_lease(project, &scope, ttl, |_| false)
+                .unwrap();
+            registry.attach_lease_owner(&lease).unwrap();
+            if interrupted {
+                registry.begin_lease_observation(&lease).unwrap();
+            }
+            force_lease_expiry(&registry, lease.id);
+            drop(lease);
+            // A watched lease needs more than an absent numeric group.
+            let probe = |_| panic!("watched lease must not fall back to a numeric probe");
+            assert!(matches!(
+                registry.acquire_lease(project, &scope, ttl, probe),
+                Err(RegistryError::LeaseConflict)
+            ));
+        }
     }
 
     #[test]

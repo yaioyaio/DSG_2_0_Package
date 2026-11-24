@@ -28,11 +28,19 @@ Windows 스캔·계획은 로컬 NTFS에서 파일·볼륨 ID를 핸들로 확�
 
 Docker 읽기 전용 단계에서는 Docker 명령 대역으로 컨텍스트 고정, 빈 목록과 미확인 상태의 구분, 중복 후보 및 변경 상황을 검증한다. 격리 엔진이 이미 동작 중이면 `DSG_TEST_DOCKER_CONTEXT=dockerguard-test sh scripts/test-rust.sh`로 실제 조회를 추가 검증한다. 엔진 시작·리소스 생성·삭제는 이 조회 검증에서 수행하지 않는다.
 
-동일한 격리 컨텍스트에서 Buildx 플러그인이 준비되어 있으면 `DSG_TEST_DOCKER_CONTEXT=dockerguard-test DSG_TEST_BUILDX=1 sh scripts/test-rust.sh`로 명시한 엔진의 기본 Buildx 빌더를 실측한다. 명령은 사용자 Buildx 설정 대신 임시 설정을 사용한다. 동일 엔진 ID, 항목 수와 각 상태 수의 범위, 보존 판정을 확인한다. 별도 BuildKit 읽기 시험은 Linux ARM64 Ubuntu Parallels에서 임시 전용 소켓과 공식 v0.35.1 클라이언트를 사용한다. [조회 계약](API_SPEC.md#docker-읽기-전용-인벤토리)의 제품 명령으로 빈 캐시와 시험 캐시, 잘못된 PID·클라이언트 해시·소켓 링크 거절을 확인한다. 소유권과 GC는 별도 수용 기준이다.
+동일한 격리 컨텍스트에서 Buildx 플러그인이 준비되어 있으면 `DSG_TEST_DOCKER_CONTEXT=dockerguard-test DSG_TEST_BUILDX=1 sh scripts/test-rust.sh`로 명시한 엔진의 기본 Buildx 빌더를 실측한다. 명령은 사용자 Buildx 설정 대신 임시 설정을 사용한다. 동일 엔진 ID, 항목 수와 각 상태 수의 범위, `candidate_count=0`, `preserved_by_reason` 합계가 전체 항목 수와 일치하는지 확인한다. 별도 BuildKit 읽기 시험은 Linux ARM64 Ubuntu Parallels에서 임시 전용 소켓과 공식 v0.35.1 클라이언트를 사용한다. [조회 계약](API_SPEC.md#docker-읽기-전용-인벤토리)의 제품 명령으로 빈 캐시와 시험 캐시, 잘못된 PID·클라이언트 해시·소켓 링크 거절을 확인한다. 소유권과 GC는 별도 수용 기준이다.
 
-관리형 실행 검증에는 임시 프로젝트의 작은 Cargo 빌드와 시간 초과 뒤 재실행, lease 경합·회수 및 등록부 마이그레이션이 포함된다. 사전에 digest가 있는 공개 fixture 이미지를 보유한 격리 엔진에서 `DSG_TEST_DOCKER_CONTEXT=dockerguard-test DSG_TEST_COMPOSE_FIXTURE=1 sh scripts/test-rust.sh`로 건강한 컨테이너 하나를 확인한다. 반복 `up`의 동일 ID와 추가 컨테이너 0개를 확인한다. 구성 변경 시험에서는 원래 인스턴스를 회수하고 새 인스턴스에서 과거 기대값을 거절한다. 회수 직전에 동일 엔진과 시험 프로젝트·서비스·라벨·전체 컨테이너 ID를 대조한다.
+2단계 파서·어댑터 대상 시험 7건이 통과했다. 정상 빈 집계, 중복 ID·잘린 출력의 부분 집계 폐기, 중복될 수 있는 원래 상태 집계와 항목당 하나인 보존 사유의 우선순위를 확인했다. 지정 엔진의 실제 Buildx 조회에서는 전체 208개, 회수 가능 표시 208개, 공유 8개, 변경 가능 167개, 회수 후보 0개를 확인했다. 별도 BuildKit 서버의 실측 근거는 기존 Ubuntu ARM64 Parallels 결과를 사용했다. [BuildKit 실측](HANDOFF.md#별도-buildkit-읽기-전용-실측)
+
+관리형 실행 검증에는 임시 프로젝트의 작은 Cargo 빌드와 시간 초과 뒤 재실행, lease 경합·회수 및 등록부 마이그레이션이 포함된다.
+
+3단계 대상 러너 4건, 레지스트리 17건, macOS 프로세스 식별 1건이 통과했다. 실제 macOS에서 `python3 -IB scripts/check-managed-execution.py <dsg> --macos-lease-only`로 소유한 이탈 자손을 등록한 뒤 두 경로를 확인했다. 첫 경로는 리더의 정상 종료 뒤 실행 감독자가 `RUN_CONTROL_UNVERIFIED`와 종료 코드 5를 반환하며 lease를 유지했다. 둘째 경로에서는 소유 실행 감독자만 SIGKILL로 종료했다. 두 경로 모두 리더 종료와 별도 그룹 자손의 생존을 확인한 뒤 같은 프로젝트 실행이 차단되는지 검사했다. 이어 임시 시험 SQLite의 해당 lease 행에서 획득 시각을 0, 만료 시각을 1로 조정해 만료를 재현했다. 제품 TTL과 heartbeat는 그대로 사용했다. 이후에도 자손이 살아 있으면 재실행이 차단됐고 자손의 자진 종료 뒤 lease를 재획득했다. 회수 감사 이벤트는 경로별 1건이다.
+
+사전에 digest가 있는 공개 fixture 이미지를 보유한 격리 엔진에서 `DSG_TEST_DOCKER_CONTEXT=dockerguard-test DSG_TEST_COMPOSE_FIXTURE=1 sh scripts/test-rust.sh`로 건강한 컨테이너 하나를 확인한다. 반복 `up`의 동일 ID와 추가 컨테이너 0개를 확인한다. 구성 변경 시험에서는 원래 인스턴스를 회수하고 새 인스턴스에서 과거 기대값을 거절한다. 회수 직전에 동일 엔진과 시험 프로젝트·서비스·라벨·전체 컨테이너 ID를 대조한다.
 
 같은 Compose 시험에서 엔진 ID와 단일 시험 컨테이너의 ID·라벨을 대조한 뒤 컨테이너의 `/dev/shm`에 상태 표식을 쓴다. 구성·이미지·마운트가 같은 컨테이너가 `unhealthy`가 된 경우 재사용은 `not_healthy`와 종료 코드 5를 반환해야 한다. 시험은 기존의 격리 컨테이너 회수 경로를 사용한다.
+
+`compose_projection` 대상 시험 4건이 통과했다. 코어 단위 시험 3건은 명명 볼륨 순서와 16진수 대소문자 정규화, 서비스 변경과 빌드 입력 변경의 구분, 지원 범위를 벗어나거나 불완전한 입력의 `unknown` 판정을 확인했다. 합성 Docker CLI 대역을 사용한 통합 시험 1건은 두 번의 조회, 옵션을 생략한 기존 JSON 계약, 동일 투영의 종료 코드 0, 재생성·재빌드 판정의 종료 코드 5를 확인했다. 컨테이너 교체·비정상 health·이미지 플랫폼 불일치에는 `baseline_unverified`와 종료 코드 5를 확인했다. 기준 해시 불일치와 알 수 없는 필드는 Docker 조회 0회로 종료하고, 오류 응답에 입력 원문이 포함되지 않는지 확인했다. 실제 격리 엔진 검증 기준은 아래에 별도로 명시한다.
 
 이미지·`tmpfs` 실측에는 같은 명령에 `DSG_TEST_COMPOSE_IMAGE`를 추가하고 값으로 격리 엔진에 준비된 공식 `docker.io/library/alpine@sha256:…` 참조를 지정한다. 두 번째 컨테이너는 원래 이미지와 ID·digest가 다른 이미지와 64 KiB `tmpfs`를 사용한다. 실제 이미지와 마운트를 조회한 뒤 구성·이미지·마운트 기대값을 개별 대조해 두 관측에서 각각 `configuration_changed`, `image_changed`, `mount_changed`와 종료 코드 5를 확인한다. 관측과 같은 `tmpfs`를 기대값에 넣어도 두 관측은 `unknown/unverified_mount`와 종료 코드 5를 반환해야 한다.
 
@@ -43,6 +51,8 @@ Docker 읽기 전용 단계에서는 Docker 명령 대역으로 컨텍스트 고
 실제 Next.js 앱의 통합 검증에는 `DSG_TEST_BUILD_PROVIDERS=1`과 `DSG_TEST_NEXT_MODULES`를 함께 지정한다. 두 번째 값은 Next.js 16.4.6, React·React DOM 19.3.1과 실행 환경의 SWC가 준비된 `node_modules`의 절대 경로다. 의존성은 크기와 파일 수를 제한한 임시 복사본을 사용한다. `PATH`에는 임시 홈에서 바로 실행할 수 있는 Node와 pnpm을 둔다. 단독 검증은 `DSG_TEST_NEXT_MODULES`를 지정해 `python3 -IB scripts/check-build-providers.py <dsg> --next-only`로 실행한다. pnpm Provider의 `next build --webpack`, `BUILD_ID`, 사전 렌더 HTML, 관리형 `exec`의 `127.0.0.1` 응답·종료 및 두 lease의 감사 기록을 확인한다.
 
 정리 회귀는 자체 생성한 임시 프로젝트만 대상으로 한다. 보호 디렉터리 보존, 기존 계획 이후 내부 파일 변경 감지, 틀린 승인 보존·일회용 승인 재실행 거절, 감사 기록과 회수량을 확인한다. 등록된 Cargo 대역의 성공·실패·중단 이벤트와 격리 Git 원격의 여섯 참조를 사용하는 워크트리 회수도 검사한다.
+
+내부 Docker GC의 제어 대역 7건, 레지스트리 회귀 17건, 이미지 GC 회귀 4건이 통과했다. 이미지·빌드 캐시 한 건 적용과 재사용 거절, 외부 입력 및 계획 범위 교차 거절, 레지스트리 간 프로젝트 번호 충돌, 동시 실행 슬롯 경합, 만료·정책·프로젝트·승인 불일치, 엔드포인트·세대·스냅샷·참조·사용 상태 변경, 영수증에 의한 복구를 검사한다. 중단 시험은 등록부의 적용 의도 커밋 뒤 모의 백엔드 SQLite에서 상태 변경과 영수증을 커밋하고 panic을 일으킨다. 레지스트리와 모의 백엔드를 다시 열어 일치하는 영수증의 결과를 확정하며, 영수증 누락 경로는 `recovery_required`로 보존하는지 확인한다. 두 경로 모두 변경 시도는 1회다. 실제 Docker 삭제와 OS 프로세스 종료는 별도 실측 범위다.
 
 `crash_after_quarantine_recovers_file_and_committed_audit`는 임시 프로젝트에서 정상 승인 적용 의도를 커밋하고 파일을 격리한 자식 프로세스만 강제 종료한다. 새 등록부를 열어 만료 lease를 회수하고 실제 복원 함수를 실행한다. 파일 ID·SHA-256 유지, 회수량 0바이트, 재복원 거절, SQLite 무결성 및 적용 의도·보존 이벤트 각 1건이 통과 기준이다. 호스트 전원 장애는 별도 출시 시험이다.
 
@@ -89,6 +99,8 @@ Windows ARM64의 로컬 NTFS에서는 `python.exe -B scripts/check-windows-arm64
 - Docker 실제 중복 생성 방지/다중 OS 통합 테스트 미수행.
 
 ## 출시 게이트
+
+2026-11-24의 새 macOS ARM64 후보는 Rust 트리 `a44f0ca`에서 검증했다. Python 14건, Rust 117건과 통합 회귀, 독립 빌드 두 번의 해시 일치, 설치·업그레이드·롤백·재업그레이드·제거 및 설치본 대시보드까지 통과했다. Linux·Windows의 검증은 기존 소스에 해당한다. [새 후보 검증](HANDOFF.md#compose-캐시-관리형-실행-및-승인-정리-보완)
 - 영속 DB/사용자 데이터 유실 0건.
 - 관리형 실행 경로에서 우회 0건(테스트 매트릭스 기준).
 - 잘못된 이미지/서비스 재사용 0건.
@@ -99,5 +111,5 @@ WBS마다 구현과 검증 기록을 [작업 대조표](TASK.md)에서 대조한
 - Rust 트리 `ada5a09`의 `0.1.1-rc.1` 후보는 macOS ARM64와 기존 Parallels Windows ARM64에서 설치 수명 주기와 대시보드를 검증했다. Linux ARM64 후보는 앞선 Ubuntu Parallels 시험에서 이전 `0.1.0` 실물 업그레이드, 두 바이너리 실행, 대시보드 HTTP, 제거 후 사용자 시험 파일 보존, 관리형 타임아웃 124와 lease 재획득을 통과했다. Windows x64 후보는 ARM64 게스트 에뮬레이션과 설치기 대상 판정을 검증했다. WBS 6.1의 기존 macOS 호스트와 Parallels Ubuntu ARM64·Windows ARM64에서 수행 가능한 패키지 검증을 완료했다. 등록된 Windows VM이 ARM64이므로 Windows x64 운영체제 설치 수명 주기는 이번 범위에서 제외했다. 해당 시험의 공식 수용 기준은 WBS 6.1에서 관리한다. [패키지 근거](RELEASE.md) · [macOS·Windows 실측](HANDOFF.md#8단계-현재-후보-제품화-검증) · [Ubuntu 실측](HANDOFF.md#별도-buildkit-읽기-전용-실측)
 
 - Docker 내장 빌더 총량·활성 집계, 기본 Buildx 빌더의 상태별 조회, 선택한 기존 이미지 1개 보존은 조회·계획 검증에 해당한다. Buildx 상태별 항목은 서로 겹칠 수 있다. WBS 2.3의 별도 BuildKit는 실제 4개를 조회하고 전부 보존했다. 프로젝트 캐시 소유권과 안전한 승인 회수의 증거가 필요하다. 이미지 적용 검증에는 승인된 적용 경로와 단독 제어를 확인한 격리 엔진이 필요하다.
-- macOS에서 격리 엔진·Buildx·Compose 이미지 옵션을 포함한 `sh scripts/test-rust.sh`는 종료 코드 0으로 완료됐고 Rust 시험 103개를 통과했다. 시험기가 Compose를 반복 실행한 뒤 제품은 동일 ID 1개를 반환했다. 시험에서는 구성·health·실제 이미지·64 KiB `tmpfs` 변경 거절, 일치하는 `tmpfs`의 `unknown/unverified_mount` 판정, 소유 컨테이너 회수를 확인했다. 명명 볼륨 옵션으로 실행한 별도 전체 시험도 종료 코드 0과 Rust 시험 103개 통과를 확인했다. 볼륨 A의 재사용, B로 교체한 뒤 A 기대값의 거절과 B 기대값의 통과, 소유 컨테이너 회수 및 외부 볼륨 두 개 보존을 확인했다. 종료 후 인벤토리는 컨테이너 7개, 이미지 7개, 볼륨 2개, 중복 0건이었다. Compose 시험의 제품 진입점은 호출자가 준 기대 구성으로 기존 컨테이너를 관측한다. 공식 PLAN의 구성 자체 정규화와 재빌드 필요 판정은 현재 미구현이며 백로그에서 추적한다. pnpm 시험에는 일반 프로젝트 스크립트와 실제 Next.js 앱 빌드·루프백 응답을 포함한다. [명명 볼륨 실측](HANDOFF.md#명명-볼륨과-ubuntu-parallels-실측)
+- macOS에서 격리 엔진·Buildx·Compose 이미지 옵션을 포함한 `sh scripts/test-rust.sh`는 종료 코드 0으로 완료됐고 Rust 시험 103개를 통과했다. 시험기가 Compose를 반복 실행한 뒤 제품은 동일 ID 1개를 반환했다. 시험에서는 구성·health·실제 이미지·64 KiB `tmpfs` 변경 거절, 일치하는 `tmpfs`의 `unknown/unverified_mount` 판정, 소유 컨테이너 회수를 확인했다. 명명 볼륨 옵션으로 실행한 별도 전체 시험도 종료 코드 0과 Rust 시험 103개 통과를 확인했다. 볼륨 A의 재사용, B로 교체한 뒤 A 기대값의 거절과 B 기대값의 통과, 소유 컨테이너 회수 및 외부 볼륨 두 개 보존을 확인했다. 종료 후 인벤토리는 컨테이너 7개, 이미지 7개, 볼륨 2개, 중복 0건이었다. Compose 시험의 제품 진입점은 호출자가 준 기대 구성으로 기존 컨테이너를 관측한다. 구성 정규화와 재빌드 필요 판정의 1단계 구현은 비민감 JSON 투영을 대상으로 하며, 위의 합성 Docker CLI 대역 시험에서 확인했다. pnpm 시험에는 일반 프로젝트 스크립트와 실제 Next.js 앱 빌드·루프백 응답을 포함한다. [명명 볼륨 실측](HANDOFF.md#명명-볼륨과-ubuntu-parallels-실측)
 - 프로세스 강제 종료와 재시작 근거는 [핸드오프](HANDOFF.md)에 기록한다. 전원 장애 복구와 전체 플랫폼의 감사 무손실은 독립된 출시 검증으로 추적한다.

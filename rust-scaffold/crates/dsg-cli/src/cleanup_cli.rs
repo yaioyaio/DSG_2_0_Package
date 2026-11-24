@@ -102,7 +102,7 @@ pub fn apply(
             process_group_gone,
         )
         .map_err(lease_error)?;
-    if let Err(error) = registry.attach_lease_process(&lease, std::process::id()) {
+    if let Err(error) = registry.attach_lease_owner(&lease) {
         registry
             .finish_lease(lease, AuditOutcome::Failure, "GC_OWNER_UNCONFIRMED")
             .map_err(lease_error)?;

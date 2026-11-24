@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 import secrets
 import signal
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -39,6 +40,121 @@ def verify_cargo(cli, project):
     following = result(cli + ['exec', '--timeout', '3', '--', 'true'])
     assert following['run']['outcome'] == 'success' and following['lease_released']
     print('Managed execution: Cargo fixture, timeout and same-project lease reacquisition passed.')
+
+
+DETACHED_FIXTURE = '''
+import os
+from pathlib import Path
+import time
+
+deadline = time.monotonic() + 10
+
+def wait_for(marker):
+    while time.monotonic() < deadline and not marker.exists():
+        time.sleep(0.02)
+
+if os.fork() == 0:
+    os.setsid()
+    Path('detached.tmp').write_text(str(os.getpid()))
+    Path('detached.tmp').replace('detached.pid')
+    wait_for(Path('detached.release'))
+    os._exit(0)
+wait_for(Path('leader.release'))
+os._exit(0)
+'''
+
+
+def verify_detached_lease(executable, base, global_policy, crash):
+    project = base / ('lease-crash' if crash else 'lease-exit')
+    project.mkdir()
+    state = project / 'state'
+    cli = [executable, '--root', str(project), '--state-dir', str(state),
+           '--global-policy', str(global_policy), '--json']
+    result(cli + ['init', '--project-id', 'detached-fixture'])
+    helper = project / 'fixture.py'
+    helper.write_text(DETACHED_FIXTURE)
+    database = state / 'registry.sqlite3'
+    detached_release = project / 'detached.release'
+    leader_release = project / 'leader.release'
+    readiness = project / 'detached.pid'
+    contender = cli + ['exec', '--timeout', '2', '--', '/usr/bin/true']
+
+    def assert_blocked():
+        blocked = call(contender, timeout=2)
+        assert blocked.returncode == 2
+        assert json.loads(blocked.stderr)['error']['code'] == 'RESOURCE_ACTIVE'
+
+    def exited(pid):
+        try:
+            os.getpgid(pid)
+        except ProcessLookupError:
+            return True
+        return False
+
+    supervisor = subprocess.Popen(cli + ['exec', '--timeout', '8', '--', sys.executable, '-IB', str(helper)],
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        ready_until = time.monotonic() + 3
+        with sqlite3.connect(database, timeout=0.3) as db:
+            while time.monotonic() < ready_until:
+                # Hold the fixture's writer lock just long enough to deliver SIGKILL
+                # after a complete sample, without racing the start of the next sample.
+                db.execute('BEGIN IMMEDIATE')
+                lease = db.execute('SELECT id, process_id, mac_observation_complete FROM execution_lease '
+                                   'WHERE released_at_ms IS NULL').fetchone()
+                if lease and lease[2] == 1 and readiness.is_file():
+                    lease_id, leader, _ = lease
+                    detached = int(readiness.read_text())
+                    observed = db.execute(
+                        'SELECT pid, started_seconds FROM execution_lease_process WHERE lease_id = ?',
+                        (lease_id,)).fetchall()
+                    if {pid for pid, started in observed if started > 0} == {leader, detached}:
+                        assert os.getpgid(leader) == leader
+                        assert os.getpgid(detached) == detached and detached != leader
+                        if crash:
+                            supervisor.kill()
+                        leader_release.touch()
+                        db.commit()
+                        break
+                db.rollback()
+                time.sleep(0.02)
+            else:
+                raise RuntimeError('The owned detached process was not recorded before the fixture deadline.')
+
+        stdout, _ = supervisor.communicate(timeout=3)
+        if crash:
+            assert supervisor.returncode == -signal.SIGKILL
+        else:
+            assert supervisor.returncode == 5
+            report = json.loads(stdout)['result']
+            assert report['reason_code'] == 'RUN_CONTROL_UNVERIFIED'
+            assert not report['run']['tree_confirmed_gone'] and not report['lease_released']
+        leader_deadline = time.monotonic() + 2
+        while not exited(leader) and time.monotonic() < leader_deadline:
+            time.sleep(0.02)
+        assert exited(leader) and os.getpgid(detached) == detached
+        assert_blocked()
+        # Keep the production TTL and heartbeat untouched. This isolated state
+        # fixture advances expiry after proving the unexpired lease blocks entry.
+        with sqlite3.connect(database, timeout=0.3) as db:
+            db.execute('UPDATE execution_lease SET acquired_at_ms = 0, expires_at_ms = 1 WHERE id = ?', (lease_id,))
+        assert_blocked()
+        assert os.getpgid(detached) == detached
+        detached_release.touch()
+        detached_deadline = time.monotonic() + 2
+        while not exited(detached) and time.monotonic() < detached_deadline:
+            time.sleep(0.02)
+        assert exited(detached)
+        assert result(contender, timeout=3)['lease_released']
+        with sqlite3.connect(database, timeout=0.3) as db:
+            assert db.execute('SELECT COUNT(*) FROM audit_event WHERE lease_id = ? '
+                              "AND reason_code = 'LEASE_RECLAIMED'", (lease_id,)).fetchone()[0] == 1
+    finally:
+        detached_release.touch()
+        leader_release.touch()
+        if supervisor.poll() is None:
+            supervisor.kill()
+        supervisor.communicate(timeout=2)
 
 
 def docker_field(arguments, timeout):
@@ -401,12 +517,21 @@ if __name__ == '__main__':
     runner_deadline = time.monotonic() + 55
     executable = str(Path(sys.argv[1]).resolve())
     context = sys.argv[2] if len(sys.argv) > 2 else None
+    lease_only = context == '--macos-lease-only'
     with tempfile.TemporaryDirectory(prefix='dsg-managed-test-') as fixture:
         base = Path(fixture)
         project = base / 'fixture'
         project.mkdir()
         global_policy = base / 'policy.json'
         global_policy.write_text('{"host_min_free_gb":0,"project_budget_gb":1}')
+        if lease_only and sys.platform != 'darwin':
+            raise SystemExit('Detached managed lease fixtures require macOS.')
+        if sys.platform == 'darwin' and (lease_only or context is None):
+            for crash in (False, True):
+                verify_detached_lease(executable, base, global_policy, crash)
+            print('Managed execution (macOS): detached process blocked expired lease after normal and forced supervisor exit.')
+            if lease_only:
+                sys.exit(0)
         state = base / 'state'
         cli = [executable, '--root', str(project), '--state-dir', str(state), '--global-policy', str(global_policy), '--json']
         result(cli + ['init', '--project-id', 'managed-fixture'])
