@@ -2,10 +2,13 @@ use crate::docker::{
     context_inventory, valid_context_name, ContextInventory, DockerOperation, DockerRead,
     QueryFailure,
 };
+use crate::docker_cache::BuildxRead;
 use crate::docker_image_gc::{valid_full_image_id, valid_owner_fingerprint};
 use std::io;
 #[cfg(any(unix, windows))]
 use std::io::Read;
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 #[cfg(unix)]
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdout, Command, Stdio};
@@ -14,9 +17,15 @@ use std::time::{Duration, Instant};
 
 const MAX_STDOUT_BYTES: usize = 64 * 1024;
 const QUERY_TIMEOUT: Duration = Duration::from_secs(3);
+#[cfg(unix)]
+const BUILDX_QUERY_TIMEOUT: Duration = Duration::from_secs(6);
+#[cfg(unix)]
+const BUILDX_CLEANUP_TIMEOUT: Duration = Duration::from_millis(500);
 const INVENTORY_TIMEOUT: Duration = Duration::from_secs(20);
 const POLL_INTERVAL: Duration = Duration::from_millis(5);
 const BUILD_CACHE_FORMAT: &str = r#"{{if eq .Type "Build Cache"}}{"total":{{json .TotalCount}},"active":{{json .Active}}}{{end}}"#;
+#[cfg(unix)]
+const BUILDX_USAGE_FORMAT: &str = "{{.Reclaimable}}|{{.Shared}}|{{.Mutable}}";
 // Docker may return a stub for an unreadable or missing context on success.
 const CONTEXT_NAME_FORMAT: &str = "{{if .Error}}null{{else}}{{json .Name}}{{end}}";
 
@@ -174,6 +183,31 @@ impl DockerCli {
         };
         Ok(command)
     }
+
+    #[cfg(unix)]
+    fn buildx_usage_command(&self, config: &Path) -> Result<Command, QueryFailure> {
+        if self.local.is_some() {
+            return Err(QueryFailure::Unavailable);
+        }
+        let mut command = self.base_command();
+        // An empty store prevents existing builders from shadowing the context's builder.
+        command
+            .env("BUILDX_CONFIG", config)
+            .env_remove("BUILDX_BUILDER")
+            .env_remove("BUILDKIT_HOST")
+            .process_group(0)
+            .args([
+                "buildx",
+                "du",
+                "--builder",
+                &self.context,
+                "--timeout",
+                "5s",
+                "--format",
+                BUILDX_USAGE_FORMAT,
+            ]);
+        Ok(command)
+    }
 }
 
 /// List locally configured names without selecting a context or querying an engine.
@@ -211,6 +245,26 @@ impl DockerRead for DockerCli {
     }
 }
 
+impl BuildxRead for DockerCli {
+    #[cfg(unix)]
+    fn query_buildx_usage(&self) -> Result<String, QueryFailure> {
+        let deadline = self.deadline.min(Instant::now() + BUILDX_QUERY_TIMEOUT);
+        if Instant::now() >= deadline {
+            return Err(QueryFailure::Timeout);
+        }
+        let config = tempfile::Builder::new()
+            .prefix("dsg-buildx-")
+            .tempdir()
+            .map_err(|_| QueryFailure::Unavailable)?;
+        capture_buildx_output(self.buildx_usage_command(config.path())?, deadline)
+    }
+
+    #[cfg(not(unix))]
+    fn query_buildx_usage(&self) -> Result<String, QueryFailure> {
+        Err(QueryFailure::Unavailable)
+    }
+}
+
 fn is_hex_id(id: &str) -> bool {
     id.len() == 64
         && id
@@ -219,15 +273,7 @@ fn is_hex_id(id: &str) -> bool {
 }
 
 fn capture_output(mut command: Command, deadline: Instant) -> Result<String, QueryFailure> {
-    if Instant::now() >= deadline {
-        return Err(QueryFailure::Timeout);
-    }
-    let mut child = command
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|_| QueryFailure::Unavailable)?;
+    let mut child = spawn_query(&mut command, deadline)?;
     let result = collect_output(&mut child, deadline);
     if result.is_err() {
         // Only kill and reap the child spawned by this call.
@@ -237,8 +283,110 @@ fn capture_output(mut command: Command, deadline: Instant) -> Result<String, Que
     result
 }
 
+fn spawn_query(command: &mut Command, deadline: Instant) -> Result<Child, QueryFailure> {
+    if Instant::now() >= deadline {
+        return Err(QueryFailure::Timeout);
+    }
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|_| QueryFailure::Unavailable)
+}
+
+#[cfg(unix)]
+fn capture_buildx_output(mut command: Command, deadline: Instant) -> Result<String, QueryFailure> {
+    let mut child = spawn_query(&mut command, deadline)?;
+    let pid = child.id() as libc::pid_t;
+    let output = child
+        .stdout
+        .take()
+        .ok_or(QueryFailure::Unavailable)
+        .and_then(|stdout| {
+            collect_stdout(stdout, deadline, || match buildx_child_exited(pid) {
+                Ok(exited) => Ok(exited),
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => Ok(false),
+                Err(_) => Err(QueryFailure::Unavailable),
+            })
+        });
+    let cleanup = finish_buildx_group(child, pid);
+    let output = output?;
+    cleanup?;
+    Ok(output)
+}
+
+#[cfg(unix)]
+fn buildx_child_exited(pid: libc::pid_t) -> io::Result<bool> {
+    // Leave the leader waitable so the numeric PGID cannot be recycled before cleanup.
+    let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    let flags = libc::WEXITED | libc::WNOHANG | libc::WNOWAIT;
+    if unsafe { libc::waitid(libc::P_PID, pid as libc::id_t, &mut info, flags) } == -1 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(unsafe { info.si_pid() } == pid)
+}
+
+#[cfg(unix)]
+fn finish_buildx_group(mut child: Child, pid: libc::pid_t) -> Result<(), QueryFailure> {
+    let deadline = Instant::now() + BUILDX_CLEANUP_TIMEOUT;
+    loop {
+        match buildx_child_exited(pid) {
+            Ok(_) => {
+                // Buildx is a CLI plugin. Stop any remaining member of this invocation's group.
+                unsafe { libc::kill(-pid, libc::SIGKILL) };
+                break;
+            }
+            Err(error)
+                if error.kind() == io::ErrorKind::Interrupted && Instant::now() < deadline => {}
+            Err(_) => return Err(QueryFailure::Unavailable),
+        }
+    }
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() < deadline => thread::sleep(POLL_INTERVAL),
+            Err(error)
+                if error.kind() == io::ErrorKind::Interrupted && Instant::now() < deadline => {}
+            _ => {
+                let _ = thread::Builder::new()
+                    .name("dsg-buildx-reaper".into())
+                    .spawn(move || child.wait());
+                return Err(QueryFailure::Unavailable);
+            }
+        }
+    };
+    loop {
+        // Signal zero observes the group after reaping the leader without affecting any PID.
+        let present = unsafe { libc::kill(-pid, 0) } == 0;
+        if !present && io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH) {
+            return status
+                .success()
+                .then_some(())
+                .ok_or(QueryFailure::Unavailable);
+        }
+        if Instant::now() >= deadline {
+            return Err(QueryFailure::Unavailable);
+        }
+        thread::sleep(POLL_INTERVAL);
+    }
+}
+
 fn collect_output(child: &mut Child, deadline: Instant) -> Result<String, QueryFailure> {
-    let mut stdout = child.stdout.take().ok_or(QueryFailure::Unavailable)?;
+    let stdout = child.stdout.take().ok_or(QueryFailure::Unavailable)?;
+    collect_stdout(stdout, deadline, || {
+        match child.try_wait().map_err(|_| QueryFailure::Unavailable)? {
+            Some(status) if !status.success() => Err(QueryFailure::Unavailable),
+            status => Ok(status.is_some()),
+        }
+    })
+}
+
+fn collect_stdout(
+    mut stdout: ChildStdout,
+    deadline: Instant,
+    mut exited_query: impl FnMut() -> Result<bool, QueryFailure>,
+) -> Result<String, QueryFailure> {
     prepare_pipe(&stdout).map_err(|_| QueryFailure::Unavailable)?;
     let mut buffer = Vec::new();
     let mut chunk = [0; 8192];
@@ -249,12 +397,7 @@ fn collect_output(child: &mut Child, deadline: Instant) -> Result<String, QueryF
             return Err(QueryFailure::Timeout);
         }
         if !exited {
-            if let Some(status) = child.try_wait().map_err(|_| QueryFailure::Unavailable)? {
-                if !status.success() {
-                    return Err(QueryFailure::Unavailable);
-                }
-                exited = true;
-            }
+            exited = exited_query()?;
         }
         if !reached_eof {
             let remaining = MAX_STDOUT_BYTES - buffer.len();
@@ -432,6 +575,49 @@ mod tests {
                     .any(|(name, value)| name == key && value.is_none()));
             }
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn buildx_usage_is_pinned_to_the_engine_context_and_empty_store() {
+        let docker = DockerCli::new("explicit-context").unwrap();
+        let config = Path::new("/isolated-buildx-config");
+        let command = docker.buildx_usage_command(config).unwrap();
+        let args: Vec<_> = command.get_args().collect();
+        assert_eq!(
+            args,
+            [
+                "--context",
+                "explicit-context",
+                "buildx",
+                "du",
+                "--builder",
+                "explicit-context",
+                "--timeout",
+                "5s",
+                "--format",
+                BUILDX_USAGE_FORMAT,
+            ]
+        );
+        assert!(command
+            .get_envs()
+            .any(|(name, value)| name == "BUILDX_CONFIG" && value == Some(config.as_os_str())));
+        for key in ["BUILDX_BUILDER", "BUILDKIT_HOST"] {
+            assert!(command
+                .get_envs()
+                .any(|(name, value)| name == key && value.is_none()));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn buildx_child_group_is_bounded_when_a_plugin_keeps_stdout_open() {
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", "sleep 15 & exit 0"]).process_group(0);
+        assert_eq!(
+            capture_buildx_output(command, Instant::now() + Duration::from_millis(100)),
+            Err(QueryFailure::Timeout)
+        );
     }
 
     #[test]

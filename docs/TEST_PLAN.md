@@ -28,6 +28,8 @@ Windows 스캔·계획은 로컬 NTFS에서 파일·볼륨 ID를 핸들로 확�
 
 Docker 읽기 전용 단계에서는 Docker 명령 대역으로 컨텍스트 고정, 빈 목록과 미확인 상태의 구분, 중복 후보 및 변경 상황을 검증한다. 격리 엔진이 이미 동작 중이면 `DSG_TEST_DOCKER_CONTEXT=dockerguard-test sh scripts/test-rust.sh`로 실제 조회를 추가 검증한다. 엔진 시작·리소스 생성·삭제는 이 조회 검증에서 수행하지 않는다.
 
+동일한 격리 컨텍스트에서 Buildx 플러그인이 준비되어 있으면 `DSG_TEST_DOCKER_CONTEXT=dockerguard-test DSG_TEST_BUILDX=1 sh scripts/test-rust.sh`로 명시한 엔진의 기본 Buildx 빌더를 실측한다. 명령은 사용자 Buildx 설정 대신 임시 설정을 사용한다. 동일 엔진 ID, 항목 수와 각 상태 수의 범위, 보존 판정을 확인한다. 별도 Buildx 빌더, 소유권, GC는 WBS 2.3의 잔여 검증이다.
+
 관리형 실행 검증에는 임시 프로젝트의 작은 Cargo 빌드와 시간 초과 뒤 재실행, lease 경합·회수 및 등록부 마이그레이션이 포함된다. 사전에 digest가 있는 공개 fixture 이미지를 보유한 격리 엔진에서 `DSG_TEST_DOCKER_CONTEXT=dockerguard-test DSG_TEST_COMPOSE_FIXTURE=1 sh scripts/test-rust.sh`로 건강한 컨테이너 하나를 확인한다. 검증하는 동안 동일 재사용 요청과 설정 해시 변경 결과, 추가 컨테이너 0개를 확인하고 fixture 라벨로 오늘 생성한 컨테이너만 회수한다.
 
 `DSG_TEST_BUILD_PROVIDERS=1 sh scripts/test-rust.sh`는 로컬 도구와 의존성 없는 임시 프로젝트로 등록된 빌드·테스트 작업을 실행한다. `DSG_TEST_PLAYWRIGHT_MODULES`에 준비한 공식 Playwright의 `node_modules` 경로를 추가하면 실제 성공·실패 추적 파일의 존재와 길이, 서로 다른 출력 경로, 기본 프로젝트 출력 보존도 확인한다. 감사 검증에는 실행 결과 코드와 해당 lease 참조만 사용한다.

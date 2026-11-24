@@ -14,7 +14,8 @@
     "release_signature": "macOS ARM64 offline signer handoff, exact archive and manifest verification, rejected responses, publisher-gated local package rejection, and package lifecycle passed. Official signer qualification remains separate.",
     "build_providers": "Cargo, Node, pnpm, Gradle, uv, Go and Playwright ran on macOS. Playwright retained success and failure traces, opt-in TTL reclaimed one expired success and preserved expected failure.",
     "documentation_traceability": "WBS 14 rows, DSG 8 stages and 13 unchanged requirements reconciled. macOS Python 14 and Rust 98 tests passed, including isolated Docker reads and WebKit dashboard comparison; four preserved release candidates matched their inventories.",
-    "windows_foundation": "Windows ARM64 MSVC cross-link and nine native NTFS filesystem tests passed on the existing Parallels guest. macOS Python 14 and Rust 98 plus registered integration passed."
+    "windows_foundation": "Windows ARM64 MSVC cross-link and nine native NTFS filesystem tests passed on the existing Parallels guest. macOS Python 14 and Rust 98 plus registered integration passed.",
+    "buildx_cache": "macOS Rust 102 and live isolated Buildx integration passed. Engine default Buildx totals 208 records, 208 reclaimable, 8 shared, 167 mutable; all preserved. Separate builder qualification remains open."
   },
   "files": [
     {
@@ -64,8 +65,8 @@
     },
     {
       "path": "docs/API_SPEC.md",
-      "sha256": "261b1a5e3ffe2ec490120ff49447085e94b912dc4c894c7489682884dc98e34c",
-      "bytes": 13421
+      "sha256": "d0cafc64fa8eab8d6653aab1915d67cfd855efbb072afed2b278d05c3b14a829",
+      "bytes": 14041
     },
     {
       "path": "docs/ARCHITECTURE.md",
@@ -124,13 +125,13 @@
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "036d11f73754b7d9598461d594301e690b41a9d40714c117f0579cce43c402c3",
-      "bytes": 12107
+      "sha256": "213c61d4139c6a21023729b3c99161645ede5b217ab9f592db3accdf1b803970",
+      "bytes": 12150
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "89302e234c7422308482d1802e3b27a0fe9186dbf051d68186f039766da79781",
-      "bytes": 11551
+      "sha256": "765ab0472c69f2d0cadb1418a3724ee76b9ed1141ee3ca55a44d27f947783eee",
+      "bytes": 12012
     },
     {
       "path": "docs/WBS.md",
@@ -299,8 +300,8 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/src/main.rs",
-      "sha256": "f881f8a536fd2590ff59bdd2ab6cd3e30d6aae2997cb5b1c04ce527a726127f5",
-      "bytes": 23490
+      "sha256": "2b0ae4a6a4e4b015011488808615b40ceac2363706bdfb6bcbd62de12b793381",
+      "bytes": 24714
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/src/mcp.rs",
@@ -339,13 +340,13 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/docker_cache.rs",
-      "sha256": "3d1b89a270d62f895f85d82644d155a8a16f09604b45636b659426fcb5ce30a0",
-      "bytes": 9498
+      "sha256": "057bcaacc7105f04fad28e17864c83ba0b2c180fed7bd69de02c00bd89c2389f",
+      "bytes": 18202
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/docker_command.rs",
-      "sha256": "9adedd23beec50bb36f3a484738b3e4c0aee57ded5edac89affcb577ab26ff4a",
-      "bytes": 20327
+      "sha256": "95b33021c0a2c4ed63e9b29f2ba126233c7523c0c8ea3cd9f77f4d54eeda2a7b",
+      "bytes": 26897
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/docker_image_gc.rs",
@@ -484,8 +485,8 @@
     },
     {
       "path": "scripts/test-rust.sh",
-      "sha256": "33cdd10560cdf2e48b24c81492b0f2c0b8a17b9410da46c259d5d4332fe61f32",
-      "bytes": 7251
+      "sha256": "e919402e184d967084c2a972055ed77d26646e3e6986adfdf796102c23ffe28a",
+      "bytes": 8323
     },
     {
       "path": "scripts/test.sh",

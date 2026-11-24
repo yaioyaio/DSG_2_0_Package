@@ -31,6 +31,8 @@ python3 -m dsg hook --agent codex
 
 `dsg --json docker-build-cache --context <context>`는 지정한 Docker 엔진의 내장 빌더 캐시 총량과 활성 항목 수를 조회한다. 조회 전후 엔진 ID가 일치해야 한다. 개별 캐시 소유권은 감지할 수 없어 모든 경우에 `disposition=preserve`를 반환한다. 집계 실패 시 수치는 `null`이며 종료 코드는 5다. 이 경로의 지원 범위는 엔진이 보고하는 내장 빌더 집계다.
 
+`dsg --json docker-buildx-cache --context <context>`는 지정 엔진에 기본 제공되는 Buildx 빌더의 `total_count`, `reclaimable_count`, `shared_count`, `mutable_count`를 읽는다. 이 명령은 빈 임시 Buildx 설정을 사용하고 조회 전후에 엔진 ID를 대조한다. Buildx의 회수 가능 표시는 캐시 상태이며 프로젝트 소유권이나 삭제 승인과 별개다. 이 명령은 항상 `disposition=preserve`를 반환하며 조회 실패·초과 시 수치는 `null`, 종료 코드는 5다. [Docker Buildx 사용량 명령](https://docs.docker.com/reference/cli/docker/buildx/du/)
+
 ### 관리형 실행과 Compose 재사용
 
 `dsg exec --timeout 1~120 -- <argv...>`는 등록된 프로젝트의 정책과 호스트·프로젝트 예산을 확인한 뒤 직접 실행한다. 관리형 실행은 프로젝트별 lease 하나와 동일 상태 저장소의 전역 두 슬롯으로 제한한다. 조회가 불완전하거나 정책상 추가 확인이 필요하면 기존 판단 형식으로 반환한다. 성공 0, 정책 거부 3, 승인 필요 4, 제어 미확인 5, 시간 초과 124, 정상 중단 130을 사용한다. 자식이 실패하면 자식의 종료 코드를 반환한다. `--json`에서는 명령과 자식 원문 출력 없이 `run.outcome`, `run.exit_code`, `run.tree_confirmed_gone`과 `lease_released`를 제공한다.

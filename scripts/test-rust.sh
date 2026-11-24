@@ -40,8 +40,11 @@ with tempfile.TemporaryDirectory(prefix='dsg-rust-test-') as fixture:
     docker_context = os.environ.get('DSG_TEST_DOCKER_CONTEXT')
     dashboard_counts = None
     compose_fixture = os.environ.get('DSG_TEST_COMPOSE_FIXTURE') == '1'
+    buildx_fixture = os.environ.get('DSG_TEST_BUILDX') == '1'
     if compose_fixture and docker_context not in {'dsg-test', 'dockerguard-test'}:
         raise SystemExit('Compose fixture requires a registered isolated test context.')
+    if buildx_fixture and docker_context not in {'dsg-test', 'dockerguard-test'}:
+        raise SystemExit('Buildx smoke requires a registered isolated test context.')
     if docker_context:
         if docker_context not in {'dsg-test', 'dockerguard-test'}:
             raise SystemExit('Real inventory smoke requires a registered isolated test context.')
@@ -78,6 +81,16 @@ with tempfile.TemporaryDirectory(prefix='dsg-rust-test-') as fixture:
         assert cache['context'] == docker_context and cache['engine_id'] == inventory['engine_id']
         assert cache['status'] == 'complete' and cache['disposition'] == 'preserve'
         print(f"Embedded builder cache: total={cache['total_count']}, active={cache['active_count']}, preserved.")
+        if buildx_fixture:
+            buildx_output = subprocess.run([str(executable), '--json', 'docker-buildx-cache',
+                                            '--context', docker_context], capture_output=True,
+                                           text=True, timeout=17, check=True)
+            buildx = json.loads(buildx_output.stdout)['result']
+            assert buildx['engine_id'] == inventory['engine_id'] and buildx['context'] == docker_context
+            assert buildx['status'] == 'complete' and buildx['disposition'] == 'preserve'
+            names = ('total_count', 'reclaimable_count', 'shared_count', 'mutable_count')
+            assert all(0 <= buildx[key] <= buildx['total_count'] for key in names)
+            print('Buildx default builder: ' + ', '.join(f'{key}={buildx[key]}' for key in names) + ', preserved.')
         if inventory['images']:
             args = [str(executable), '--root', str(project), '--state-dir', str(project / '.dsg'), '--json']
             preview = subprocess.run(args + ['gc-plan', '--docker-context', docker_context,
