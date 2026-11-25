@@ -4,6 +4,7 @@ package cache
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -19,12 +20,13 @@ import (
 )
 
 type dsgSameMountAuthority struct {
-	db      *bolt.DB
-	device  uint64
-	inode   uint64
-	path    string
-	mu      sync.Mutex
-	witness *dsgLedgerWitness
+	db             *bolt.DB
+	device         uint64
+	inode          uint64
+	path           string
+	mu             sync.Mutex
+	witness        *dsgLedgerWitness
+	claimFreshness func(context.Context, dsgSameMountGrant, string) error
 }
 
 const dsgLedgerLimit = 16 << 20
@@ -223,10 +225,14 @@ func (a *dsgSameMountAuthority) currentDigest() []byte {
 // leaves an untrusted ledger and stops mutation. Keep the last checkpoint at
 // its separate path so restoring old grant bytes cannot restore authority.
 func (a *dsgSameMountAuthority) update(fn func(*bolt.Tx) error) error {
+	return a.updateIfCurrent(nil, fn)
+}
+
+func (a *dsgSameMountAuthority) updateIfCurrent(expected []byte, fn func(*bolt.Tx) error) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	previous := a.currentDigest()
-	if previous == nil {
+	if previous == nil || (expected != nil && !bytes.Equal(previous, expected)) {
 		return ErrDSGExactPreserve
 	}
 	if err := a.db.Update(fn); err != nil {

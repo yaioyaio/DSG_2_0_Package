@@ -306,6 +306,9 @@ func DSGRunExactOperator(ctx context.Context, op, registration string, req DSGOp
 	status := "settled"
 	if op == DSGOperatorApply {
 		status = "applied"
+		a.claimFreshness = func(ctx context.Context, grant dsgSameMountGrant, checkpoint string) error {
+			return dsgClaimExternalFreshness(ctx, registration, grant, checkpoint)
+		}
 		receipt, err = a.apply(ctx, root, g, native, remount)
 	} else {
 		receipt, err = a.recover(ctx, root, g, native, remount)

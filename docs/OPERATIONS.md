@@ -57,9 +57,24 @@ Windows SCM 어댑터의 시험 구성은 `LocalSystem` 서비스와 전용 로�
 3. 초기 등록에 앞서 `/var/lib/dsg-buildkit-witness`를 로컬 승인 원장·작업 저장소와 다른 비휘발 장치에 준비한다. 증거 루트와 등록 ID별 하위 디렉터리는 root 소유 0700으로 둔다. 초기 등록은 `/var/lib/dsg-buildkit-witness/<등록 ID>/ledger.sha256`을 root 소유 0600으로 만들고 장치 번호와 inode를 등록 봉인에 기록한다. 메모리 파일시스템의 증거는 거절된다. 운영 중 원장·체크포인트·별도 증거가 누락되거나 서로 다르면 자료를 보존하고 원인을 조사한다. 파일 교체나 남은 사본에서의 증거 재생성으로 재개하지 않는다.
 4. 승인된 대상 호스트에서 [systemd unit](../integrations/systemd/dsg-buildkit-exact.service)을 설치하고 `systemctl daemon-reload`, `systemctl start dsg-buildkit-exact.service`를 실행한다. `/run/dsg-buildkit-exact`의 `root:dsg-buildkit-access` 소유와 0750 권한, `control.sock`의 같은 소유와 0660 권한을 확인한다. unit은 자동 재시작을 사용하지 않는다. 배포 전 실제 두 계정으로 각 역할과 교차 요청 거절을 확인한다. 별도 BuildKit·Docker 소켓과 TCP 리스너, 그룹·ACL·관리자 권한을 통해 대상 변경 경계를 우회할 수 있는지도 점검한다. [요청과 응답](API_SPEC.md#linux-arm64-buildkit-단일-대상-api)
 
+### 외부 최초 적용 확인 서비스
+
+공개 `apply`를 열기 전에 워커 VM의 메모리·디스크 스냅샷에 포함되지 않는 비휘발 저장 위치에 외부 확인 서비스를 배치한다. 서비스 계정 소유 0700 상태 디렉터리에 같은 계정 소유 0400 `expected.json`을 미리 만든다. 값은 승인 직후의 신뢰할 수 있는 기록에서 가져와 `version: 1`, `registration`, `scope_sha256`, `checkpoint_sha256` 네 필드에 고정한다. `scope_sha256`의 입력은 등록 ID, 보유 증거 SHA-256, 적용 의도 SHA-256, 승인 SHA-256을 순서대로 둔 ASCII 줄 네 개이며 마지막 줄도 개행으로 끝난다. [전송 계약](API_SPEC.md#외부-최초-적용-확인)
+
+워커 측의 루트 릴레이는 보호된 상위 경로, 루트 소유 0700 `/run/dsg-buildkit-freshness`, 루트 소유 0600 `authority.sock`을 사용한다. 전송할 때 요청 쓰기 방향의 EOF와 응답 종료를 보존한다. 외부 확인 스크립트에는 `--state-dir`과 함께 같은 상태 디렉터리 안의 `--socket` 또는 요청 하나를 읽는 `--stdio`를 지정한다. 최초 요청이 일치하면 외부 서비스가 `claimed` 표식과 상태 디렉터리를 동기화한 뒤 응답한다. 외부 상태가 유실되거나 응답을 받지 못하면 기존 상태와 표식을 보존한다. VM 안의 원장 또는 복원본으로 외부 확인 상태를 다시 초기화하면 안 된다. [외부 확인 실행기](../scripts/buildkit-freshness-authority.py)
+
+격리 QEMU 검증에서는 요청 전 전체 VM 스냅샷을 복원한 뒤, 루트 릴레이와 macOS 호스트 외부 확인 서비스를 사용해 동일 Go 클라이언트의 재호출이 보존으로 끝나는 것을 확인했다. 외부 최초 소비는 1건, 네이티브 변경은 0건이었다. 성공 응답을 수신한 이후의 RAM 스냅샷을 복원하거나 외부 확인 상태 자체를 롤백하는 상황에서는 적용 경계 밖에서 스냅샷 복원 세대와 중복 VM 실행을 차단해야 한다.
+
 ### 프로젝트 등록 준비
 
-현재 전용 워커 검사기의 프로젝트 옵션은 DSG의 추적 `README.md`와 고정 커밋·해시를 새 빈 격리 워커의 캐시 기록에 결속한다. 결과는 읽기 전용 소유 근거다. 실제 운영 배치·변경 권한·운영 영수증 검증 플래그는 각각 `false`다. 기존 예행의 원장 등록은 합성 출처와 저장소 레이아웃을 요구한다. 운영 프로젝트에 배치할 때는 지정 호스트, 실제 레이아웃의 보호 캡슐과 별도 보관 지점을 먼저 검증한다. [프로젝트 워커와 스냅샷 실측](HANDOFF.md#프로젝트-전용-워커와-전체-vm-스냅샷-실측)
+전용 워커 검사기의 프로젝트 옵션은 DSG의 추적 `README.md`와 고정 커밋·해시를 새 빈 격리 워커의 캐시 기록에 결속한다. 워커를 정지한 뒤 Linux ARM64의 전용 마운트·네트워크 네임스페이스에서 기존 발급 증거와 저장소의 결속을 읽기 전용으로 재확인할 수 있다. 루트 소유 0700 `/run/dsg-project-enrollment-<hex>/stage`의 보호된 전용 tmpfs 위치에 기존 워커 저장소와 설정을 사용하고, 이전 `cache_read_only_evidence` 객체를 루트 소유 0400 `project-issuance.json`으로 제공한다. 기존 발급 파일의 SHA-256과 패치된 `buildkitd`의 SHA-256은 별도로 확보한 값으로 고정한다. [등록 계약](API_SPEC.md#격리된-프로젝트-전용-워커-검증)
+
+```sh
+python3 -IB scripts/check-buildkit-project-registration.py \
+  "$workspace" "$retained_buildkitd_sha256" "$retained_issuance_sha256"
+```
+
+엄격하게 등록한 워커는 `--require-quiescence`로 검사한다. 이 경우 정지한 실행 세대와 읽기 전용 저장소, 마운트 및 열린 핸들 검사를 모두 통과해야 한다. 읽기 전용 등록 결과의 운영 배포, 운영 계정, 배타 변경, 정확 변경 승인, 영수증 보관 플래그는 모두 `false`다. 지정 운영 호스트에서는 실제 계정과 접근 제한, 배타 변경 경계, 운영 등록 캡슐, 별도 보관 지점을 검증해야 한다.
 
 ### 영수증과 검증 해시 보관
 
