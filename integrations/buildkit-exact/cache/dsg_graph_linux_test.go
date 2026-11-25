@@ -191,7 +191,8 @@ func TestDSGGraphProjectsNativeAdjacency(t *testing.T) {
 	require.Equal(t, "preserve", g.Disposition)
 	require.Len(t, g.EvidenceHash, 64)
 	require.Contains(t, g.Unverified, "native_allocation_contents")
-	require.Contains(t, g.Unverified, "cache_record_transitive_parents_and_aliases")
+	require.NotContains(t, g.Unverified, "cache_record_transitive_parents_and_aliases")
+	require.Equal(t, &DSGTransitiveCache{Records: 3, Ancestors: 1, AliasRecords: 1, ParentLinks: 2, AliasLinks: 1}, g.Transitive.CacheRecords)
 	require.Equal(t, &DSGGraphCache{
 		Committed: true, SnapshotFallback: true, Parents: 1, Children: 1, AliasesIn: 1, SnapshotPeers: 1, BlobPeers: 1,
 	}, g.Cache)

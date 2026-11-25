@@ -12,8 +12,9 @@ import (
 
 // These are counts of potential retention paths. They do not authorize GC.
 type DSGGraphTransitive struct {
-	Solver   *DSGTransitiveSolver `json:"solver,omitempty"`
-	GCLabels *DSGTransitiveGC     `json:"gc_labels,omitempty"`
+	CacheRecords *DSGTransitiveCache  `json:"cache_records,omitempty"`
+	Solver       *DSGTransitiveSolver `json:"solver,omitempty"`
+	GCLabels     *DSGTransitiveGC     `json:"gc_labels,omitempty"`
 }
 
 type DSGTransitiveSolver struct {
@@ -59,7 +60,6 @@ func dsgReach[T comparable](seeds []T, adjacency map[T][]T) map[T]bool {
 }
 
 func (r *dsgGraphReader) extendedGraph(o *DSGDedicatedGraph, solverTx, cacheTx, containerdTx, history *bolt.Tx, worker, id, snapshot, blob string, warn func(string)) {
-	o.Transitive = &DSGGraphTransitive{}
 	if o.Solver != nil {
 		s, err := r.solverClosure(solverTx, worker+"::"+id, o.Solver.ResultNodes)
 		if err == nil {
