@@ -12,7 +12,9 @@ import re
 import resource
 import signal
 import select
+import socket
 import stat
+import struct
 import subprocess
 import sys
 import time
@@ -26,6 +28,7 @@ SCOPE = {"project": "Project", "worker": "Worker", "record_id": "RecordID",
          "approval": "Approval", "intent": "Intent", "custody_sha256": None}
 DIRECTORY = os.O_DIRECTORY | os.O_RDONLY | os.O_NOFOLLOW
 LIMIT = 8192
+FENCE_SOCKET = Path("/run/dsg-buildkit-execution-fence/authority.sock")
 
 
 def require(condition):
@@ -113,7 +116,50 @@ def validate_receipt(receipt, scope):
             and end - start <= 1800000)
 
 
-def execute(state_dir, frame, effect):
+def fence_exchange(stream, registration, scope_digest, job_digest, deadline):
+    def remaining():
+        timeout = deadline - time.monotonic()
+        if timeout <= 0:
+            raise TimeoutError
+        return timeout
+
+    nonce = os.urandom(32).hex()
+    frame = f"DSG-FRESHNESS-1 {registration} {scope_digest} {job_digest} {nonce}\n".encode("ascii")
+    expected = f"DSG-FRESHNESS-1 CLAIMED {nonce}\n".encode("ascii")
+    stream.settimeout(remaining())
+    stream.sendall(frame)
+    stream.shutdown(socket.SHUT_WR)
+    reply = bytearray()
+    while len(reply) <= len(expected):
+        stream.settimeout(remaining())
+        block = stream.recv(len(expected) + 1 - len(reply))
+        if not block:
+            return reply == expected and time.monotonic() <= deadline
+        reply.extend(block)
+    return False
+
+
+def reserve_fence(registration, scope_digest, job_digest):
+    deadline = time.monotonic() + 4
+    require(sys.platform.startswith("linux") and os.geteuid() == 0)
+    with protected_directory(FENCE_SOCKET.parent) as directory:
+        info = os.fstat(directory)
+        require(info.st_uid == 0 and stat.S_IMODE(info.st_mode) == 0o700)
+        node = os.stat(FENCE_SOCKET.name, dir_fd=directory, follow_symlinks=False)
+        require(stat.S_ISSOCK(node.st_mode) and node.st_uid == 0 and stat.S_IMODE(node.st_mode) == 0o600)
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as stream:
+            remaining = deadline - time.monotonic()
+            require(remaining > 0)
+            stream.settimeout(remaining)
+            stream.connect(f"/proc/self/fd/{directory}/{FENCE_SOCKET.name}")
+            pid, uid, _ = struct.unpack("3i", stream.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED,
+                                                              struct.calcsize("3i")))
+            require(pid > 0 and uid == 0 and os.path.samestat(node, os.stat(
+                FENCE_SOCKET.name, dir_fd=directory, follow_symlinks=False)))
+            return fence_exchange(stream, registration, scope_digest, job_digest, deadline)
+
+
+def execute(state_dir, frame, effect, reserve):
     match = FRAME.fullmatch(frame)
     require(match)
     registration, digest = (part.decode("ascii") for part in match.groups())
@@ -145,6 +191,10 @@ def execute(state_dir, frame, effect):
                 store(marker, claim)
             os.fsync(directory)
             store(fd, {**base, "status": "pending"})
+            scope = job["scope"]
+            binding = "\n".join(("dsg-external-execution-fence-v1", registration, scope["custody_sha256"],
+                                 scope["intent"], scope["approval"], ""))
+            require(reserve(registration, hashlib.sha256(binding.encode("ascii")).hexdigest(), digest) is True)
             result = effect(job)
             require(type(result) is dict and result.keys() == {"status", "receipt"} and result["status"] == "applied")
             validate_receipt(result["receipt"], job["scope"])
@@ -222,7 +272,7 @@ def main():
         require(len(frame) < 160)
         signal.alarm(64)
         require(sys.platform.startswith("linux") and os.geteuid() == 0 and args.operator.is_absolute())
-        result = execute(args.state_dir, frame, lambda job: native(args.operator, job))
+        result = execute(args.state_dir, frame, lambda job: native(args.operator, job), reserve_fence)
         status = 0
     except (OSError, ValueError, TypeError, KeyError, RecursionError, subprocess.SubprocessError):
         result, status = {"status": "preserve"}, 1
