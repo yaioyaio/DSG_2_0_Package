@@ -3,6 +3,7 @@
 package cache
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -22,10 +23,12 @@ const dsgMarker = ".dsg-dedicated-worker-v1"
 // DSGRejectEnrolledRoot keeps a flagless invocation of the patched binary out
 // of an enrolled worker. The daemon repeats it inside its ordinary startup lock.
 func DSGRejectEnrolledRoot(root string) error {
-	if _, err := os.Lstat(filepath.Join(root, dsgMarker)); errors.Is(err, os.ErrNotExist) {
-		return nil
+	for _, name := range []string{dsgMarker, dsgNSMarker} {
+		if _, err := os.Lstat(filepath.Join(root, name)); !errors.Is(err, os.ErrNotExist) {
+			return ErrDSGExactPreserve
+		}
 	}
-	return ErrDSGExactPreserve
+	return nil
 }
 
 func dsgValidMarker(dir int) bool {
@@ -38,11 +41,28 @@ func dsgValidMarker(dir int) bool {
 // owns this raw O_CLOEXEC descriptor until the kernel closes it at process exit,
 // including while upstream shutdown callbacks and background goroutines run.
 func DSGAcquireDedicatedDaemon(root string) error {
+	return dsgAcquireDaemon(root, false)
+}
+
+func DSGAcquireQuiescentDaemon(root string) error {
+	return dsgAcquireDaemon(root, true)
+}
+
+func dsgAcquireDaemon(root string, strict bool) error {
 	fd, err := dsgLockRoot(root)
 	if err != nil {
 		return err
 	}
+	var st unix.Stat_t
+	if !errors.Is(unix.Fstatat(fd, dsgNSMarker, &st, unix.AT_SYMLINK_NOFOLLOW), unix.ENOENT) {
+		unix.Close(fd)
+		return dsgQError("enrollment")
+	}
 	if dsgValidMarker(fd) {
+		if strict {
+			unix.Close(fd)
+			return dsgQError("enrollment")
+		}
 		return nil
 	}
 	// The duplicate shares the read offset but does not release the lease.
@@ -57,6 +77,12 @@ func DSGAcquireDedicatedDaemon(root string) error {
 	if !errors.Is(err, io.EOF) {
 		unix.Close(fd)
 		return ErrDSGExactPreserve
+	}
+	if strict {
+		if err := dsgEnrollNamespace(fd, root); err != nil {
+			unix.Close(fd)
+			return err
+		}
 	}
 	marker, err := unix.Openat(fd, dsgMarker, unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_WRONLY|unix.O_CLOEXEC, 0600)
 	if err != nil {
@@ -74,12 +100,14 @@ func DSGAcquireDedicatedDaemon(root string) error {
 
 // The lazy native snapshotter may not yet have initialized its DB.
 type DSGDedicatedObservation struct {
-	Worker       string              `json:"worker"`
-	SolverTx     int                 `json:"solver_tx"`
-	CacheTx      int                 `json:"cache_tx"`
-	ContainerdTx int                 `json:"containerd_tx"`
-	SnapshotTx   *int                `json:"snapshot_tx"`
-	Record       *DSGDedicatedRecord `json:"record,omitempty"`
+	Worker       string                  `json:"worker"`
+	SolverTx     int                     `json:"solver_tx"`
+	CacheTx      int                     `json:"cache_tx"`
+	ContainerdTx int                     `json:"containerd_tx"`
+	SnapshotTx   *int                    `json:"snapshot_tx"`
+	Quiescence   *DSGDedicatedQuiescence `json:"quiescence,omitempty"`
+	Graph        *DSGDedicatedGraph      `json:"graph,omitempty"`
+	Record       *DSGDedicatedRecord     `json:"record,omitempty"`
 }
 
 // These are persisted binding observations. Metadata alone cannot qualify
@@ -198,17 +226,24 @@ func dsgOpenOwned(dir int, name string, directory bool) (*os.File, error) {
 // DSGInspectDedicatedWorker runs offline. It never starts a cache manager,
 // solver, containerd DB service or snapshotter (their constructors can mutate).
 func DSGInspectDedicatedWorker(root string) (DSGDedicatedObservation, error) {
-	return dsgInspectDedicated(root, "")
+	return dsgInspectDedicated(root, "", false)
 }
 
 func DSGInspectDedicatedRecord(root, id string) (DSGDedicatedObservation, error) {
 	if !dsgFullID.MatchString(id) {
 		return DSGDedicatedObservation{}, ErrDSGExactPreserve
 	}
-	return dsgInspectDedicated(root, id)
+	return dsgInspectDedicated(root, id, false)
 }
 
-func dsgInspectDedicated(root, recordID string) (DSGDedicatedObservation, error) {
+func DSGInspectQuiescentDedicatedRecord(root, id string) (DSGDedicatedObservation, error) {
+	if !dsgFullID.MatchString(id) {
+		return DSGDedicatedObservation{}, ErrDSGExactPreserve
+	}
+	return dsgInspectDedicated(root, id, true)
+}
+
+func dsgInspectDedicated(root, recordID string, strict bool) (DSGDedicatedObservation, error) {
 	var o DSGDedicatedObservation
 	dir, err := dsgLockRoot(root)
 	if err != nil {
@@ -218,6 +253,26 @@ func dsgInspectDedicated(root, recordID string) (DSGDedicatedObservation, error)
 	if !dsgValidMarker(dir) {
 		return o, ErrDSGExactPreserve
 	}
+	if strict {
+		if err := dsgCheckQuiescence(dir, root); err != nil {
+			return o, err
+		}
+	}
+	o, err = dsgInspectPinned(dir, recordID)
+	if err != nil {
+		return DSGDedicatedObservation{}, err
+	}
+	if strict {
+		if err := dsgCheckQuiescence(dir, root); err != nil {
+			return DSGDedicatedObservation{}, err
+		}
+		o.Quiescence = &DSGDedicatedQuiescence{true, true, true, true}
+	}
+	return o, nil
+}
+
+func dsgInspectPinned(dir int, recordID string) (DSGDedicatedObservation, error) {
+	var o DSGDedicatedObservation
 	worker, err := dsgOpenOwned(dir, "runc-native", true)
 	if err != nil {
 		return o, ErrDSGExactPreserve
@@ -240,7 +295,8 @@ func dsgInspectDedicated(root, recordID string) (DSGDedicatedObservation, error)
 	}
 	o.Worker = string(data)
 	var snapTx int
-	for _, dbSpec := range []struct {
+	var txs [4]*bolt.Tx
+	for i, dbSpec := range []struct {
 		dir  int
 		name string
 		tx   *int
@@ -271,20 +327,29 @@ func dsgInspectDedicated(root, recordID string) (DSGDedicatedObservation, error)
 			return DSGDedicatedObservation{}, ErrDSGExactPreserve
 		}
 		defer db.Close()
-		err = db.View(func(tx *bolt.Tx) error {
-			*dbSpec.tx = tx.ID()
-			if recordID != "" && dbSpec.tx == &o.CacheTx {
-				var err error
-				o.Record, err = dsgObserveRecord(tx, o.Worker, recordID)
-				return err
-			}
-			return nil
-		})
+		tx, err := db.Begin(false)
 		if err != nil {
 			return DSGDedicatedObservation{}, ErrDSGExactPreserve
 		}
+		defer tx.Rollback()
+		txs[i] = tx
+		*dbSpec.tx = tx.ID()
 		if dbSpec.tx == &snapTx {
 			o.SnapshotTx = &snapTx
+		}
+	}
+	if recordID != "" {
+		o.Record, err = dsgObserveRecord(txs[1], o.Worker, recordID)
+		if err != nil {
+			return DSGDedicatedObservation{}, ErrDSGExactPreserve
+		}
+		if o.Record.RecordPresent {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			o.Graph, err = dsgObserveNativeGraph(ctx, o.Worker, recordID, txs[0], txs[1], txs[2], txs[3], workerFD, int(sn.Fd()))
+			if err != nil {
+				return DSGDedicatedObservation{}, ErrDSGExactPreserve
+			}
 		}
 	}
 	return o, nil

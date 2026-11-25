@@ -14,6 +14,9 @@ import (
 
 func dsgStartWorker(c *cli.Command, root string, cfg *config.Config) error {
 	if !c.Bool("dsg-dedicated-worker") {
+		if c.Bool("dsg-require-quiescence") {
+			return cache.ErrDSGExactPreserve
+		}
 		return cache.DSGRejectEnrolledRoot(root)
 	}
 	// The upstream constructors apply CLI overrides after startup locking.
@@ -36,6 +39,9 @@ func dsgStartWorker(c *cli.Command, root string, cfg *config.Config) error {
 		cfg.Workers.OCI.ProxySnapshotterPath != "" || c.String("oci-worker-proxy-snapshotter-path") != "" {
 		return cache.ErrDSGExactPreserve
 	}
+	if c.Bool("dsg-require-quiescence") {
+		return cache.DSGAcquireQuiescentDaemon(root)
+	}
 	return cache.DSGAcquireDedicatedDaemon(root)
 }
 
@@ -52,7 +58,9 @@ func dsgInspectWorker(c *cli.Command, root string) error {
 	}
 	var observation cache.DSGDedicatedObservation
 	var err error
-	if c.IsSet("dsg-record-id") {
+	if c.Bool("dsg-require-quiescence") {
+		observation, err = cache.DSGInspectQuiescentDedicatedRecord(root, c.String("dsg-record-id"))
+	} else if c.IsSet("dsg-record-id") {
 		observation, err = cache.DSGInspectDedicatedRecord(root, c.String("dsg-record-id"))
 	} else {
 		observation, err = cache.DSGInspectDedicatedWorker(root)
