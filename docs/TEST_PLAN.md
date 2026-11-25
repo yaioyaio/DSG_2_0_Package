@@ -104,7 +104,11 @@ WBS 2.3은 실제 제품 CLI와 공식 v0.35.1 `buildkitd`·`buildctl`을 전용
 
 현재 Linux ARM64 제품의 Ubuntu 시험에서 기준 4개 불변과 새 레코드 1개를 독립 OCI 산출물과 대조했다. 공식 정확 ID 조회가 1개를 반환했고 회수 후보·prune 요청은 0개였다. [BuildKit 실측 집계](../dist/dsg-buildkit-native-69f9692b4210/QUALIFICATION.json)
 
-실제 단일 레코드 회수는 동일 변경 잠금 아래 프로젝트 소유권, 워커·저장소 세대, 전체 ID, 스냅샷·콘텐츠·lease·솔버의 별칭과 양방향 참조를 직전에 검증하고, 대상 변경과 영속 영수증 기록까지 보호하는 경로가 준비된 뒤 시험한다. 표준 `du`가 숨기는 동등 가변·불변 별칭까지 점검한다. 정확한 대상 증거에 별도 승인을 받은 경우에만 지정 시험 1건을 전용 원장에서 실행한다. 통과 조건은 대상 1→0, 같은 워커와 별도 워커의 비대상 레코드·참조·lease 변경 0건, 빌더 범위 GC 호출 0건이다. 대상 1→0은 논리적 제거로 기록하고, 물리 회수량은 대상 저장소의 실제 할당 바이트를 전후로 측정해 별도로 기록한다. 동일 증거의 재사용과 참조·세대 교체는 요청 전 거절한다. 외부 BuildKit 소스 변경이나 회수 대상 범위 변경은 사용자 계획 승인을 기다린다. 전용 저장소 세대 전체를 폐기하는 방식은 별도 범위와 별도 승인이 필요하다. [v0.35.1 별칭 제거](https://github.com/moby/buildkit/blob/412cc86ad3c4252b82e929f9b1b1ad167376ded8/cache/manager.go#L1367-L1383) · [v0.35.1 조회의 별칭 처리](https://github.com/moby/buildkit/blob/412cc86ad3c4252b82e929f9b1b1ad167376ded8/cache/manager.go#L1454-L1465) · [v0.35.1 공개 제어 API](https://github.com/moby/buildkit/blob/412cc86ad3c4252b82e929f9b1b1ad167376ded8/api/services/control/control.proto#L14-L35)
+실제 단일 레코드 회수는 동일 변경 잠금 아래 프로젝트 소유권, 워커·저장소 세대, 전체 ID, 스냅샷·콘텐츠·lease·솔버의 별칭과 양방향 참조를 직전에 검증하고, 대상 변경과 영속 영수증 기록까지 보호하는 경로가 준비된 뒤 시험한다. 표준 `du`가 숨기는 동등 가변·불변 별칭까지 점검한다. 정확한 대상 증거에 별도 승인을 받은 경우에만 지정 시험 1건을 전용 원장에서 실행한다. 통과 조건은 대상 1→0, 같은 워커와 별도 워커의 비대상 레코드·참조·lease 변경 0건, 빌더 범위 GC 호출 0건이다. 대상 1→0은 논리적 제거로 기록하고, 물리 회수량은 대상 저장소의 실제 할당 바이트를 전후로 측정해 별도로 기록한다. 동일 증거의 재사용과 참조·세대 교체는 요청 전 거절한다. 수용된 개발 범위는 공식 v0.35.1에 대한 단일 ID 오버레이다. 회수 대상이나 공유 저장소의 변경 범위를 확대하려면 계획 승인을 받는다. 전용 저장소 세대 전체를 폐기하는 방식은 별도 범위와 별도 승인이 필요하다. [v0.35.1 별칭 제거](https://github.com/moby/buildkit/blob/412cc86ad3c4252b82e929f9b1b1ad167376ded8/cache/manager.go#L1367-L1383) · [v0.35.1 조회의 별칭 처리](https://github.com/moby/buildkit/blob/412cc86ad3c4252b82e929f9b1b1ad167376ded8/cache/manager.go#L1454-L1465) · [v0.35.1 공개 제어 API](https://github.com/moby/buildkit/blob/412cc86ad3c4252b82e929f9b1b1ad167376ded8/api/services/control/control.proto#L14-L35)
+
+BuildKit v0.35.1 소스 오버레이는 공식 캐시 관리자와 네이티브 snapshotter의 실제 읽기 관측, 별도 합성 bbolt 변경 트랜잭션을 구분한다. 실제 읽기 관측에서 별칭을 식별하고 같은 워커와 다른 워커의 데이터베이스·스냅샷·lease를 전후 대조한다. 합성 트랜잭션에서 승인 증거의 불일치, 잘못된 세대, 숨은 참조와 연결된 저장소 객체를 거절한다. 한 건의 논리적 변경과 승인 소비·영수증의 동시 커밋, 기존 비대상 레코드 불변과 재호출 거부를 확인한다. 표준 워커의 적용은 보존이며 실제 캐시 요청은 별도 수용 조건을 따른다. [네이티브 읽기 시험](../integrations/buildkit-exact/cache/dsg_native_isolation_test.go) · [Ubuntu BuildKit 실측](../dist/dsg-buildkit-exact-native-be0e2c1ab945/QUALIFICATION.json)
+
+공식 커밋의 codeload 아카이브를 확보한 뒤 `python3 scripts/prepare-buildkit-exact.py <공식 아카이브> <신규 임시 디렉터리>`로 준비한다. 아카이브 SHA-256 불일치는 디렉터리 생성 전에 거절한다. 준비한 소스 디렉터리에서 `go test -mod=vendor -p=2 -vet=off -run '^TestDSGExact' -timeout=60s ./cache`로 모델 시험을 실행한다. Linux에서만 실제 native snapshotter 통합 시험을 실행한다. [준비기](../scripts/prepare-buildkit-exact.py) · [공식 소스 커밋](https://github.com/moby/buildkit/tree/412cc86ad3c4252b82e929f9b1b1ad167376ded8)
 
 ### Linux ARM64 로컬 제어 서비스 프로브
 
@@ -115,6 +119,8 @@ WBS 5.1의 로컬 읽기 확인은 보호된 root 소켓과 예상 프로세스�
 Linux ARM64의 코어 쓰기 요청 진입점은 경계 시험에서 리스너 옵션 상속과 메시지별 커널 자격·pidfd를 확인한다. 대리 FD 사용·종료된 송신자·보조 데이터 또는 본문 잘림·전달 FD·교차 역할·요청의 역할 선언을 거절하는지 점검한다. Ubuntu Parallels에서 기존 admission 4건과 새 요청 경계 6건을 통과했다. 운영 권한으로 실제 삭제하는 구간은 별도 게이트를 적용한다. [Linux 권한 확인 시험](../dist/dsg-auth-gate-c95a42aa0b72/QUALIFICATION.json)
 
 Linux ARM64의 전용 변경 어댑터는 동일 배타 슬롯 아래 승인 전 대조, 승인 소비·적용 의도 감사의 내구 커밋, 변경 요청 1건, 영수증 정산을 확인한다. 다른 프로젝트·정책·역할·현재 엔진 세대는 승인 소비 전에 거절한다. 적용 의도 커밋 뒤 권한을 다시 확인할 수 없으면 변경 없이 보존한다. 소켓·세대·정책이 바뀐 뒤에도 동일 자원 범위의 미확정 적용을 차단하고, 같은 프로젝트의 전체 의도 ID에 맞는 영수증을 읽어서만 정산한다. 시험은 보호 등록부와 전용 제어 대역을 사용한다. Ubuntu Parallels에서 새 어댑터 3건과 관련 회귀 20건을 통과했다. [Ubuntu 격리 실측](../dist/dsg-exclusive-dispatch-44a3dedceecb/QUALIFICATION.json) · [코어 어댑터와 시험](../rust-scaffold/crates/dsg-core/src/docker_gc_apply/dispatch.rs)
+
+운영 연결의 경계 시험은 합성 SQLite 백엔드에서 `BEGIN IMMEDIATE`로 잡은 변경 잠금이 등록부의 승인 소비 전에 존재하고 소비 후에도 유지되는지 제3 연결로 확인한다. 승인·의도 커밋을 확인한 뒤에만 한 대상과 영수증을 함께 변경한다. 응답을 유실시키고 백엔드와 등록부를 다시 열어 영수증으로 정산한다. 잘못된 배정·저장소·관측과 경쟁 쓰기를 거절하고 복구의 변경 재호출은 0건이어야 한다. [Rust 회귀](../rust-scaffold/crates/dsg-core/src/docker_gc_apply/dispatch/tests.rs)
 
 ### 전용 Docker 백엔드 소유권 사전 검증
 

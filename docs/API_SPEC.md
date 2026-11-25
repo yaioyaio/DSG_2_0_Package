@@ -53,6 +53,8 @@ Linux ARM64의 `dsg --json docker-controller-admission --policy <절대 경로>/
 
 `DockerGcDispatch`는 배타 변경 경계를 소유한 제어기에 연결하는 코어 어댑터다. 커널 검증을 통과한 요청, root의 보호된 등록부, 같은 프로젝트의 활성 lease를 요구한다. 배타 슬롯 아래 대상 상태, 현재 프로젝트 정책, 네 배포 피어의 세대를 확인한다. 보호된 승인 행을 한 번 소비하면서 적용 의도와 감사를 커밋한 뒤에만 백엔드에 대상 변경을 요청한다. 복구는 같은 프로젝트의 전체 의도 ID와 안정적인 엔진 자원 범위를 대조하고 영수증만 조회한다. 활성 정책·프로세스 세대가 바뀌어도 이전 의도는 같은 자원 범위에 남는다. 실제 삭제는 소유권과 영속 영수증을 갖춘 전용 백엔드를 조립한 운영 제어기만 연결할 수 있다. [어댑터 구현](../rust-scaffold/crates/dsg-core/src/docker_gc_apply/dispatch.rs)
 
+Linux ARM64 제어기는 승인 정책과 같은 디렉터리의 보호된 소유 등록을 고정한다. 승인·적용은 현재 프로젝트 소유 지문, 자원 종류·전체 ID와 저장소를 대조한다. 백엔드가 대상의 쓰기 잠금을 잡은 상태에서 정확한 관측을 반환해야 SQLite 원장이 승인 한 건을 소비하고 적용 의도를 커밋한다. 이 커밋 뒤에도 같은 변경 잠금 아래에서만 백엔드가 대상 변경과 영속 영수증을 마칠 수 있다. 응답 유실은 `recovery_required`와 0 B로 남긴다. 복구는 현재 프로젝트의 이전 의도와 동일한 안정 저장소를 대조하고 정확한 영수증만 읽는다. [Rust 제어기](../rust-scaffold/crates/dsg-core/src/docker_gc_apply/dispatch.rs)
+
 Unix 피어 자격증명, pidfd, 프로세스 시작 시각, 실행 파일 식별자와 해시, 소켓 식별자를 대조하고 읽기 프로브는 제어기에만 보낸다. 성공 시 `status=verified`, 제어기와 엔진의 `endpoint`·`generation`, `role_separation=verified`, `engine_boundary=protected_unix_socket`과 종료 코드 0을 반환한다. 불일치는 `status=unknown`, `failure`와 종료 코드 5를 반환한다. 두 경우 모두 `mutation_authorized=false`, `apply_gate=preserve_unverified_control`을 유지한다. 운영 쓰기에는 제어기 배포 출처·신뢰, 프로젝트 자원 출처·소유권, 요청별 승인, 배타 변경 경계와 공개 운영 어댑터 검증이 필요하다. [구현](../rust-scaffold/crates/dsg-core/src/docker_control_local/admission.rs)
 
 ### 전용 Docker 백엔드 읽기 전용 점검
