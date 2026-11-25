@@ -15,6 +15,7 @@ import (
 
 const dsgRecoverySynthetic = "synthetic-bbolt-v1"
 const dsgNativeTrialMode = "native-five-stage-trial-v1"
+const dsgNativeDeletionQualification = "native-backing-deletion-qualification-v1"
 const dsgRecoveryBucket = "_dsg_recovery_journal_v1"
 const dsgRecoveryClaimsSchema = "domain-selector-reservations-v1"
 
@@ -30,17 +31,34 @@ type dsgRecoveryPlan struct {
 	Objects           [len(dsgRecoveryDomains)]dsgRecoveryObject
 }
 
+func (p dsgRecoveryPlan) stages() []string {
+	if p.Mode == dsgNativeDeletionQualification {
+		return dsgRecoveryDomains[2:4] // snapshot and blob only
+	}
+	return dsgRecoveryDomains[:]
+}
+
 func (p dsgRecoveryPlan) valid(mode string) bool {
 	if p.Mode != mode || !p.Request.valid() || !dsgDigest.MatchString(p.GraphSHA256) {
 		return false
 	}
-	for _, obj := range p.Objects {
+	stages := p.stages()
+	for n, obj := range p.Objects {
+		if n >= len(stages) {
+			if obj != (dsgRecoveryObject{}) {
+				return false
+			}
+			continue
+		}
 		if !dsgFullID.MatchString(obj.Key) && !(strings.HasPrefix(obj.Key, "sha256:") && dsgDigest.MatchString(obj.Key[7:])) {
 			return false
 		}
 		if !dsgDigest.MatchString(obj.BeforeSHA256) || !dsgDigest.MatchString(obj.NonTargetSHA256) {
 			return false
 		}
+	}
+	if mode == dsgNativeDeletionQualification {
+		return p.Objects[0].Key == p.Request.RecordID && p.Objects[0].BeforeSHA256 == p.Request.MetadataDigest
 	}
 	cache := p.Objects[len(p.Objects)-1]
 	return cache.Key == p.Request.RecordID && cache.BeforeSHA256 == p.Request.MetadataDigest
@@ -51,11 +69,11 @@ func dsgRecoveryHash(data []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// Stage proofs commit to every selector, its entire approved graph and this
-// domain. Their presence proves completion only if committed with the effect.
+// Stage tokens commit to every selector, its entire approved graph and this
+// domain. A token alone provides no evidence of the participant's effect.
 func (p dsgRecoveryPlan) proof(stage int) string {
 	data, _ := json.Marshal(p) // fields contain only strings, fixed arrays and integers
-	return dsgRecoveryHash(append(data, []byte(dsgRecoveryDomains[stage])...))
+	return dsgRecoveryHash(append(data, []byte(p.stages()[stage])...))
 }
 
 type dsgRecoveryObservation uint8
@@ -66,10 +84,11 @@ const (
 	dsgRecoveryAfter                          // exact postcondition and matching proof
 )
 
-// A participant must compare its full selector/preimage and authorization time
-// in the same durable transaction as the effect and proof. Observe must reject
-// missing/mismatched store identity, ownership, changed non-target evidence,
-// partial or unrecognized state.
+// Transactional participants compare their full selector/preimage and
+// authorization time in the durable transaction that seals effect and proof.
+// The disposable filesystem qualification instead rechecks under the fence
+// and verifies its persisted pre-effect marker and exact physical postcondition.
+// Observe rejects mismatched ownership, changed peers and partial state.
 type dsgRecoveryParticipant interface {
 	observe(context.Context, dsgRecoveryPlan, int) (dsgRecoveryObservation, error)
 	commit(context.Context, dsgRecoveryPlan, int) error
@@ -87,18 +106,19 @@ type dsgRecoveryState struct {
 	Confirmed  int  // number of durable participant proofs acknowledged in order
 	Armed      bool // the next participant may already have committed
 	Receipt    *DSGExactReceipt
-	TrialProof string `json:",omitempty"` // evidence of retention, never a deletion receipt
+	TrialProof string `json:",omitempty"` // qualification evidence, never a production receipt
 }
 
 func (s dsgRecoveryState) valid(plan dsgRecoveryPlan) bool {
-	if s.Plan != plan || s.Confirmed < 0 || s.Confirmed > len(plan.Objects) {
+	stages := len(plan.stages())
+	if s.Plan != plan || s.Confirmed < 0 || s.Confirmed > stages {
 		return false
 	}
-	if s.Confirmed < len(plan.Objects) {
+	if s.Confirmed < stages {
 		return s.Receipt == nil && s.TrialProof == ""
 	}
-	if plan.Mode == dsgNativeTrialMode {
-		return !s.Armed && s.Receipt == nil && s.TrialProof == plan.proof(len(plan.Objects)-1)
+	if plan.Mode == dsgNativeTrialMode || plan.Mode == dsgNativeDeletionQualification {
+		return !s.Armed && s.Receipt == nil && s.TrialProof == plan.proof(stages-1)
 	}
 	return plan.Mode == dsgRecoverySynthetic && !s.Armed && s.TrialProof == "" && s.Receipt != nil && s.Receipt.Request == plan.Request &&
 		s.Receipt.LogicalRecords == 1 && s.Receipt.PhysicalBytes == nil
@@ -112,7 +132,7 @@ func (j *dsgRecoveryJournal) fenced(ctx context.Context, p dsgRecoveryPlan, run 
 	if !p.valid(mode) || j.db == nil || j.db.NoSync || ctx.Err() != nil {
 		return ErrDSGExactPreserve
 	}
-	for _, store := range j.store {
+	for _, store := range j.store[:len(p.stages())] {
 		if store == nil {
 			return ErrDSGExactPreserve
 		}
@@ -130,8 +150,8 @@ func dsgRecoveryAuthorized(ctx context.Context, p dsgRecoveryPlan) bool {
 // in that journal, regardless of which cache record named it.
 func (p dsgRecoveryPlan) claimKeys() (intent []byte, claims [][]byte) {
 	claims = append(claims, []byte("approval/"+p.Request.Approval))
-	for n, obj := range p.Objects {
-		claims = append(claims, []byte("object/"+dsgRecoveryDomains[n]+"/"+obj.Key))
+	for n, domain := range p.stages() {
+		claims = append(claims, []byte("object/"+domain+"/"+p.Objects[n].Key))
 	}
 	return []byte("intent/" + p.Request.Intent), claims
 }
@@ -212,7 +232,7 @@ func (j *dsgRecoveryJournal) load(p dsgRecoveryPlan) (state dsgRecoveryState, er
 // An unexplained missing row can never be treated as a completed effect.
 func (j *dsgRecoveryJournal) inspect(ctx context.Context, state dsgRecoveryState) (dsgRecoveryObservation, error) {
 	current := dsgRecoveryUnknown
-	for n, store := range j.store {
+	for n, store := range j.store[:len(state.Plan.stages())] {
 		if err := ctx.Err(); err != nil {
 			return dsgRecoveryUnknown, err
 		}
@@ -258,7 +278,7 @@ func (j *dsgRecoveryJournal) save(previous, next dsgRecoveryState) error {
 		if err != nil {
 			return err
 		}
-		if state.Confirmed == len(previous.Plan.Objects) || state.Confirmed != previous.Confirmed || state.Armed != previous.Armed || !next.valid(previous.Plan) {
+		if state.Confirmed == len(previous.Plan.stages()) || state.Confirmed != previous.Confirmed || state.Armed != previous.Armed || !next.valid(previous.Plan) {
 			return ErrDSGExactPreserve
 		}
 		intent, _ := previous.Plan.claimKeys()
@@ -275,11 +295,12 @@ func (j *dsgRecoveryJournal) save(previous, next dsgRecoveryState) error {
 // A completed operation is only available through status, never replay.
 func (j *dsgRecoveryJournal) advance(ctx context.Context, p dsgRecoveryPlan, barrier func(string)) error {
 	return j.fenced(ctx, p, func() error {
+		stages := len(p.stages())
 		state, err := j.load(p)
 		if err != nil {
 			return err
 		}
-		if state.Confirmed == len(p.Objects) {
+		if state.Confirmed == stages {
 			return ErrDSGExactPreserve
 		}
 		current, err := j.inspect(ctx, state)
@@ -319,8 +340,8 @@ func (j *dsgRecoveryJournal) advance(ctx context.Context, p dsgRecoveryPlan, bar
 		next := state
 		next.Confirmed++
 		next.Armed = false
-		if next.Confirmed == len(p.Objects) {
-			if p.Mode == dsgNativeTrialMode {
+		if next.Confirmed == stages {
+			if p.Mode == dsgNativeTrialMode || p.Mode == dsgNativeDeletionQualification {
 				next.TrialProof = p.proof(n)
 			} else {
 				next.Receipt = &DSGExactReceipt{Request: p.Request, LogicalRecords: 1}

@@ -21,17 +21,18 @@ const dsgGraphMaxEntries = 16384
 // stores. Each checked section has an independent traversal and shared budget.
 // The graph is evidence for preservation and carries no mutation authority.
 type DSGDedicatedGraph struct {
-	Cache        *DSGGraphCache       `json:"cache,omitempty"`
-	Solver       *DSGGraphSolver      `json:"solver,omitempty"`
-	Containerd   *DSGGraphBackend     `json:"containerd,omitempty"`
-	Snapshot     *DSGGraphSnapshot    `json:"native_snapshot,omitempty"`
-	Blob         *DSGGraphBlob        `json:"local_blob,omitempty"`
-	Allocations  *DSGGraphAllocations `json:"native_allocations,omitempty"`
-	Transitive   *DSGGraphTransitive  `json:"transitive,omitempty"`
-	External     *DSGGraphExternal    `json:"external,omitempty"`
-	EvidenceHash string               `json:"references_sha256"`
-	Unverified   []string             `json:"unverified"`
-	Disposition  string               `json:"disposition"`
+	Cache        *DSGGraphCache         `json:"cache,omitempty"`
+	Solver       *DSGGraphSolver        `json:"solver,omitempty"`
+	Containerd   *DSGGraphBackend       `json:"containerd,omitempty"`
+	Snapshot     *DSGGraphSnapshot      `json:"native_snapshot,omitempty"`
+	Blob         *DSGGraphBlob          `json:"local_blob,omitempty"`
+	Allocations  *DSGGraphAllocations   `json:"native_allocations,omitempty"`
+	Transitive   *DSGGraphTransitive    `json:"transitive,omitempty"`
+	External     *DSGGraphExternal      `json:"external,omitempty"`
+	Ownership    *DSGRetentionOwnership `json:"retention_ownership,omitempty"`
+	EvidenceHash string                 `json:"references_sha256"`
+	Unverified   []string               `json:"unverified"`
+	Disposition  string                 `json:"disposition"`
 }
 
 type DSGGraphCache struct {
@@ -55,9 +56,11 @@ type DSGGraphSolver struct {
 }
 
 type dsgGraphReader struct {
-	ctx       context.Context
-	remaining int
-	evidence  hash.Hash
+	ctx                context.Context
+	remaining          int
+	evidence           hash.Hash
+	gcWalk             *dsgGCWalk
+	solverSharedResult bool
 }
 
 func (r *dsgGraphReader) edge(fields ...string) {
@@ -138,7 +141,7 @@ func dsgObserveNativeGraph(ctx context.Context, workerID, recordID string, solve
 		Unverified:  []string{"native_allocation_contents"},
 	}
 	r := &dsgGraphReader{ctx: ctx, remaining: dsgGraphMaxEntries, evidence: sha256.New()}
-	r.edge("dsg-native-reference-graph-v3", workerID, recordID)
+	r.edge("dsg-native-reference-graph-v4", workerID, recordID)
 	warn := func(code string) {
 		o.Unverified = append(o.Unverified, code)
 		r.edge("unverified", code)
@@ -175,6 +178,7 @@ func dsgObserveNativeGraph(ctx context.Context, workerID, recordID string, solve
 		}
 	}
 	r.extendedGraph(o, solverTx, cacheTx, containerdTx, history, workerID, recordID, snapshot, blob, warn)
+	o.Ownership = r.retentionOwnership(o, cacheTx, containerdTx, snapshotTx, snapshotterFD, recordID, snapshot, blob)
 	if ctx.Err() != nil {
 		return nil, ErrDSGExactPreserve
 	}
@@ -385,6 +389,15 @@ func (r *dsgGraphReader) solver(o *DSGDedicatedGraph, tx *bolt.Tx, resultID stri
 			if len(raw) > 512 || json.Unmarshal(raw, &result) != nil || result.ID != resultID ||
 				links.Bucket(k) == nil {
 				return ErrDSGExactPreserve
+			}
+			// A solver node can associate more than one independent result.
+			if err := r.each(b, func(k, v []byte) error {
+				if string(k) != resultID {
+					r.solverSharedResult = true
+				}
+				return nil
+			}); err != nil {
+				return err
 			}
 			targetNodes[node] = struct{}{}
 			r.edge("solver-result", node, resultID)

@@ -167,6 +167,7 @@ func (r *dsgGraphReader) gcClosure(tx, history *bolt.Tx, snapshot, blob string) 
 			w.out.Unresolved++
 		}
 	}
+	r.gcWalk = w
 	return &w.out, nil
 }
 

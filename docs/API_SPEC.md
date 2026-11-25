@@ -43,6 +43,8 @@ Linux ARM64의 `dsg --json buildkit-local-cache --socket <절대 Unix 소켓> --
 
 정확 ID 조회는 하나의 전용 잠금에서 기존 네 저장소와 존재하는 빌드 이력 DB의 읽기 전용 트랜잭션을 고정한다. `graph`는 캐시, 솔버, containerd, 스냅샷, blob에서 확인한 직접 연결과 `references_sha256`, 미확인 범위 및 보존 판정을 반환한다. `transitive`는 솔버 양방향 인덱스와 지원하는 GC 라벨의 도달 범위 및 미해결 자원을 집계한다. `external`은 이미지·컨테이너·ingest·빌드 이력과 외부 캐시 메타데이터의 지원 형식을 집계한다. `transitive.cache_records`는 캐시 부모·자식과 양방향 별칭 경로의 제한된 탐색 결과다. `native_allocations`에는 확인된 inode, 메타데이터 SHA-256과 할당 블록을 제공한다. 일반 조회에서 파일 내용과 확장 속성은 미확인으로 기록하고 보존 판정을 유지한다. [참조 대조 구현](../integrations/buildkit-exact/cache/dsg_graph_linux.go)
 
+`graph.retention_ownership`은 `checked`, `exclusive`, `reason`과 검증한 lease·자식 스냅샷 수를 반환한다. `owned_roots`와 `owned_child_snapshots`는 구성 요소별 판정이다. 스냅샷의 양방향 인덱스, 같은 네임스페이스의 정확한 lease 리소스, 뷰의 전용 디렉터리 부재를 대조한다. 단일 로컬 content 객체에서 대상 blob으로 들어오는 참조를 확인한 경우 `incoming_content_key_sha256`으로 해당 객체 키의 SHA-256을 반환한다. 이 참조가 있으면 전체 폐쇄 범위를 `exclusive=false`로 판정한다. 응답은 읽기 증거이며 변경 권한을 부여하지 않는다. [소유권 판정](../integrations/buildkit-exact/cache/dsg_graph_ownership_linux.go)
+
 ### 로컬 Docker 제어 서비스 읽기 확인
 
 Linux ARM64의 `dsg --json docker-controller-probe --socket <절대 Unix 소켓> --expected-pid <서비스 PID>`는 로컬 Unix 소켓과 상대 프로세스가 선언한 프로토콜을 확인한다. 경로 구성 요소는 심볼릭 링크 없이 열고, 상위 경로의 root 소유와 그룹·기타 쓰기 제한, 소켓 부모의 0700 권한, root 소유 단일 링크 소켓의 0600 권한을 확인한다. 예상 PID와 root 상대 자격을 대조하고, pidfd로 고정한 프로세스의 생존·시작 시각과 소켓 식별자를 요청 전후에 확인한다. 연결에는 2초 기한과 512바이트 응답 한도를 적용한다.

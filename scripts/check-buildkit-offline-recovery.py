@@ -118,9 +118,11 @@ def verify_trial_backing(workspace, store, candidate, graph):
     producer = runpy.run_path(str(workspace / "check-buildkit-native.py"))
     with tarfile.open(workspace / "source.oci.tar", "r:") as archive:
         index = json.loads(producer["archive_bytes"](archive, "index.json"))
-        manifest = json.loads(producer["oci_blob"](archive, index["manifests"], producer["OCI_MANIFEST"]))
+        manifest_bytes = producer["oci_blob"](archive, index["manifests"], producer["OCI_MANIFEST"])
+        manifest = json.loads(manifest_bytes)
         layer = producer["oci_blob"](archive, manifest["layers"], producer["OCI_LAYER"])
     with tarfile.open(fileobj=io.BytesIO(layer), mode="r:") as archive:
+        assert [member.name.removeprefix("./") for member in archive.getmembers()] == [producer["OWNED_FILE"]]
         payload = producer["archive_bytes"](archive, producer["OWNED_FILE"])
     assert payload.startswith(b"DSG dedicated worker synthetic project ")
 
@@ -157,11 +159,19 @@ def verify_trial_backing(workspace, store, candidate, graph):
             assert entry.st_dev == device and entry.st_uid == 0
             matched.append(child)
     assert len(matched) == 1
+    assert backing["snapshot"]["entries"] == 2
+    assert [entry.name for entry in matched[0].iterdir()] == [producer["OWNED_FILE"]]
     snapshot_sha = read_exact(matched[0] / producer["OWNED_FILE"], payload)
     blob_sha = hashlib.sha256(layer).hexdigest()
     assert blob_sha == candidate["verified_layer_sha256"] == backing["blob"]["declared_sha256"]
     read_exact(native / "content/blobs/sha256" / blob_sha, layer, backing["blob"]["root_inode"])
-    return {"snapshot_payload_sha256": snapshot_sha, "blob_sha256": blob_sha}
+    manifest_sha = hashlib.sha256(manifest_bytes).hexdigest()
+    assert graph["retention_ownership"]["incoming_content_key_sha256"] == hashlib.sha256(
+        f"sha256:{manifest_sha}".encode("ascii"),
+    ).hexdigest()
+    read_exact(native / "content/blobs/sha256" / manifest_sha, manifest_bytes)
+    return {"snapshot_payload_sha256": snapshot_sha, "blob_sha256": blob_sha,
+            "incoming_oci_manifest_sha256": manifest_sha}
 
 
 def qualify_native_writes(workspace, tests_hash):
@@ -186,17 +196,30 @@ def qualify_native_writes(workspace, tests_hash):
         backing = [match[1] for line in lines if (match := re.match(
             r"^\s+--- PASS: TestDSGNativeBackingRecovery/(snapshot|blob) ", line,
         ))]
+        deletion = [match[1] for line in lines if (match := re.match(
+            r"^\s+--- PASS: TestDSGNativeDeletionJournalRecovery/([a-z-]+) ", line,
+        ))]
+        deletion_proof = [match.groups() for line in lines if (match := re.search(
+            r"\bnative-backing-deletion-qualification-v1 snapshot_calls=(\d+) blob_calls=(\d+) "
+            r"recovery_calls=(\d+) non_target_changes=(\d+) production_receipts=(\d+)$", line,
+        ))]
         assert {"TestDSGNativeJournalRecovery", "TestDSGNativeBackingRecovery",
-                "TestDSGNativeCacheMetadataRecovery"} <= set(passed)
+                "TestDSGNativeCacheMetadataRecovery", "TestDSGNativeDeletionJournalRecovery"} <= set(passed)
         assert set(journal_stages) == {"solver", "lease", "snapshot", "blob", "cache"}
         assert set(backing) == {"snapshot", "blob"}
         assert any("native-five-stage-trial-v1" in line for line in lines)
+        assert set(deletion) == {"snapshot", "blob", "missing-pre-effect", "partial-postcondition"}
+        assert deletion_proof == [("1", "1", "0", "0", "0")]
+        counts = dict(zip(("snapshot_calls", "blob_calls", "recovery_calls", "non_target_changes",
+                           "production_receipts"), map(int, deletion_proof[0]), strict=True))
     return {"passed": passed, "journal_stages": journal_stages, "independent_stages": [*backing, "cache"],
             "trial_proof": "native-five-stage-trial-v1",
+            "actual_synthetic_backing_deletion": {"proof": "native-backing-deletion-qualification-v1",
+                                                  "cases": deletion, **counts},
             "writable_ext4": True, "owned_loop_released": True}
 
 
-def qualify(workspace, daemon_hash, client_hash):
+def require_private_boundary(workspace):
     assert sys.platform == "linux" and os.uname().machine == "aarch64" and os.geteuid() == 0
     assert workspace.resolve(strict=True) == workspace and workspace.is_mount()
     assert workspace.stat().st_uid == 0 and stat.S_IMODE(workspace.stat().st_mode) == 0o700
@@ -204,6 +227,9 @@ def qualify(workspace, daemon_hash, client_hash):
     for kind in ("net", "mnt"):
         assert os.readlink(f"/proc/self/ns/{kind}") != os.readlink(f"/proc/1/ns/{kind}")
     assert not Path("/run/docker.sock").is_socket() and not Path("/run/containerd/containerd.sock").is_socket()
+
+
+def qualify(workspace, daemon_hash, client_hash):
     fixture = runpy.run_path(str(workspace / "check-dedicated-buildkit-fence.py"))
     daemon = fixture["check_binary"](workspace, "buildkitd", daemon_hash)
     client = fixture["check_binary"](workspace, "buildctl", client_hash)
@@ -258,13 +284,19 @@ def qualify(workspace, daemon_hash, client_hash):
         expected = ("filesystem_read_only", "executor_namespace_gone", "mounts_clear", "external_handles_clear")
         assert all(evidence["quiescence"][name] is True for name in expected)
         graph = evidence["graph"]
+        ownership = graph["retention_ownership"]
         assert graph["disposition"] == "preserve" and graph["unverified"]
         assert re.fullmatch(r"[a-f0-9]{64}", graph["references_sha256"])
         assert graph["cache"]["committed"] and graph["solver"]["result_nodes"] > 0
         assert evidence["history_tx"] > 0 and graph["external"]["history_records"] >= 0
         assert graph["transitive"]["solver"]["result_nodes"] > 0
         assert graph["transitive"]["cache_records"]
-        assert graph["transitive"]["gc_labels"]["content_nodes"] > 0
+        assert graph["transitive"]["gc_labels"]["content_nodes"] == 2
+        assert ownership["checked"] and not ownership["exclusive"]
+        assert ownership["reason"] == "foreign_or_unresolved_retention_edge"
+        assert ownership["record_lease"] and ownership["variant_lease"] and not ownership["view_lease"]
+        assert ownership["owned_roots"] == graph["transitive"]["gc_labels"]["roots"] == 2
+        assert ownership["owned_child_snapshots"] == graph["native_snapshot"]["children"] == 1
         for kind in ("snapshot", "blob"):
             allocation = graph["native_allocations"][kind]
             assert re.fullmatch(r"[a-f0-9]{64}", allocation["metadata_sha256"])
@@ -279,6 +311,7 @@ def qualify(workspace, daemon_hash, client_hash):
         candidate["reclamation_checks"] = {
             "retention_roots": graph["transitive"]["gc_labels"]["roots"],
             "snapshot_children": graph["native_snapshot"]["children"],
+            "retention_ownership": ownership,
             "unverified": graph["unverified"],
             "approval_requested": False,
         }
@@ -294,10 +327,13 @@ def qualify(workspace, daemon_hash, client_hash):
 
 if __name__ == "__main__":
     os.umask(0o077)
+    native = None
     try:
         workspace = Path(sys.argv[1])
+        require_private_boundary(workspace)
+        native = qualify_native_writes(workspace, sys.argv[4])
         result = qualify(workspace, sys.argv[2], sys.argv[3])
-        result["native_writable_recovery"] = qualify_native_writes(workspace, sys.argv[4])
+        result["native_writable_recovery"] = native
     except (AssertionError, OSError, KeyError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
         location = error.__traceback__
         local_line = location.tb_lineno
@@ -307,6 +343,7 @@ if __name__ == "__main__":
             location = location.tb_next
         category = str(error) if re.fullmatch(r"[a-z_0-9]{1,80}", str(error)) else None
         print(json.dumps({"fixture_error": type(error).__name__, "line": local_line,
-                          "category": category, "errno": getattr(error, "errno", None)}), flush=True)
+                          "category": category, "errno": getattr(error, "errno", None),
+                          "native_writable_recovery": native}), flush=True)
         raise SystemExit(1) from None
     print(json.dumps(result, sort_keys=True), flush=True)
