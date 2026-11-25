@@ -138,13 +138,13 @@
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "95ecbf4f4758ccde9cacb338972f1a8ec96393f56f8d21f78368a416a783dd3d",
-      "bytes": 28724
+      "sha256": "2ef88d819b237aa439c807ae9d9923f0f16dad74ba56c461b1bd7af0a65d760e",
+      "bytes": 29447
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "c7923fba224dbf96cfab788a059ce01dc55f2bbff5088eb728d4432fad0f3ae7",
-      "bytes": 57449
+      "sha256": "256fa5d12d1eab15e12c54dc8bcec1399f14d2ad7f99d941de2ed02fe8bd5742",
+      "bytes": 59014
     },
     {
       "path": "docs/WBS.md",
@@ -273,8 +273,8 @@
     },
     {
       "path": "integrations/buildkit-exact/cache/dsg_ledger_recovery_linux_test.go",
-      "sha256": "c37690ca1c36dcd457b3db0875e04bce875b569873e57d838f3731d35c41a1cf",
-      "bytes": 4626
+      "sha256": "0e6720d3a6e4f21f6055f2f45e8cc6f479beca7343115705113575717ff3a82c",
+      "bytes": 5689
     },
     {
       "path": "integrations/buildkit-exact/cache/dsg_manifestless_candidate_linux_test.go",
@@ -888,8 +888,8 @@
     },
     {
       "path": "scripts/test-buildkit-settled-receipt.py",
-      "sha256": "2a879e713daa3ef7a2f9fcb1e5b19c0946abfac3a44a1bf300f3007ad485540c",
-      "bytes": 4810
+      "sha256": "c1e45316f2523f8e34bfeba079841e0c9dd488587f1e2ef360c3158d394275fb",
+      "bytes": 7269
     },
     {
       "path": "scripts/test-rust.sh",

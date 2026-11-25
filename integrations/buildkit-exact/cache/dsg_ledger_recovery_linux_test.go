@@ -95,6 +95,31 @@ func TestDSGLedgerLossRecovery(t *testing.T) {
 	}
 }
 
+// Local verification succeeds at both legitimate phases. An observer retaining
+// the settled checkpoint outside the rollback domain can distinguish them.
+func TestDSGLedgerIndependentSettledCheckpoint(t *testing.T) {
+	stage := t.TempDir()
+	require.NoError(t, os.Chmod(stage, 0700))
+	path := filepath.Join(stage, "grants.db")
+	authority, err := dsgCreateSameMountAuthority(path)
+	require.NoError(t, err)
+	defer authority.db.Close()
+
+	grant := dsgTestLedgerGrant(authority.device + 1)
+	require.NoError(t, authority.approve(t.Context(), grant))
+	require.True(t, authority.verified())
+	approvedCheckpoint, err := os.ReadFile(path + ".checkpoint")
+	require.NoError(t, err)
+
+	require.NoError(t, authority.advance(t.Context(), grant, nil))
+	receipt := DSGExactReceipt{Request: grant.Request, LogicalRecords: 1}
+	require.NoError(t, authority.advance(t.Context(), grant, &receipt))
+	require.True(t, authority.verified())
+	settledCheckpoint, err := os.ReadFile(path + ".checkpoint")
+	require.NoError(t, err)
+	require.NotEqual(t, settledCheckpoint, approvedCheckpoint)
+}
+
 func TestDSGLedgerGenerationReplay(t *testing.T) {
 	stage := t.TempDir()
 	require.NoError(t, os.Chmod(stage, 0700))

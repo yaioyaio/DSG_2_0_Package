@@ -28,6 +28,49 @@ def finalized():
 
 
 class SettledReceiptTest(unittest.TestCase):
+    def test_archive_and_independent_pin_loss(self):
+        raw = json.dumps(finalized()).encode()
+        pin_bytes = hashlib.sha256(raw).hexdigest().encode("ascii") + b"\n"
+        for archive_present, pin_present in ((True, True), (False, True), (True, False), (False, False)):
+            with self.subTest(archive=archive_present, pin=pin_present), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                archive = root / "archive" / "AUTHORIZED-RESULT.json"
+                pin_path = root / "supervisor" / "ARCHIVE-SHA256"
+                archive.parent.mkdir()
+                pin_path.parent.mkdir()
+                archive.write_bytes(raw)
+                pin_path.write_bytes(pin_bytes)
+                if not archive_present:
+                    archive.unlink()
+                if not pin_present:
+                    pin_path.unlink()
+
+                # The supervisor supplies its retained value and never derives a replacement from the archive.
+                try:
+                    pin = pin_path.read_text(encoding="ascii").strip()
+                except FileNotFoundError:
+                    pin = ""
+                expected_files = {path: path.stat().st_ino for path in (archive, pin_path) if path.exists()}
+                args = ["check", "--archive", str(archive), "--archive-sha256", pin,
+                        "--custody-sha256", digest, "--record-id", record]
+                output = io.StringIO()
+                with patch("sys.argv", args), contextlib.redirect_stdout(output):
+                    code = checker["main"]()
+
+                response = json.loads(output.getvalue())
+                if archive_present and pin_present:
+                    self.assertEqual(code, 0)
+                    self.assertEqual(response["status"], "archived_settled_receipt")
+                    self.assertEqual(response["mutation_calls"], 0)
+                else:
+                    self.assertEqual(code, 1)
+                    self.assertEqual(response, {"status": "preserve", "mutation_calls": 0})
+                self.assertEqual(set(root.rglob("*")), {archive.parent, pin_path.parent, *expected_files})
+                for path, original in ((archive, raw), (pin_path, pin_bytes)):
+                    if path in expected_files:
+                        self.assertEqual(path.stat().st_ino, expected_files[path])
+                        self.assertEqual(path.read_bytes(), original)
+
     def test_controller_rehearsal(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "SETTLED.json"
