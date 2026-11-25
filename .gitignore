@@ -45,6 +45,9 @@ mysql-data/
 dsg-current
 .dsg-release-*/
 .dsg-stage-*/
+dsg-buildkit-external-execution/
+execution-state.json
+execution-claimed
 *.sqlite
 *.sqlite3
 *.sqlite-wal
