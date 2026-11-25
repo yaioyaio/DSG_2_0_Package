@@ -22,14 +22,16 @@ const dsgGraphMaxEntries = 16384
 // stores. Each checked section has an independent traversal and shared budget.
 // The graph is evidence for preservation and carries no mutation authority.
 type DSGDedicatedGraph struct {
-	Cache        *DSGGraphCache    `json:"cache,omitempty"`
-	Solver       *DSGGraphSolver   `json:"solver,omitempty"`
-	Containerd   *DSGGraphBackend  `json:"containerd,omitempty"`
-	Snapshot     *DSGGraphSnapshot `json:"native_snapshot,omitempty"`
-	Blob         *DSGGraphBlob     `json:"local_blob,omitempty"`
-	EvidenceHash string            `json:"references_sha256"`
-	Unverified   []string          `json:"unverified"`
-	Disposition  string            `json:"disposition"`
+	Cache        *DSGGraphCache      `json:"cache,omitempty"`
+	Solver       *DSGGraphSolver     `json:"solver,omitempty"`
+	Containerd   *DSGGraphBackend    `json:"containerd,omitempty"`
+	Snapshot     *DSGGraphSnapshot   `json:"native_snapshot,omitempty"`
+	Blob         *DSGGraphBlob       `json:"local_blob,omitempty"`
+	Transitive   *DSGGraphTransitive `json:"transitive,omitempty"`
+	External     *DSGGraphExternal   `json:"external,omitempty"`
+	EvidenceHash string              `json:"references_sha256"`
+	Unverified   []string            `json:"unverified"`
+	Disposition  string              `json:"disposition"`
 }
 
 type DSGGraphCache struct {
@@ -106,11 +108,18 @@ func dsgGraphSolverKey(value string) bool {
 	return dsgFullID.MatchString(value) || dsgGraphSHA256(value) || (random && dsgDigest.MatchString(encoded))
 }
 
-func dsgObserveNativeGraph(ctx context.Context, workerID, recordID string, solverTx, cacheTx, containerdTx, snapshotTx *bolt.Tx, workerFD, snapshotterFD int) (*DSGDedicatedGraph, error) {
+func dsgObserveNativeGraph(ctx context.Context, workerID, recordID string, solverTx, cacheTx, containerdTx, snapshotTx *bolt.Tx, workerFD, snapshotterFD int, historyTxs ...*bolt.Tx) (*DSGDedicatedGraph, error) {
 	if !dsgFullID.MatchString(workerID) || !dsgFullID.MatchString(recordID) || ctx.Err() != nil {
 		return nil, ErrDSGExactPreserve
 	}
-	for _, tx := range []*bolt.Tx{solverTx, cacheTx, containerdTx, snapshotTx} {
+	if len(historyTxs) > 1 {
+		return nil, ErrDSGExactPreserve
+	}
+	var history *bolt.Tx
+	if len(historyTxs) == 1 {
+		history = historyTxs[0]
+	}
+	for _, tx := range []*bolt.Tx{solverTx, cacheTx, containerdTx, snapshotTx, history} {
 		if tx != nil && tx.Writable() {
 			return nil, ErrDSGExactPreserve
 		}
@@ -119,15 +128,12 @@ func dsgObserveNativeGraph(ctx context.Context, workerID, recordID string, solve
 	o := &DSGDedicatedGraph{
 		Disposition: "preserve",
 		Unverified: []string{
-			"transitive_references_and_containerd_gc_label_semantics",
-			"containerd_image_container_and_ingest_references",
-			"cross_namespace_snapshot_alias_lease_edges",
-			"build_history_and_external_metadata_payloads",
+			"cache_record_transitive_parents_and_aliases",
 			"native_allocation_contents",
 		},
 	}
 	r := &dsgGraphReader{ctx: ctx, remaining: dsgGraphMaxEntries, evidence: sha256.New()}
-	r.edge("dsg-native-direct-graph-v1", workerID, recordID)
+	r.edge("dsg-native-reference-graph-v2", workerID, recordID)
 	warn := func(code string) {
 		o.Unverified = append(o.Unverified, code)
 		r.edge("unverified", code)
@@ -159,6 +165,7 @@ func dsgObserveNativeGraph(ctx context.Context, workerID, recordID string, solve
 			}
 		}
 	}
+	r.extendedGraph(o, solverTx, cacheTx, containerdTx, history, workerID, recordID, snapshot, blob, warn)
 	if ctx.Err() != nil {
 		return nil, ErrDSGExactPreserve
 	}

@@ -98,13 +98,14 @@ func dsgAcquireDaemon(root string, strict bool) error {
 	return nil
 }
 
-// The lazy native snapshotter may not yet have initialized its DB.
+// The native snapshot and build history DBs may be absent.
 type DSGDedicatedObservation struct {
 	Worker       string                  `json:"worker"`
 	SolverTx     int                     `json:"solver_tx"`
 	CacheTx      int                     `json:"cache_tx"`
 	ContainerdTx int                     `json:"containerd_tx"`
 	SnapshotTx   *int                    `json:"snapshot_tx"`
+	HistoryTx    *int                    `json:"history_tx,omitempty"`
 	Quiescence   *DSGDedicatedQuiescence `json:"quiescence,omitempty"`
 	Graph        *DSGDedicatedGraph      `json:"graph,omitempty"`
 	Record       *DSGDedicatedRecord     `json:"record,omitempty"`
@@ -294,8 +295,8 @@ func dsgInspectPinned(dir int, recordID string) (DSGDedicatedObservation, error)
 		return o, ErrDSGExactPreserve
 	}
 	o.Worker = string(data)
-	var snapTx int
-	var txs [4]*bolt.Tx
+	var snapTx, historyTx int
+	var txs [5]*bolt.Tx
 	for i, dbSpec := range []struct {
 		dir  int
 		name string
@@ -303,7 +304,11 @@ func dsgInspectPinned(dir int, recordID string) (DSGDedicatedObservation, error)
 	}{
 		{dir, "cache.db", &o.SolverTx}, {workerFD, "metadata_v2.db", &o.CacheTx},
 		{workerFD, "containerdmeta.db", &o.ContainerdTx}, {int(sn.Fd()), "metadata.db", &snapTx},
+		{dir, "history.db", &historyTx},
 	} {
+		if dbSpec.tx == &historyTx && recordID == "" {
+			continue
+		}
 		// Supply the pinned, non-symlink descriptor. No path is reopened for a
 		// compaction, creation, initialization, or sidecar DB.
 		db, err := bolt.Open(dbSpec.name, 0400, &bolt.Options{ReadOnly: true, Timeout: 100 * time.Millisecond,
@@ -321,7 +326,7 @@ func dsgInspectPinned(dir int, recordID string) (DSGDedicatedObservation, error)
 			},
 		})
 		if err != nil {
-			if dbSpec.tx == &snapTx && errors.Is(err, os.ErrNotExist) {
+			if (dbSpec.tx == &snapTx || dbSpec.tx == &historyTx) && errors.Is(err, os.ErrNotExist) {
 				continue
 			}
 			return DSGDedicatedObservation{}, ErrDSGExactPreserve
@@ -337,6 +342,9 @@ func dsgInspectPinned(dir int, recordID string) (DSGDedicatedObservation, error)
 		if dbSpec.tx == &snapTx {
 			o.SnapshotTx = &snapTx
 		}
+		if dbSpec.tx == &historyTx {
+			o.HistoryTx = &historyTx
+		}
 	}
 	if recordID != "" {
 		o.Record, err = dsgObserveRecord(txs[1], o.Worker, recordID)
@@ -346,7 +354,7 @@ func dsgInspectPinned(dir int, recordID string) (DSGDedicatedObservation, error)
 		if o.Record.RecordPresent {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
-			o.Graph, err = dsgObserveNativeGraph(ctx, o.Worker, recordID, txs[0], txs[1], txs[2], txs[3], workerFD, int(sn.Fd()))
+			o.Graph, err = dsgObserveNativeGraph(ctx, o.Worker, recordID, txs[0], txs[1], txs[2], txs[3], workerFD, int(sn.Fd()), txs[4])
 			if err != nil {
 				return DSGDedicatedObservation{}, ErrDSGExactPreserve
 			}

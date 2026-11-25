@@ -36,6 +36,8 @@ BuildKit v0.35.1의 DSG 소스 오버레이는 캐시 관리자의 메모리에�
 
 엄격 조회는 별도 PID 네임스페이스와 전용 ext4의 디렉터리 식별자를 등록 표지로 고정한다. 초기 PID 네임스페이스의 관측 가능한 프로세스·태스크·마운트·핸들을 제한된 범위에서 점검한다. 읽기 전용 superblock으로 쓰기를 차단한다. 신뢰 경계에는 커널, 스토리지와 VM 관리자 권한이 포함된다. 이후 쓰기 허용 상태에서의 회수와 다중 저장소 실제 정산은 별도 경계 검증이 필요하다. [경계 구현](../integrations/buildkit-exact/cache/dsg_quiescence_linux.go)
 
+전이 그래프는 고정 버전 솔버의 순방향·역방향 인덱스를 대조한다. 지원하는 GC 라벨과 외부 참조는 분류된 ID와 관계의 해시만 증거로 노출한다. 원문 속성이나 해석이 불가능한 외부 메타데이터를 반환하지 않는다. 시험용 쓰기 경계에서는 단계별 복구를 검증하며 운영 캐시 쓰기와 최종 회수 영수증은 별도 수용 기준을 적용한다. [전이 판독](../integrations/buildkit-exact/cache/dsg_graph_transitive_linux.go) · [외부 참조 판독](../integrations/buildkit-exact/cache/dsg_graph_external_linux.go)
+
 에이전트 훅 실패 시 차단 여부는 CLI의 동작에 따른다. macOS에서 Docker 직접 접근을 통제하는 수용 기준은 샌드박스와 검증된 서비스 경계로 적용한다. Windows의 경우 SCM이 소유한 named pipe에서 허용 SID를 검증한다. [에이전트 운영](OPERATIONS.md#에이전트-연동-운영)
 
 ## Python POC 경고

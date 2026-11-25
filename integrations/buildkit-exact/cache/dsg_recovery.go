@@ -1,6 +1,5 @@
 // DSG cross-store recovery protocol. The native worker exposes no participant
-// implementation or mutation entry point. Only the synthetic qualification
-// fixture currently implements the atomic participant contract.
+// implementation or mutation entry point. Qualification participants are installed only by tests.
 package cache
 
 import (
@@ -30,8 +29,8 @@ type dsgRecoveryPlan struct {
 	Objects           [len(dsgRecoveryDomains)]dsgRecoveryObject
 }
 
-func (p dsgRecoveryPlan) valid() bool {
-	if p.Mode != dsgRecoverySynthetic || !p.Request.valid() || !dsgDigest.MatchString(p.GraphSHA256) {
+func (p dsgRecoveryPlan) valid(mode string) bool {
+	if p.Mode != mode || !p.Request.valid() || !dsgDigest.MatchString(p.GraphSHA256) {
 		return false
 	}
 	for _, obj := range p.Objects {
@@ -76,9 +75,10 @@ type dsgRecoveryParticipant interface {
 }
 
 type dsgRecoveryJournal struct {
-	root  string
-	db    *bolt.DB // dedicated protected journal, with synchronous commits
-	store [len(dsgRecoveryDomains)]dsgRecoveryParticipant
+	root              string
+	qualificationMode string   // empty selects the synthetic fixture
+	db                *bolt.DB // dedicated protected journal, with synchronous commits
+	store             [len(dsgRecoveryDomains)]dsgRecoveryParticipant
 }
 
 type dsgRecoveryState struct {
@@ -100,7 +100,11 @@ func (s dsgRecoveryState) valid(plan dsgRecoveryPlan) bool {
 }
 
 func (j *dsgRecoveryJournal) fenced(ctx context.Context, p dsgRecoveryPlan, run func() error) error {
-	if !p.valid() || j.db == nil || j.db.NoSync || ctx.Err() != nil {
+	mode := j.qualificationMode
+	if mode == "" {
+		mode = dsgRecoverySynthetic
+	}
+	if !p.valid(mode) || j.db == nil || j.db.NoSync || ctx.Err() != nil {
 		return ErrDSGExactPreserve
 	}
 	for _, store := range j.store {
