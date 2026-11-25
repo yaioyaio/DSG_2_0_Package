@@ -257,6 +257,11 @@ def hold(args):
     evidence = {"schema": "dsg-buildkit-approval-custody-v1", "purpose": args.purpose, "keeper": keeper,
                 "runtime_sha256": args.runtime_sha256, "created_at_unix_ms": created_wall,
                 "expires_at_unix_ms": created_wall + ttl_ms, "expires_at_boottime_ms": created_boot + ttl_ms}
+    if args.operator_sha256 is not None:
+        require(DIGEST_PATTERN.fullmatch(args.operator_sha256) and
+                digest_private(stage / "dsg-buildkit-exact", 0o500, 100 * 1024**2) == args.operator_sha256,
+                "operator_digest")
+        evidence["operator_sha256"] = args.operator_sha256
     stopped = False
 
     def stop(_signum, _frame):
@@ -325,6 +330,9 @@ def status(args):
             "custody_source_changed")
     runtime = digest_private(visible_stage / EXECUTABLE, 0o500, 100 * 1024**2)
     require(runtime == evidence["runtime_sha256"], "custody_runtime_changed")
+    if "operator_sha256" in evidence:
+        require(digest_private(visible_stage / "dsg-buildkit-exact", 0o500, 100 * 1024**2)
+                == evidence["operator_sha256"], "custody_operator_changed")
     require(keeper_identity(pid) == before and live(evidence), "custody_expired_or_replaced")
     require(canonical(dict(evidence, evidence_sha256=digest)) + b"\n" == raw, "custody_encoding")
     print(raw.decode("ascii"), end="", flush=True)
@@ -336,6 +344,7 @@ def main():
     keep = commands.add_parser("hold")
     keep.add_argument("stage", type=stage_arg)
     keep.add_argument("runtime_sha256")
+    keep.add_argument("--operator-sha256", help="digest of the separate fixed-name exact-record operator")
     keep.add_argument("--lifetime-seconds", type=int, default=1800)
     keep.add_argument("--purpose", choices=("approval", "rehearsal"), default="approval")
     inspect = commands.add_parser("status")

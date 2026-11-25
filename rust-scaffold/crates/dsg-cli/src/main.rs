@@ -162,6 +162,12 @@ enum Command {
         #[arg(long)]
         context: String,
     },
+    /// 전용 BuildKit 마운트의 승인·적용·영수증 요청 한 건을 표준 입력의 Unix 소켓에서 받습니다.
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    BuildkitExactController {
+        /// 로컬 서비스 배포자가 선택한 등록 ID (소문자 16진수 12–64자리)
+        registration: String,
+    },
     /// 운영자가 지정한 Linux ARM64 로컬 BuildKit 데몬의 캐시 상태를 조회합니다.
     #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
     BuildkitLocalCache {
@@ -292,6 +298,10 @@ impl Output {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match &cli.command {
+        #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+        Command::BuildkitExactController { registration } => {
+            return ExitCode::from(dsg_core::buildkit_exact_controller::serve(registration));
+        }
         Command::Hook { agent } => return hooks::run(*agent),
         Command::Mcp => return mcp::run(&cli),
         Command::McpStateRead { plan_id } => return mcp_state::run(&cli, *plan_id),
@@ -541,7 +551,8 @@ fn run(cli: &Cli) -> Result<Output, CliError> {
             ))
         }
         #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
-        Command::BuildkitLocalCache { .. }
+        Command::BuildkitExactController { .. }
+        | Command::BuildkitLocalCache { .. }
         | Command::DockerControllerProbe { .. }
         | Command::DockerControllerAdmission { .. }
         | Command::DockerBackendPreflight { .. } => unreachable!(),

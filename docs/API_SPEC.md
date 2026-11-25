@@ -125,6 +125,18 @@ Windows SCM 어댑터는 고정 로컬 named pipe에서 `/_ping`, `/info`, `/dsg
 
 `GET /api/overview`는 `health`, `policy`, `docker`, `cleanup`의 집계 객체를 반환한다. 각 부분은 조회가 불가능하면 `null`이다. 자료가 불완전할 때 수치를 미확인으로 표시하며, 완전한 0건은 숫자로 표시한다. 정리 미리보기는 승인이나 적용 이력을 생성하지 않는다. 서비스는 루프백 Host 및 같은 출처 요청을 확인하고 연결을 한 번에 하나씩 처리한다. [운영 방법](OPERATIONS.md#로컬-대시보드)
 
+## Linux ARM64 BuildKit 단일 대상 API
+
+`dsg buildkit-exact-controller <등록 ID>`는 등록된 보유 프로세스의 격리 네임스페이스에서 수락된 로컬 AF_UNIX `SOCK_SEQPACKET` 연결을 표준 입력(fd 0)으로 받아 요청 하나를 처리한다. 등록 ID는 소문자 16진수 12–64자다. 패킷은 최대 4 KiB의 JSON 객체이며 `version: 1`, `operation`, `scope`를 받는다. `scope`는 `project`, `worker`, `record_id`, `generation`, `origin`, `metadata_digest`, `approval`, `intent`, `custody_sha256`의 전체 값을 요구한다. 프로젝트·세대·출처·메타데이터·승인·적용 의도·보유 증거는 각각 SHA-256 값이며, 워커와 레코드는 전체 ID다. 커널의 연결 자격과 메시지 자격·pidfd가 같은 생존 프로세스를 가리켜야 한다. 루트 관리자가 설치한 정책의 서로 다른 비루트 UID가 각각 승인과 실행을 담당한다. 예외 요청은 변경 전에 거절된다.
+
+| 요청 | 역할 | 정상 응답 |
+|---|---|---|
+| `approve` | 승인자 | `{"status":"approved","receipt":null}` |
+| `apply` | 실행자 | `{"status":"applied","receipt":{…}}`. 승인·세대·같은 마운트의 현재 증거를 재확인하고 승인 1회 소비와 변경을 연결한다. |
+| `receipt` | 실행자 | `{"status":"settled","receipt":{…}}`. 저장된 변경의 영수증을 확인하며 네이티브 변경을 다시 호출하지 않는다. 논리 회수와 물리 회수량을 별도로 표시한다. |
+
+운영 제어기는 SHA-256이 고정된 네이티브 `dsg-buildkit-exact`에 메서드와 등록 ID를 전달한다. 관리자가 보호한 등록에서 승인·출처·실행 파일·보유 프로세스·같은 마운트와 원장 체크포인트를 독립적으로 검증한다. 클라이언트가 경로, 임의 명령, UID 또는 승인 원문을 지정할 수 없다. 자체 권한 거절은 `{"status":"preserved","reason":"controller_admission"}`과 종료 5, 네이티브 보존 판정은 본문 없이 종료 5다. 승인 원장 또는 체크포인트를 읽을 수 없는 상태에서는 적용과 실시간 영수증 조회가 모두 거절된다. 게스트 유실 후 호스트에 사전 보관한 영수증은 별도 검사기로 읽기 검증만 할 수 있다. [API 실측](HANDOFF.md#buildkit-공개-api와-승인-원장-복구)
+
 ## 계획 API (미구현)
 - `dsg inspect <resource-id>`
 - `dsg docker reuse --project <id>`
