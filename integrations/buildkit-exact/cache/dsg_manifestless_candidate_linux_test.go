@@ -34,8 +34,6 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-const dsgManifestlessFile = "dsg-owned-payload"
-
 func dsgManifestlessLayer(t *testing.T, ctx context.Context, ref ImmutableRef, payload []byte) (ocispecs.Descriptor, []byte) {
 	t.Helper()
 	remotes, err := ref.GetRemotes(ctx, true, config.RefConfig{Compression: compression.New(compression.Uncompressed)}, false, nil)

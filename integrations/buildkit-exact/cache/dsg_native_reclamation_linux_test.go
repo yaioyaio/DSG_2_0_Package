@@ -38,7 +38,13 @@ import (
 // operation accepts an inherited fd for this private disposable ext4 fixture.
 func dsgSeedReclaim(t *testing.T) (*os.File, dsgReclaimInput) {
 	t.Helper()
-	root := filepath.Join(t.TempDir(), dsgDeletionRoot)
+	return dsgSeedReclaimAt(t, filepath.Join(t.TempDir(), dsgDeletionRoot))
+}
+
+// A fresh registered target is created only inside the caller-enrolled private mount.
+func dsgSeedReclaimAt(t *testing.T, root string) (*os.File, dsgReclaimInput) {
+	t.Helper()
+	require.Equal(t, dsgDeletionRoot, filepath.Base(root))
 	require.NoError(t, os.Mkdir(root, 0700))
 	dir, err := os.Open(root)
 	require.NoError(t, err)
@@ -66,7 +72,8 @@ func dsgSeedReclaim(t *testing.T) (*os.File, dsgReclaimInput) {
 		return err
 	}))
 	require.NoError(t, history.Close())
-	graph := s.preflight(t)
+	graph, err := s.graph(t.Context())
+	require.NoError(t, err)
 	require.NotNil(t, graph.Ownership)
 	require.Equal(t, "exact_record_resources", graph.Ownership.Reason, "%v", graph.Unverified)
 	require.True(t, graph.Ownership.Exclusive && graph.Ownership.RecordLease && graph.Ownership.VariantLease)
@@ -200,26 +207,6 @@ func (s *dsgReclaimFixture) seedStores(t *testing.T, ctx context.Context) {
 		s.shape.ViewID = view.id
 		return nil
 	}))
-}
-
-func (s *dsgReclaimFixture) preflight(t *testing.T) *DSGDedicatedGraph {
-	t.Helper()
-	var txs []*bolt.Tx
-	for _, file := range []string{reclaimSolver, reclaimCache, reclaimBackend, reclaimNative, reclaimHistory} {
-		db, err := bolt.Open(filepath.Join(s.root, file), 0600, &bolt.Options{ReadOnly: true, Timeout: time.Second})
-		require.NoError(t, err)
-		defer db.Close()
-		tx, err := db.Begin(false)
-		require.NoError(t, err)
-		defer tx.Rollback()
-		txs = append(txs, tx)
-	}
-	dir, err := os.Open(filepath.Join(s.root, "snapshots"))
-	require.NoError(t, err)
-	defer dir.Close()
-	g, err := dsgObserveNativeGraph(t.Context(), s.plan.Request.Worker, s.plan.Request.RecordID, txs[0], txs[1], txs[2], txs[3], int(s.dir.Fd()), int(dir.Fd()), txs[4])
-	require.NoError(t, err)
-	return g
 }
 
 // Reopen the participating stores through their public reader interfaces. The

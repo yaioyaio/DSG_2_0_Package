@@ -49,6 +49,10 @@ func DSGAcquireQuiescentDaemon(root string) error {
 }
 
 func dsgAcquireDaemon(root string, strict bool) error {
+	return dsgAcquireDaemonFromProc(root, strict, "/proc")
+}
+
+func dsgAcquireDaemonFromProc(root string, strict bool, procRoot string) error {
 	fd, err := dsgLockRoot(root)
 	if err != nil {
 		return err
@@ -79,7 +83,7 @@ func dsgAcquireDaemon(root string, strict bool) error {
 		return ErrDSGExactPreserve
 	}
 	if strict {
-		if err := dsgEnrollNamespace(fd, root); err != nil {
+		if err := dsgEnrollNamespace(fd, root, procRoot); err != nil {
 			unix.Close(fd)
 			return err
 		}

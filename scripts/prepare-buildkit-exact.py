@@ -64,6 +64,14 @@ def prepare(archive, destination):
             raise SystemExit("pinned buildkitd startup anchor mismatch")
         source = source.replace(anchor, insertion + anchor)
     main.write_text(source)
+    # containerd's content-store capability probe unlinks its temporary file.
+    # Release the descriptor before the worker filesystem returns to read-only.
+    verity = destination / "vendor/github.com/containerd/containerd/v2/internal/fsverity/fsverity_linux.go"
+    verity_source = verity.read_text()
+    enable_open = "func Enable(path string) error {\n\tf, err := os.Open(path)\n\tif err != nil {\n\t\treturn err\n\t}\n"
+    if verity_source.count(enable_open) != 1:
+        raise SystemExit("pinned fs-verity descriptor anchor mismatch")
+    verity.write_text(verity_source.replace(enable_open, enable_open + "\tdefer f.Close()\n", 1))
     print(f"prepared official BuildKit {COMMIT} with the DSG worker and cache overlay")
 
 

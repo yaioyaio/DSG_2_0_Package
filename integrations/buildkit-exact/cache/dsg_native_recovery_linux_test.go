@@ -52,52 +52,6 @@ func (s *dsgNativeTrial) resources() []leases.Resource {
 	return []leases.Resource{{Type: "snapshots/native", ID: s.p.Objects[2].Key}, {Type: "content", ID: s.p.Objects[3].Key}}
 }
 
-// Hash the full bounded native bucket tree, excluding only specified leaves
-// (solver) or the single new protective lease (containerd). Length-framed
-// components distinguish a key containing '/' from multiple path components.
-func dsgTrialTree(tx *bolt.Tx, skip func([]string) bool) (string, error) {
-	h := sha256.New()
-	remaining := 1024
-	var visit func([]string, *bolt.Bucket) error
-	visit = func(path []string, b *bolt.Bucket) error {
-		if len(path) > 12 || remaining <= 0 {
-			return ErrDSGExactPreserve
-		}
-		remaining--
-		encoded, _ := json.Marshal(path)
-		fmt.Fprintf(h, "b%d:", len(encoded))
-		h.Write(encoded)
-		fmt.Fprintf(h, "s%d;", b.Sequence())
-		return b.ForEach(func(k, v []byte) error {
-			if len(k) > 512 || len(v) > 8192 || remaining <= 0 {
-				return ErrDSGExactPreserve
-			}
-			child := append(slices.Clone(path), string(k))
-			if skip(child) {
-				return nil
-			}
-			if v == nil {
-				return visit(child, b.Bucket(k))
-			}
-			remaining--
-			encoded, _ := json.Marshal(child)
-			fmt.Fprintf(h, "v%d:", len(encoded))
-			h.Write(encoded)
-			fmt.Fprintf(h, "%d:", len(v))
-			h.Write(v)
-			return nil
-		})
-	}
-	err := tx.ForEach(func(k []byte, b *bolt.Bucket) error {
-		path := []string{string(k)}
-		if skip(path) {
-			return nil
-		}
-		return visit(path, b)
-	})
-	return fmt.Sprintf("%x", h.Sum(nil)), err
-}
-
 func (s *dsgNativeTrial) solverPeers(tx *bolt.Tx) (string, error) {
 	node, id := s.p.Objects[0].Key, s.result()
 	return dsgTrialTree(tx, func(path []string) bool {

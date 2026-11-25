@@ -132,6 +132,12 @@ WBS 1.4·2.3의 읽기 전용 관측은 격리 네이티브 `CacheManager`의 `G
 
 같은 생성기의 폐기 가능한 단일 레코드와 비대상 피어를 한 저널에 연결한다. 솔버, lease·네임스페이스 메타데이터, 자식 snapshot view, snapshot, blob, cache 각각의 효과 직전과 직후에 자식 종료를 주입한다. 출처에 결속한 증거와 독립 네이티브 API의 최종 조회로 논리적 시험 레코드 1건의 제거를 확인한다. 이미 반영된 효과의 재실행·비대상 변경·운영 회수 영수증이 각각 0건이어야 한다. 운영 수용 시험은 새 활성 대상의 별도 승인과 동일 오프라인 마운트에서의 승인 검증·배타 변경 연결을 요구한다. 호스트 전원 차단은 격리 물리 장비의 별도 검증이다. [전체 레코드 복구 시험](../integrations/buildkit-exact/cache/dsg_native_reclamation_linux_test.go) · [Ubuntu 실측](../dist/dsg-exact-reclamation-c24288576c86/QUALIFICATION.json)
 
+### BuildKit 동일 마운트 승인과 회수 예행시험
+
+WBS 1.4·2.3의 비공개 실행기와 마운트 보유 프로세스가 전용 오프라인 ext4의 동일 마운트, 대상 출처와 DB 5개 해시를 승인 증거에 묶는다. 승인 없음, 보유 증거 해시 불일치 및 승인 재사용을 각각 거절한다. 폐기 가능한 시험 레코드의 6단계 효과를 확인하고 읽기 전용 복귀 뒤 원장을 다시 열어 동일 영수증을 조회한다. 독립 역방향 인덱스에서 비대상 피어가 그대로여야 한다. 최초 응답이 유실되면 영수증 조회로만 정산한다. [예행시험 결과](../dist/dsg-same-mount-c781b7dbb024/REHEARSAL.json) · [응답 유실 복구](../dist/dsg-same-mount-f50586013b0d/RECOVERED-REHEARSAL.json)
+
+운영 대상에는 현재 활성 증거를 특정한 별도 승인이 필요하다. 별도 사전 관측은 생성 출처·전체 ID·마운트 보유 증거와 양쪽 유효 기간을 대조하고, 승인 대기 중 적용·prune을 0건으로 유지한다. 호스트 유효 시각과 게스트 벽시계·부팅 후 경과 시간을 확인하며, 만료 또는 마운트 보유 상태 변경 시 다시 검증한다. [별도 승인 사전 증거](../dist/dsg-same-mount-c7883af0a86e/PREAPPROVAL.json) 표준 BuildKit 공개 API 연결과 마운트 보유 프로세스·승인 원장·VM 유실은 이번 예행시험의 검증 범위 밖이다. 물리 회수량과 호스트 전원 차단은 별도로 검증한다. [보유 검증 실행기](../scripts/check-buildkit-approval-custody.py) · [Ubuntu 회귀](../dist/dsg-same-mount-regression-2effb1cd80c6/QUALIFICATION.json)
+
 ### Linux ARM64 로컬 제어 서비스 프로브
 
 WBS 5.1의 로컬 읽기 확인은 보호된 root 소켓과 예상 프로세스의 프로토콜 선언을 검증한다. 등록한 서비스의 성공과 소켓 링크·권한·상대 PID·선언 불일치 거절을 확인하고, 성공과 실패 모두 `mutation_authorized=false`와 보존 게이트를 확인한다. 운영 제어기의 출처·권한·배타 변경 경계는 별도로 검증한다. [프로브 구현과 시험](../rust-scaffold/crates/dsg-core/src/docker_control_local.rs)

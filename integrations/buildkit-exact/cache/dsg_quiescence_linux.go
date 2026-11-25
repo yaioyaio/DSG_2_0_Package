@@ -33,9 +33,13 @@ type DSGDedicatedQuiescence struct {
 	ExternalHandlesClear  bool `json:"external_handles_clear"`
 }
 
-func dsgQError(reason string) error {
-	return fmt.Errorf("quiescence_%s: %w", reason, ErrDSGExactPreserve)
+type dsgQuiescenceFailure struct{ reason string }
+
+func (q dsgQuiescenceFailure) Error() string {
+	return "quiescence_" + q.reason + ": " + ErrDSGExactPreserve.Error()
 }
+func (q dsgQuiescenceFailure) Unwrap() error { return ErrDSGExactPreserve }
+func dsgQError(reason string) error          { return dsgQuiescenceFailure{reason} }
 
 func dsgReadKernel(path string, limit int64) ([]byte, error) {
 	f, err := os.Open(path)
@@ -56,12 +60,16 @@ func dsgStat(path string) (unix.Stat_t, error) {
 	return st, err
 }
 
-func dsgEnrollNamespace(dir int, root string) error {
-	ns, err := dsgStat("/proc/self/ns/pid")
+func dsgEnrollNamespace(dir int, root, procRoot string) error {
+	var fs unix.Statfs_t
+	if unix.Statfs(procRoot, &fs) != nil || fs.Type != unix.PROC_SUPER_MAGIC {
+		return dsgQError("namespace")
+	}
+	ns, err := dsgStat(filepath.Join(procRoot, "self/ns/pid"))
 	if err != nil || os.Geteuid() != 0 || os.Getpid() != 1 || ns.Ino == dsgInitPIDNS {
 		return dsgQError("namespace")
 	}
-	procInit, err := dsgStat("/proc/1/ns/pid")
+	procInit, err := dsgStat(filepath.Join(procRoot, "1/ns/pid"))
 	if err != nil || ns.Dev != procInit.Dev || ns.Ino != procInit.Ino {
 		return dsgQError("enrollment")
 	}
@@ -397,10 +405,14 @@ func dsgProcVisible() error {
 }
 
 func dsgCheckQuiescence(dir int, root string) error {
+	return dsgCheckQuiescenceMode(dir, root, true)
+}
+
+func dsgCheckQuiescenceMode(dir int, root string, readOnly bool) error {
 	if err := dsgProcVisible(); err != nil {
 		return err
 	}
-	st, err := dsgFilesystem(dir, root, true)
+	st, err := dsgFilesystem(dir, root, readOnly)
 	if err != nil {
 		return err
 	}
