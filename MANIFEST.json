@@ -33,7 +33,8 @@
     "buildkit_project_enrollment": "A pinned Ubuntu ARM64 BuildKit dedicated worker accepted tracked DSG README bytes. The project revision, source SHA-256, LLB, OCI export, native worker and record IDs were bound and four native DB digests were unchanged by read-only qualification. A separate QEMU full VM snapshot restored coherent synthetic RAM and ext4 markers. The off-VM latest marker differed. Production rollout, application-level full-snapshot rejection and physical power interruption are still unverified.",
     "buildkit_external_freshness": "Independent issuance verified a stopped Ubuntu ARM64 worker with five native DBs unchanged. Public apply was preserved when external freshness was absent or denied. The actual Go freshness client used a protected relay to a host authority outside a QEMU full snapshot. One synthetic external claim was recorded and a request after the pre-request restore was denied. Native mutation calls were zero. Production rollout, restoration after the success reply, and a physical power cut remain separate.",
     "buildkit_external_execution": "The external executor reserved one isolated append effect and returned the same settled receipt after bare QEMU full restores at approval and receipt boundaries. The isolated approval store was restored to its earlier state while the independent execution journal and claim remained intact. Ubuntu ARM64 verified the actual CLI with a pinned synthetic child, stale execution state and exact replay. Actual operating deployment, physical power cuts and joint rollback of execution state and claim remained separate in that run.",
-    "buildkit_independent_execution_fence": "The Ubuntu ARM64 external executor CLI required an independent one-time reservation outside the guest before a digest-pinned synthetic effect. The saved execution ledger and local marker were jointly rolled back. macOS admitted one reservation, rejected the repeat, and one effect occurred. After restoring the settled files, the same receipt returned without the socket. Production worker mutation, physical power loss, and rollback of the independent reservation were outside this qualification."
+    "buildkit_independent_execution_fence": "The Ubuntu ARM64 external executor CLI required an independent one-time reservation outside the guest before a digest-pinned synthetic effect. The saved execution ledger and local marker were jointly rolled back. macOS admitted one reservation, rejected the repeat, and one effect occurred. After restoring the settled files, the same receipt returned without the socket. Production worker mutation, physical power loss, and rollback of the independent reservation were outside this qualification.",
+    "local_reclaim_measurement": "The installed macOS ARM64 CLI reclaimed one generated 16,777,216-byte Cargo artifact; expected size and independently observed pre-cleanup file allocation agreed. The protected witness was preserved. The host volume delta is observational. Ubuntu Parallels independently measured 8,192 expected payload allocation bytes for a new exact BuildKit fixture before separate approval, with zero mutations."
   },
   "files": [
     {
@@ -143,13 +144,13 @@
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "d0270e1aad4d1f8e32389477d0b89a5911de8c2d4146ab71b934d9c817a18a80",
-      "bytes": 31476
+      "sha256": "6307022d27b8b7913d955f2a086ffecc351e6b3128d6ffe4198ba33c15be7c2a",
+      "bytes": 32343
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "f109f0f9ac23aa224138240edf21176fd3b6af99de32cb4069a1ec238fb88ba7",
-      "bytes": 66039
+      "sha256": "d1b49ba1b715aeb6bde6c3b2b841480cd28288f86f6342b6aec36e1ddfcad0fe",
+      "bytes": 67035
     },
     {
       "path": "docs/WBS.md",
