@@ -200,6 +200,11 @@ WBS 1.4·5.1은 전용 Ubuntu Parallels ARM64 Moby에서 합성 이미지 한 �
 - Linux 외부 실행기의 원장을 같은 inode에서 `ready`로 되감고 최초 실행 표식을 제거한다. VM 밖 독립 예약 기록이 보존된 상태에서 같은 요청을 보내면 합성 변경 총 1건, 재변경 0건이어야 한다. 원본 정산 상태와 표식을 복원하고 예약 소켓을 제거한 뒤 영수증의 바이트가 일치해야 한다. [Linux·macOS 실측](../dist/dsg-buildkit-independent-fence-b12b208/qualification/LINUX-JOINT-ROLLBACK.json)
 - 운영 승인자·실행자의 권한 연결, 실제 워커의 독점 변경권, 독립 영수증 보관은 지정 운영 환경에서 검증한다. 물리 전원 차단, 독립 예약 상태까지 되감기는 경우, 외부 실행기 자체의 예약 응답 후 RAM 복원은 별도 시험으로 다룬다. [사전 점검](../dist/dsg-buildkit-independent-fence-b12b208/qualification/OPERATING-AND-POWER-PREFLIGHT.json)
 
+### 로컬 예상 회수량과 실제 할당량
+
+- 검증된 macOS 설치본에서 성공한 합성 Cargo 작업의 재생성 산출물을 자동 회수한다. 생성 전 예상 크기를 고정하고 쓰기·동기화 뒤 파일의 할당 블록을 확인한다. 회수된 파일 수·논리 바이트와 파일 부재, 보호 파일 해시를 대조한다. Mac 호스트 볼륨의 가용량 변화는 별도 관측값으로 기록한다. [macOS 실측](../dist/dsg-local-reclaim-measurement-70cadd3/MACOS-LOCAL-RECLAIM.json)
+- BuildKit 정확 ID는 기존 승인·복구 증거를 사용한다. 과거 물리 회수량이 미측정이면 추정으로 채우지 않는다. 새 합성 대상의 별도 승인 이후에만 같은 ext4에서 선정 파일과 저장소 전체의 실제 할당량을 전후 비교한다. 게스트 ext4의 변화와 Mac 볼륨에 귀속 가능한 공간을 각각 기록한다. [대상 검증 기준](TEST_PLAN.md#buildkit-동일-마운트의-단일-승인-회수)
+
 ## 에이전트 연동 검증
 
 `sh scripts/test-rust.sh`는 합성 프로젝트의 훅 설치·중복 방지·설정 보존·제거, 허용·거부·잘못된 JSON 응답과 MCP의 읽기 전용 목록·쓰기 거절을 확인한다. 정리 후보를 조회한 뒤 상태 폴더가 생기지 않아야 한다.
