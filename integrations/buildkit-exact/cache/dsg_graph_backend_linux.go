@@ -3,6 +3,7 @@
 package cache
 
 import (
+	"bytes"
 	"encoding/binary"
 	"strconv"
 	"strings"
@@ -219,7 +220,7 @@ func (r *dsgGraphReader) leases(out *DSGGraphBackend, ns *bolt.Bucket, id, s, bl
 				role = "variants"
 				out.VariantLease = true
 				snapshotCount, blobCount = &out.VariantLeaseSnapshots, &out.VariantLeaseBlobs
-			case s + "-view":
+			case id + "-view":
 				role = "view"
 				out.ViewLease = true
 				snapshotCount, blobCount = &out.ViewLeaseSnapshots, &out.ViewLeaseBlobs
@@ -321,10 +322,13 @@ func dsgGraphReadNativeSnapshot(b *bolt.Bucket) (dsgGraphNativeSnapshot, error) 
 	if b == nil {
 		return s, ErrDSGExactPreserve
 	}
+	if b.Bucket([]byte("parent")) != nil {
+		return s, ErrDSGExactPreserve
+	}
 	rawID := b.Get([]byte("id"))
 	id, n := binary.Uvarint(rawID)
 	kind := b.Get([]byte("kind"))
-	if n <= 0 || n != len(rawID) || id == 0 || len(kind) != 1 {
+	if n <= 0 || n != len(rawID) || id == 0 || len(kind) != 1 || !bytes.Equal(rawID, binary.AppendUvarint(nil, id)) {
 		return s, ErrDSGExactPreserve
 	}
 	s = dsgGraphNativeSnapshot{id: id, parent: string(b.Get([]byte("parent"))), kind: snapshots.Kind(kind[0])}
@@ -406,7 +410,8 @@ func (r *dsgGraphReader) snapshot(o *DSGDedicatedGraph, tx *bolt.Tx, fd int, key
 		if m <= 0 || n+1+m != len(k) {
 			return ErrDSGExactPreserve
 		}
-		if (child == target.id && (parent != expectedParent || string(v) != keys.key)) ||
+		if !bytes.Equal(k, dsgGraphNativeIndexKey(parent, child)) || (string(v) == keys.key && child != target.id) ||
+			(child == target.id && (parent != expectedParent || string(v) != keys.key)) ||
 			(parent == target.id && children[child] != string(v)) {
 			return ErrDSGExactPreserve
 		}

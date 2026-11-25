@@ -120,6 +120,12 @@ Parallels의 별도 쓰기 가능 ext4 loop에서 시험용 실제 저장소를 
 
 같은 시험 워커와 같은 저널의 네이티브 통합 시험은 솔버·lease·snapshot·blob·cache를 순서대로 적용한다. 각 효과 커밋 직후 자식을 종료하고 재개에서 저널 확인만 기록하는지 검증한다. 완료는 `native-five-stage-trial-v1` 시험 증명으로 확인하고 삭제 영수증 대입을 거절한다. 별도 읽기 전용 시험은 합성 scratch LLB의 OCI 계층과 inode가 일치하는 생성 파일·blob만 내용 대조에 사용한다. 일반 조회는 내용 없이 할당 구조를 판독한다. [네이티브 통합 시험](../integrations/buildkit-exact/cache/dsg_native_recovery_linux_test.go) · [Ubuntu 최종 실측](../dist/dsg-e2e-recovery-c306f911edac/QUALIFICATION.json) · [내보내기 없는 후보 실측](../dist/dsg-e2e-recovery-selection-169c44319405/QUALIFICATION.json)
 
+### BuildKit 정확 소유권과 네이티브 삭제 복구 시험
+
+WBS 1.4·2.3의 소유권 시험은 레코드·변형 lease와 읽기 전용 자식 view를 각각 대조한다. view lease가 해제된 경우 역방향 인덱스가 일치하고 전용 할당이 없는 자식의 소유를 확인한다. 외부 lease·캐시 매핑·저장소 별칭·역방향 인덱스 결손·외부 콘텐츠 참조·자식의 별도 보존 루트·예상 밖 전용 디렉터리·미지원 lease 항목을 각각 주입해 배타 승인을 거절한다. 읽기 전용 전용 워커에서는 레코드의 lease·자식과 전체 범위의 유입 참조를 각각 확인한다. 반복 조회에서 DB 5개의 해시가 유지되고 OCI 아카이브의 매니페스트와 네이티브 바이트가 일치해야 한다. Ubuntu 실측은 소유 lease 2개와 lease 없는 자식 view 1개를 확인했으며, 유입 매니페스트 참조로 보존했다. 활성 후보·실제 캐시 삭제·prune은 각각 0건이다. [소유권 시험](../integrations/buildkit-exact/cache/dsg_graph_ownership_linux_test.go) · [Ubuntu 실측](../dist/dsg-exact-ownership-8d9e8b065edd/QUALIFICATION.json)
+
+별도 쓰기 가능 시험 저장소의 저널에서 스냅샷과 blob의 실제 삭제를 각각 시험한다. 각 효과 전후에 자식 종료를 주입하고 저장소를 다시 연다. 예상한 삭제 효과가 있으면 저널 확인만 기록한다. 효과 전 예상 객체가 없거나 효과 후 상태의 일부가 일치하지 않으면 보존한다. 실제 시험 결과는 대상 삭제 각 1건, 복구 중 삭제 재호출·비대상 변경·운영 회수 영수증 각각 0건이다. 전체 레코드의 승인 회수와 실제 호스트 전원 장애는 각각 별도 게이트로 검증한다. [네이티브 삭제 복구 시험](../integrations/buildkit-exact/cache/dsg_native_deletion_linux_test.go) · [Ubuntu 실측](../dist/dsg-exact-ownership-8d9e8b065edd/QUALIFICATION.json)
+
 ### Linux ARM64 로컬 제어 서비스 프로브
 
 WBS 5.1의 로컬 읽기 확인은 보호된 root 소켓과 예상 프로세스의 프로토콜 선언을 검증한다. 등록한 서비스의 성공과 소켓 링크·권한·상대 PID·선언 불일치 거절을 확인하고, 성공과 실패 모두 `mutation_authorized=false`와 보존 게이트를 확인한다. 운영 제어기의 출처·권한·배타 변경 경계는 별도로 검증한다. [프로브 구현과 시험](../rust-scaffold/crates/dsg-core/src/docker_control_local.rs)
