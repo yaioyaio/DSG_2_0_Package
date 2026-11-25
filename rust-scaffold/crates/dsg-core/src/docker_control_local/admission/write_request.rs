@@ -119,6 +119,12 @@ impl AuthorizedWriteRequest<'_> {
         }
     }
 
+    pub(crate) fn pin_backend_ownership(
+        &self,
+    ) -> Result<super::backend_ownership::PinnedBackendOwnership> {
+        super::backend_ownership::PinnedBackendOwnership::open(self.policy)
+    }
+
     pub(crate) fn approver(&self) -> &ControllerEvidence {
         self.approver
     }

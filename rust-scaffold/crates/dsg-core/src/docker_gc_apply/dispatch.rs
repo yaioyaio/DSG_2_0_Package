@@ -1,7 +1,8 @@
 use super::{
     managed_docker_identity, matches_current, plan_with_controller, resolve_receipt,
-    valid_owner_fingerprint, ControlledDockerGc, DockerGcError, DockerGcKind, DockerGcResult,
-    GcApplyStatus, Intent, Lease, Registry, RegistryError, StoredPlan, APPROVAL_TTL,
+    valid_owner_fingerprint, Binding, ControlledDockerGc, DockerGcError, DockerGcKind,
+    DockerGcResult, GcApplyStatus, Intent, Lease, Observation, Registry, RegistryError, StoredPlan,
+    APPROVAL_TTL,
 };
 use crate::docker_control_local::{AuthorizedWriteRequest, ControllerEvidence, WriteRequest};
 use sha2::{Digest, Sha256};
@@ -12,6 +13,30 @@ pub(crate) trait ExclusiveDockerGc: ControlledDockerGc {
     /// belongs to the underlying resource store and survives new sockets, policies and processes.
     /// This is local controller evidence, available without an engine query during recovery.
     fn engine(&self) -> Option<ExclusiveEngine<'_>>;
+
+    /// Acquire the native store's mutation exclusion before the registry consumes approval.
+    /// Dropping the guard without commit must leave the native resource and ledger unchanged.
+    fn prepare(&mut self, intent: &Intent) -> Option<Box<dyn PreparedDockerGc + '_>>;
+}
+
+/// Only the native implementation that owns *all* writers for this target and its references
+/// may supply this guard. An outer registry slot or an ordinary Docker API socket is insufficient.
+pub(crate) trait PreparedDockerGc {
+    fn observed(&self) -> &Observation;
+
+    /// Commit one native change and its immutable receipt under the same held exclusion.
+    /// Acknowledgement alone never settles the registry. Loss of the response is indeterminate.
+    fn commit(self: Box<Self>, claim: ClaimedDockerGc<'_>) -> bool;
+}
+
+/// Constructed only after the exact registry claim has committed.
+pub(crate) struct ClaimedDockerGc<'a>(&'a Intent);
+
+impl ClaimedDockerGc<'_> {
+    #[allow(dead_code)] // Used by in-process native implementations.
+    pub(crate) fn intent(&self) -> &Intent {
+        self.0
+    }
 }
 
 pub(crate) struct ExclusiveEngine<'a> {
@@ -79,6 +104,9 @@ impl<'a> DockerGcDispatch<'a> {
         request: AuthorizedWriteRequest<'_>,
     ) -> Result<DockerGcDispatchResult, DockerGcError> {
         registry.check_protected_docker_gc_state()?;
+        let ownership = request
+            .pin_backend_ownership()
+            .map_err(|_| DockerGcError::UnverifiedControl)?;
         let epoch = DispatchEpoch {
             policy: request.policy_digest(),
             controller: request.controller(),
@@ -92,10 +120,12 @@ impl<'a> DockerGcDispatch<'a> {
             project_policy_digest,
             request.request(),
             &epoch,
-            || request.check_current().is_ok(),
+            || request.check_current().is_ok() && ownership.check_current().is_ok(),
+            |binding| ownership.permits(request.request(), binding),
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn dispatch_request(
         &mut self,
         registry: &mut Registry,
@@ -104,6 +134,7 @@ impl<'a> DockerGcDispatch<'a> {
         request: &WriteRequest,
         epoch: &DispatchEpoch<'_>,
         request_current: impl Fn() -> bool,
+        assignment_permits: impl Fn(&Binding) -> bool,
     ) -> Result<DockerGcDispatchResult, DockerGcError> {
         let project = match request {
             WriteRequest::Approve { project_id, .. }
@@ -127,6 +158,9 @@ impl<'a> DockerGcDispatch<'a> {
                 let payload = registry.read_current_gc_plan(project, *plan_id, &policy)?;
                 let intent = Intent::load(&payload, project, &owner)?;
                 require_current_intent(&intent, &policy, &endpoint, epoch.engine)?;
+                if !assignment_permits(&intent.binding) {
+                    return Err(DockerGcError::UnverifiedControl);
+                }
                 if !matches_current(self.backend, &intent.binding) {
                     return Err(DockerGcError::UnverifiedCandidate);
                 }
@@ -154,10 +188,21 @@ impl<'a> DockerGcDispatch<'a> {
                     registry.check_managed_docker_gc_approval(lease, *plan_id, &policy, &digest)?;
                 let intent = Intent::load(&approved.payload, project, &owner)?;
                 require_current_intent(&intent, &policy, &endpoint, epoch.engine)?;
-                let verified = matches_current(self.backend, &intent.binding);
-                if !request_current()
-                    || self.engine_namespace(epoch.engine) != Some(endpoint.as_str())
+                if !assignment_permits(&intent.binding) {
+                    return Err(DockerGcError::UnverifiedControl);
+                }
+                let prepared = self
+                    .backend
+                    .prepare(&intent)
+                    .ok_or(DockerGcError::UnverifiedCandidate)?;
+                let binding = &intent.binding;
+                let observation = prepared.observed();
+                if observation.binding != *binding
+                    || !observation.eligible_for(project, &owner, binding.kind, &binding.id)
                 {
+                    return Err(DockerGcError::UnverifiedCandidate);
+                }
+                if !request_current() {
                     return Err(DockerGcError::UnverifiedControl);
                 }
                 registry.claim_managed_docker_gc(
@@ -167,12 +212,16 @@ impl<'a> DockerGcDispatch<'a> {
                     &digest,
                     &approved.identity,
                 )?;
-                let result = if verified
-                    && request_current()
-                    && self.engine_namespace(epoch.engine) == Some(endpoint.as_str())
-                {
-                    resolve_receipt(&intent, self.backend.apply_if_current(&intent))
+                let result = if request_current() {
+                    if prepared.commit(ClaimedDockerGc(&intent)) {
+                        // Always read the durable backend ledger. A commit response or an
+                        // absent target alone cannot prove the operation's outcome.
+                        self.read_exact_receipt(&intent, epoch.engine, &request_current)?
+                    } else {
+                        resolve_receipt(&intent, None)
+                    }
                 } else {
+                    drop(prepared);
                     DockerGcResult {
                         status: GcApplyStatus::Preserved,
                         reclaimed_bytes: 0,
@@ -189,20 +238,13 @@ impl<'a> DockerGcDispatch<'a> {
             WriteRequest::Recover { intent_id, .. } => {
                 let pending = registry.pending_managed_docker_gc_by_intent(lease, intent_id)?;
                 let intent = Intent::load(&pending.payload, project, &owner)?;
-                if intent.operation != *intent_id || intent.binding.endpoint != endpoint {
-                    return Err(DockerGcError::UnverifiedControl);
-                }
-                if !request_current()
-                    || self.engine_namespace(epoch.engine) != Some(endpoint.as_str())
+                if intent.operation != *intent_id
+                    || intent.binding.endpoint != endpoint
+                    || !assignment_permits(&intent.binding)
                 {
                     return Err(DockerGcError::UnverifiedControl);
                 }
-                let result = resolve_receipt(&intent, self.backend.receipt(&intent));
-                if !request_current()
-                    || self.engine_namespace(epoch.engine) != Some(endpoint.as_str())
-                {
-                    return Err(DockerGcError::UnverifiedControl);
-                }
+                let result = self.read_exact_receipt(&intent, epoch.engine, &request_current)?;
                 registry.finish_managed_docker_gc(
                     lease,
                     pending.plan_id,
@@ -212,6 +254,23 @@ impl<'a> DockerGcDispatch<'a> {
                 Ok(DockerGcDispatchResult::Recovered(result))
             }
         }
+    }
+
+    fn read_exact_receipt(
+        &mut self,
+        intent: &Intent,
+        engine: &ControllerEvidence,
+        request_current: &impl Fn() -> bool,
+    ) -> Result<DockerGcResult, DockerGcError> {
+        let namespace = Some(intent.binding.endpoint.as_str());
+        if !request_current() || self.engine_namespace(engine) != namespace {
+            return Err(DockerGcError::UnverifiedControl);
+        }
+        let receipt = self.backend.receipt(intent);
+        if !request_current() || self.engine_namespace(engine) != namespace {
+            return Err(DockerGcError::UnverifiedControl);
+        }
+        Ok(resolve_receipt(intent, receipt))
     }
 
     fn engine_namespace(&self, admission: &ControllerEvidence) -> Option<&str> {

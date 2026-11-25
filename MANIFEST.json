@@ -78,8 +78,8 @@
     },
     {
       "path": "docs/API_SPEC.md",
-      "sha256": "0e0e08e55b67903a921dea3bbbef584e1cf8dc3a140ae4a7a3a0c24f768dddf8",
-      "bytes": 26148
+      "sha256": "bd169ec53885b85b23d761cce3b02250257e4ef53d8b8384e6e37cc54d857a48",
+      "bytes": 26930
     },
     {
       "path": "docs/ARCHITECTURE.md",
@@ -128,8 +128,8 @@
     },
     {
       "path": "docs/SECURITY.md",
-      "sha256": "0c78d5ba6225a1da200fcb287cacad32d27ad8eda4e7d3c3a8112c1f0ef17f25",
-      "bytes": 5316
+      "sha256": "a18b97e1e2199c6964ef7ec9c8afe8d373240888de5e8f1b0c34f81aa313a68c",
+      "bytes": 5977
     },
     {
       "path": "docs/SOURCES.md",
@@ -138,13 +138,13 @@
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "0c017923d0db93c515bfc11576f36c655ae5d6aa0b6e71ce39ecc19973563af4",
-      "bytes": 23945
+      "sha256": "368c00bb2a06e1d4d144b4635459879c33125d5ccaa69e27eb086856180f130d",
+      "bytes": 24527
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "0069b1e46947499cc9fd0d8de4f2aa790cb9550a93dc97a8b0c2cf359037b148",
-      "bytes": 42486
+      "sha256": "d68c8a5cb54e830183256533f7ea584451b2c2544c75519882c3328ba02f02f7",
+      "bytes": 44681
     },
     {
       "path": "docs/WBS.md",
@@ -155,6 +155,26 @@
       "path": "integrations/README.md",
       "sha256": "0674bf410cfdcddc3a74e328116d8ec412f28cfb261e4092f77ed1a74c0965a2",
       "bytes": 1899
+    },
+    {
+      "path": "integrations/buildkit-exact/cache/dsg_exact.go",
+      "sha256": "6308b63f44f356486b6fac21ab151d484440b080358729990b8d39d89a7d074e",
+      "bytes": 4852
+    },
+    {
+      "path": "integrations/buildkit-exact/cache/dsg_exact_apply.go",
+      "sha256": "0df60a1c31c33aeb306dfee01e91fe83c23134c1fc1e4ee9d3fc87fe14a28c24",
+      "bytes": 8952
+    },
+    {
+      "path": "integrations/buildkit-exact/cache/dsg_exact_test.go",
+      "sha256": "8116028ca79edc7424d841a471e9b173a3185e5771cc0edf51bee3274cdca176",
+      "bytes": 11214
+    },
+    {
+      "path": "integrations/buildkit-exact/cache/dsg_native_isolation_test.go",
+      "sha256": "3288d60cb8fc8ea2664d82ec6c6202b270a43a237e1dd3ce096c4df9e0f1a48f",
+      "bytes": 4209
     },
     {
       "path": "integrations/claude/README.md",
@@ -388,13 +408,13 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/docker_control_local/admission/backend_ownership.rs",
-      "sha256": "08f3bbc2fb54e62faa648e5d7680eef14fb2ed5c2f132d6f008c60f414757579",
-      "bytes": 12501
+      "sha256": "1742e6406f899bcbcf8bbb8a36096dd3ecf23cccc2d6e1c4a7e6c1f97fbf8393",
+      "bytes": 16238
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/docker_control_local/admission/write_request.rs",
-      "sha256": "d7ceecf2cdc015312811e009f05c6d7ee4d5eb19ed50ea76aada919c6ac36866",
-      "bytes": 24921
+      "sha256": "66dcd28a177e0c0fc2e3498a10f570862daa6528cad7033a857f4a6a6f2265f7",
+      "bytes": 25128
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/docker_gc_apply.rs",
@@ -403,13 +423,13 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/docker_gc_apply/dispatch.rs",
-      "sha256": "1c27daa6d076857a2b97a331aaaa4ef286812833da22ad212c90b3fe22e2ba54",
-      "bytes": 10787
+      "sha256": "0af7d21bb821b7096f424c0371f5d13dc7830c9011a4309e82ec706baff6583c",
+      "bytes": 13427
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/docker_gc_apply/dispatch/tests.rs",
-      "sha256": "53fd0cff3a2a4eba451e337caf7ae270886ab65b8916b3b8711b86d4eef7d8d8",
-      "bytes": 14503
+      "sha256": "214144659eee9312c4c275c1887193cdc9777d711ac980a33b803c977a7dd29c",
+      "bytes": 22427
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/docker_gc_apply/live_fixture.rs",
@@ -570,6 +590,11 @@
       "path": "scripts/git-completion.sh",
       "sha256": "4c1307f79e528c02f93fbc3d8dd73606dcfa66b28cd03d503be7a4ff38af1ca1",
       "bytes": 778
+    },
+    {
+      "path": "scripts/prepare-buildkit-exact.py",
+      "sha256": "09e1cb316a3d50e59751e3a2a129473c3450a1edf99b1bc36f28f928f094da28",
+      "bytes": 2376
     },
     {
       "path": "scripts/prepare-release-signature.py",
