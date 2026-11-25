@@ -166,6 +166,11 @@ WBS 1.4·5.1은 전용 Ubuntu Parallels ARM64 Moby에서 합성 이미지 한 �
 - 원장 장애. 원장 부재·다른 inode의 동일 바이트 복사본·절단·소비 전 상태 되감기, 체크포인트 부재·부분 기록에서 적용과 실시간 영수증 조회가 둘 다 거절되어야 한다. 네이티브 DB와 저널을 보존하고 원본 원장·체크포인트 복원 후 동일 영수증을 조회해야 한다. [Go 회귀](../integrations/buildkit-exact/cache/dsg_ledger_recovery_linux_test.go) · [Ubuntu Parallels 실측](../dist/dsg-controller-runtime-5b7ca8e3454a/AUTHORIZED-RESULT.json)
 - VM 유실. 기존 Parallels 밖의 폐기 가능한 VM에서 부팅 세대와 휘발 상태 유실을 확인한다. 이전 등록의 적용·실시간 영수증 요청은 거절되고, 게스트 밖에 사전 고정한 해시와 영수증만 읽기 검증되어야 한다. 물리 호스트 전원·전체 일치 스냅샷 롤백·호스트 아카이브와 고정값 동시 유실은 별도 범위다. [VM 실측](../dist/dsg-controller-runtime-5b7ca8e3454a/VM-LOSS.json) · [호스트 감사 회귀](../scripts/test-buildkit-settled-receipt.py)
 
+### BuildKit 운영 사전 점검과 복구 회귀
+
+- **운영 사전 점검.** Ubuntu Parallels Linux ARM64에서 읽기 전용 systemd 기본 질의로 BuildKit exact 서비스, 관련 빌더, keeper 및 등록, `dsgd` 설치 여부를 확인한다. 변경·배포 요청은 0건이어야 하며 VM의 시작·종료 상태를 기록한다. 운영 수용에는 정확한 서비스·등록 자산, 보호 정책·역할, 독점 마운트의 실제 호스트 증거가 필요하다. BuildKit 전용 읽기 전용 프로브는 기존 Docker 프로브와 별도 구현 항목이다. [사전 점검 결과](../dist/dsg-recovery-qualification-28ba0a3/OPERATING-PREFLIGHT.json)
+- **복구 회귀.** macOS Python은 정상·아카이브만 유실·핀만 유실·동시 유실을 검증한다. 기존 예행 아카이브는 정상 검증돼야 하고 자료 유실 시 보존 판정, 변경 0건, 대체 0건이어야 한다. 동일 파일시스템의 별도 파일로 수행하며 독립 장애 영역은 추후 실측한다. Linux Go는 두 유효 단계의 로컬 검증과 독립 완료값이 구분되는지 확인한다. 실제 동시 롤백·재승인·변경 성공은 미실행이다. 기존 QEMU는 VM 유실 범위이며 물리 전원 차단에는 별도로 지정된 격리 장비가 필요하다. [호스트 회귀](../dist/dsg-recovery-qualification-28ba0a3/HOST-RECEIPT-REGRESSION.json) · [Linux 회귀](../dist/dsg-recovery-qualification-28ba0a3/LINUX-LEDGER-REGRESSION.json) · [핸드오프](HANDOFF.md#buildkit-운영-사전-점검과-복구-회귀)
+
 ## 에이전트 연동 검증
 
 `sh scripts/test-rust.sh`는 합성 프로젝트의 훅 설치·중복 방지·설정 보존·제거, 허용·거부·잘못된 JSON 응답과 MCP의 읽기 전용 목록·쓰기 거절을 확인한다. 정리 후보를 조회한 뒤 상태 폴더가 생기지 않아야 한다.
