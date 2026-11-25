@@ -24,10 +24,11 @@ BOUNDARY_ERRORS = (
 )
 
 
-def command(workspace, args, timeout=8):
+def command(workspace, args, timeout=8, temporary=None):
     return subprocess.run(
         args, cwd=workspace, env={"PATH": SYSTEM_PATH, "LANG": "C", "HOME": str(workspace),
-                                 "XDG_RUNTIME_DIR": str(workspace), "TMPDIR": str(workspace)},
+                                 "XDG_RUNTIME_DIR": str(workspace), "TMPDIR": str(temporary or workspace),
+                                 "GOMAXPROCS": "1"},
         stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout,
     )
 
@@ -39,8 +40,8 @@ def mount_command(workspace, *args):
 
 
 @contextmanager
-def private_store(workspace):
-    image, mountpoint = workspace / "trial.ext4", workspace / "native"
+def private_store(workspace, name="native"):
+    image, mountpoint = workspace / (name + ".ext4"), workspace / name
     with image.open("xb") as temporary:
         temporary.truncate(64 * 1024**2)
     metadata = image.lstat()
@@ -99,6 +100,46 @@ def rejection(workspace, args, reasons=BOUNDARY_ERRORS):
     return observed[0]
 
 
+def digest_stores(store, fixture):
+    digests = fixture["database_digests"](store)
+    history = store / "history.db"
+    info = history.lstat()
+    assert stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and info.st_uid == 0
+    assert 0 < info.st_size <= 128 * 1024**2
+    with history.open("rb") as database:
+        digests["history.db"] = hashlib.file_digest(database, "sha256").hexdigest()
+    return digests
+
+
+def qualify_native_writes(workspace, tests_hash):
+    fixture = runpy.run_path(str(workspace / "check-dedicated-buildkit-fence.py"))
+    tests = fixture["check_binary"](workspace, "dsg-cache-tests", tests_hash)
+    with private_store(workspace, "native-write") as (mountpoint, store):
+        assert not os.statvfs(store).f_flag & os.ST_RDONLY and mountpoint.is_mount()
+        result = command(
+            workspace, (tests, "-test.run", "^TestDSGNative", "-test.v", "-test.parallel", "1",
+                        "-test.timeout", "35s"), timeout=40, temporary=store,
+        )
+        if result.returncode:
+            site = re.search(rb"dsg_native_([a-z_]+)_linux_test\.go:(\d{1,4}):", result.stdout)
+            location = "_" + "_".join(item.decode("ascii") for item in site.groups()) if site else ""
+            raise AssertionError("native_write_recovery_tests" + location)
+        lines = result.stdout.decode("utf-8").splitlines()
+        passed = [match[1] for line in lines
+                  if (match := re.match(r"^--- PASS: (TestDSGNative[A-Za-z0-9]+) ", line))]
+        solver_lease = [match[1] for line in lines if (match := re.match(
+            r"^\s+--- PASS: TestDSGNativeSolverRecovery/(solver|lease) ", line,
+        ))]
+        backing = [match[1] for line in lines if (match := re.match(
+            r"^\s+--- PASS: TestDSGNativeBackingRecovery/(snapshot|blob) ", line,
+        ))]
+        assert {"TestDSGNativeSolverRecovery", "TestDSGNativeBackingRecovery",
+                "TestDSGNativeCacheMetadataRecovery"} <= set(passed)
+        assert set(solver_lease) == {"solver", "lease"} and set(backing) == {"snapshot", "blob"}
+    return {"passed": passed, "journal_stages": solver_lease, "independent_stages": [*backing, "cache"],
+            "writable_ext4": True, "owned_loop_released": True}
+
+
 def qualify(workspace, daemon_hash, client_hash):
     assert sys.platform == "linux" and os.uname().machine == "aarch64" and os.geteuid() == 0
     assert workspace.resolve(strict=True) == workspace and workspace.is_mount()
@@ -150,7 +191,7 @@ def qualify(workspace, daemon_hash, client_hash):
             assert rejection(workspace, check) == "quiescence_mounts"
         finally:
             mount_command(workspace, "umount", alias)
-        before = fixture["database_digests"](store)
+        before = digest_stores(store, fixture)
         observed = command(workspace, check, timeout=12)
         if observed.returncode:
             failure = next((reason for reason in BOUNDARY_ERRORS if reason.encode() in observed.stderr), "unknown")
@@ -164,7 +205,12 @@ def qualify(workspace, daemon_hash, client_hash):
         assert graph["disposition"] == "preserve" and graph["unverified"]
         assert re.fullmatch(r"[a-f0-9]{64}", graph["references_sha256"])
         assert graph["cache"]["committed"] and graph["solver"]["result_nodes"] > 0
-        assert fixture["database_digests"](store) == before
+        assert evidence["history_tx"] > 0 and graph["external"]["history_records"] >= 0
+        assert graph["transitive"]["solver"]["result_nodes"] > 0
+        assert graph["transitive"]["gc_labels"]["content_nodes"] > 0
+        repeated = command(workspace, check, timeout=12)
+        assert repeated.returncode == 0 and json.loads(repeated.stdout) == evidence
+        assert digest_stores(store, fixture) == before
         candidate["offline"] = evidence
         candidate["disposition"] = "preserve"
         snapshot = json.dumps(candidate, sort_keys=True, separators=(",", ":")).encode()
@@ -180,7 +226,9 @@ def qualify(workspace, daemon_hash, client_hash):
 if __name__ == "__main__":
     os.umask(0o077)
     try:
-        result = qualify(Path(sys.argv[1]), sys.argv[2], sys.argv[3])
+        workspace = Path(sys.argv[1])
+        result = qualify(workspace, sys.argv[2], sys.argv[3])
+        result["native_writable_recovery"] = qualify_native_writes(workspace, sys.argv[4])
     except (AssertionError, OSError, KeyError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
         location = error.__traceback__
         local_line = location.tb_lineno
@@ -188,7 +236,7 @@ if __name__ == "__main__":
             if location.tb_frame.f_code.co_filename == __file__:
                 local_line = location.tb_lineno
             location = location.tb_next
-        category = str(error) if re.fullmatch(r"[a-z_]{1,80}", str(error)) else None
+        category = str(error) if re.fullmatch(r"[a-z_0-9]{1,80}", str(error)) else None
         print(json.dumps({"fixture_error": type(error).__name__, "line": local_line,
                           "category": category, "errno": getattr(error, "errno", None)}), flush=True)
         raise SystemExit(1) from None
