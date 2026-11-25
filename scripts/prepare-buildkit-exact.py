@@ -34,7 +34,8 @@ def prepare(archive, destination):
             with tar.extractfile(item) as source, target.open("xb") as output:
                 shutil.copyfileobj(source, output)
     overlay = Path(__file__).resolve().parents[1] / "integrations/buildkit-exact"
-    for package in ("cache", "cmd/buildkitd"):
+    for package in ("cache", "cmd/buildkitd", "cmd/dsg-buildkit-exact"):
+        (destination / package).mkdir(mode=0o700, parents=True, exist_ok=True)
         for source in sorted((overlay / package).glob("dsg_*.go")):
             with source.open("rb") as handle, (destination / package / source.name).open("xb") as output:
                 shutil.copyfileobj(handle, output)

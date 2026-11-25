@@ -13,7 +13,7 @@ use std::os::unix::net::UnixStream;
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant};
 
-mod admission;
+pub(crate) mod admission;
 pub use admission::{
     configure_write_request_listener, verify_admission, verify_backend_ownership,
     with_authorized_write_request, AdmissionEvidence, AuthorizedWriteRequest,
@@ -209,7 +209,7 @@ fn peer_credentials(fd: RawFd) -> Result<libc::ucred> {
     Ok(peer)
 }
 
-fn check_alive(process: &File) -> Result<()> {
+pub(crate) fn check_alive(process: &File) -> Result<()> {
     let mut entry = libc::pollfd {
         fd: process.as_raw_fd(),
         events: libc::POLLIN,
@@ -297,7 +297,7 @@ fn validate_reply(reply: &[u8]) -> Result<()> {
     Ok(())
 }
 
-fn io_failure(error: io::Error) -> QueryFailure {
+pub(crate) fn io_failure(error: io::Error) -> QueryFailure {
     match error.kind() {
         io::ErrorKind::PermissionDenied => QueryFailure::InvalidSelector,
         io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock => QueryFailure::Timeout,

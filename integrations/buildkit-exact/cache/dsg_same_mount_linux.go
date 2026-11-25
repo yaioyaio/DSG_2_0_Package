@@ -11,7 +11,6 @@ import (
 	"errors"
 	"io"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -212,51 +211,6 @@ func dsgInspectSameMount(ctx context.Context, root string, source dsgSameMountSo
 	return dsgObserveSameMount(ctx, fd, root, source, native, true)
 }
 
-type dsgSameMountAuthority struct {
-	db     *bolt.DB
-	device uint64
-}
-
-// The supervisor supplies a protected path off the target device. Bolt reuses
-// the verified O_NOFOLLOW file descriptor, and creation syncs its parent entry.
-func dsgOpenSameMountAuthority(path string) (*dsgSameMountAuthority, error) {
-	parent := filepath.Dir(path)
-	if !filepath.IsAbs(path) || filepath.Clean(path) != path || !dsgProtectedParent(path) {
-		return nil, ErrDSGExactPreserve
-	}
-	dir, err := unix.Open(parent, unix.O_DIRECTORY|unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
-	if err != nil {
-		return nil, ErrDSGExactPreserve
-	}
-	defer unix.Close(dir)
-	var pst unix.Stat_t
-	if unix.Fstat(dir, &pst) != nil || int(pst.Uid) != os.Geteuid() || pst.Mode&07777 != 0700 {
-		return nil, ErrDSGExactPreserve
-	}
-	var device uint64
-	db, err := bolt.Open(path, 0600, &bolt.Options{Timeout: time.Second, OpenFile: func(_ string, flags int, _ os.FileMode) (*os.File, error) {
-		fd, err := unix.Openat(dir, filepath.Base(path), flags|unix.O_NOFOLLOW|unix.O_CLOEXEC|unix.O_NONBLOCK, 0600)
-		if err != nil {
-			return nil, ErrDSGExactPreserve
-		}
-		var st unix.Stat_t
-		if unix.Fstat(fd, &st) != nil || st.Mode&(unix.S_IFMT|07777) != unix.S_IFREG|0600 || int(st.Uid) != os.Geteuid() || st.Nlink != 1 || uint64(st.Dev) != uint64(pst.Dev) {
-			unix.Close(fd)
-			return nil, ErrDSGExactPreserve
-		}
-		device = uint64(st.Dev)
-		return os.NewFile(uintptr(fd), path), nil
-	}})
-	if err != nil {
-		return nil, ErrDSGExactPreserve
-	}
-	if device == 0 || unix.Fsync(dir) != nil {
-		db.Close()
-		return nil, ErrDSGExactPreserve
-	}
-	return &dsgSameMountAuthority{db, device}, nil
-}
-
 type dsgSameMountState struct {
 	Grant   dsgSameMountGrant
 	Phase   string
@@ -264,7 +218,7 @@ type dsgSameMountState struct {
 }
 
 func (a *dsgSameMountAuthority) admissible(g dsgSameMountGrant) bool {
-	return a != nil && a.db != nil && !a.db.NoSync && !a.db.IsReadOnly() && a.device != 0 && a.device != g.Evidence.Identity.Device && g.valid()
+	return a != nil && a.db != nil && !a.db.NoSync && !a.db.IsReadOnly() && a.device != 0 && a.device != g.Evidence.Identity.Device && g.valid() && a.verified()
 }
 
 func (g dsgSameMountGrant) keys() (key []byte, claims [][]byte) {
@@ -277,7 +231,7 @@ func (a *dsgSameMountAuthority) approve(ctx context.Context, g dsgSameMountGrant
 	if !a.admissible(g) {
 		return ErrDSGExactPreserve
 	}
-	return a.db.Update(func(tx *bolt.Tx) error {
+	return a.update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucketIfNotExists([]byte(dsgSameMountBucket))
 		if err != nil {
 			return err
@@ -352,7 +306,7 @@ func dsgReadSameMountState(tx *bolt.Tx, g dsgSameMountGrant) (dsgSameMountState,
 }
 
 func (a *dsgSameMountAuthority) advance(ctx context.Context, g dsgSameMountGrant, receipt *DSGExactReceipt) error {
-	return a.db.Update(func(tx *bolt.Tx) error {
+	return a.update(func(tx *bolt.Tx) error {
 		s, err := dsgReadSameMountState(tx, g)
 		if err != nil {
 			return err

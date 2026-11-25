@@ -233,9 +233,11 @@ fn matches_peer(connection: &libc::ucred, message: &libc::ucred) -> bool {
 }
 
 fn check_role(sender: &Sender, expected: &Peer) -> Result<()> {
-    if sender.credentials.uid == 0
-        || sender.credentials.pid != expected.pid
-        || sender.credentials.uid != expected.uid
+    check_sender(sender, expected.pid, expected.uid)
+}
+
+fn check_sender(sender: &Sender, pid: i32, uid: u32) -> Result<()> {
+    if sender.credentials.uid == 0 || sender.credentials.pid != pid || sender.credentials.uid != uid
     {
         return Err(QueryFailure::InvalidSelector);
     }
@@ -243,10 +245,33 @@ fn check_role(sender: &Sender, expected: &Peer) -> Result<()> {
     let info = File::open(format!("/proc/self/fdinfo/{}", sender.process.as_raw_fd()))
         .map_err(io_failure)?;
     let info = bounded_read(info, 4096)?;
-    if credential_field(&info, b"Pid:")?.parse::<i32>() != Ok(expected.pid) {
+    if credential_field(&info, b"Pid:")?.parse::<i32>() != Ok(pid) {
         return Err(QueryFailure::InvalidSelector);
     }
     check_alive(&sender.process)
+}
+
+/// Receive a single local role account's packet with a kernel-pinned, live sender.
+/// Both connection and per-message credentials must identify the same process.
+pub(crate) fn receive_account_packet(
+    fd: RawFd,
+    payload: &mut [u8],
+    deadline: Instant,
+) -> Result<(usize, u32, File)> {
+    let peer = prepare_socket(fd)?;
+    if peer.pid <= 0 {
+        return Err(QueryFailure::InvalidSelector);
+    }
+    let (length, sender) = receive(fd, payload, deadline)?;
+    // Consume the bounded packet before denying root so the peer can receive
+    // the admission response without racing an unread packet at socket close.
+    if peer.uid == 0 || !matches_peer(&peer, &sender.credentials) {
+        return Err(QueryFailure::InvalidSelector);
+    }
+    check_sender(&sender, peer.pid, peer.uid)?;
+    check_process_uid(peer.pid, peer.uid)?;
+    check_alive(&sender.process)?;
+    Ok((length, peer.uid, sender.process))
 }
 
 fn get_int_option(fd: RawFd, option: libc::c_int) -> Result<libc::c_int> {
@@ -271,7 +296,7 @@ fn get_int_option(fd: RawFd, option: libc::c_int) -> Result<libc::c_int> {
     Ok(value)
 }
 
-fn check_seqpacket(fd: RawFd) -> Result<()> {
+pub(crate) fn check_seqpacket(fd: RawFd) -> Result<()> {
     if get_int_option(fd, libc::SO_DOMAIN)? != libc::AF_UNIX
         || get_int_option(fd, libc::SO_TYPE)? != libc::SOCK_SEQPACKET
     {
