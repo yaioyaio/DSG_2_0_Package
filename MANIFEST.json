@@ -32,7 +32,8 @@
     "buildkit_operating_service": "Ubuntu Parallels ARM64 systemd operated one dedicated socket with two system roles. A single synthetic record was applied and the read-only receipt recovery did not call mutation. Same-generation ledger/checkpoint rollback and a diverging external witness were preserved without backend changes. Guest ext4 receipt and macOS-side independent pin were verified after service cleanup, with four availability cases. Physical host power loss and production project rollout remain separate.",
     "buildkit_project_enrollment": "A pinned Ubuntu ARM64 BuildKit dedicated worker accepted tracked DSG README bytes. The project revision, source SHA-256, LLB, OCI export, native worker and record IDs were bound and four native DB digests were unchanged by read-only qualification. A separate QEMU full VM snapshot restored coherent synthetic RAM and ext4 markers. The off-VM latest marker differed. Production rollout, application-level full-snapshot rejection and physical power interruption are still unverified.",
     "buildkit_external_freshness": "Independent issuance verified a stopped Ubuntu ARM64 worker with five native DBs unchanged. Public apply was preserved when external freshness was absent or denied. The actual Go freshness client used a protected relay to a host authority outside a QEMU full snapshot. One synthetic external claim was recorded and a request after the pre-request restore was denied. Native mutation calls were zero. Production rollout, restoration after the success reply, and a physical power cut remain separate.",
-    "buildkit_external_execution": "The external executor reserved one isolated append effect and returned the same settled receipt after bare QEMU full restores at approval and receipt boundaries. The isolated approval store was restored to its earlier state while the independent execution journal and claim remained intact. Ubuntu ARM64 verified the actual CLI with a pinned synthetic child, stale execution state and exact replay. Actual operating deployment, physical power cuts and joint rollback of execution state and claim remain separate."
+    "buildkit_external_execution": "The external executor reserved one isolated append effect and returned the same settled receipt after bare QEMU full restores at approval and receipt boundaries. The isolated approval store was restored to its earlier state while the independent execution journal and claim remained intact. Ubuntu ARM64 verified the actual CLI with a pinned synthetic child, stale execution state and exact replay. Actual operating deployment, physical power cuts and joint rollback of execution state and claim remained separate in that run.",
+    "buildkit_independent_execution_fence": "The Ubuntu ARM64 external executor CLI required an independent one-time reservation outside the guest before a digest-pinned synthetic effect. The saved execution ledger and local marker were jointly rolled back. macOS admitted one reservation, rejected the repeat, and one effect occurred. After restoring the settled files, the same receipt returned without the socket. Production worker mutation, physical power loss, and rollback of the independent reservation were outside this qualification."
   },
   "files": [
     {
@@ -82,8 +83,8 @@
     },
     {
       "path": "docs/API_SPEC.md",
-      "sha256": "619d345ecce905a79ed45315efbf3bf7d20a60210a4f5d649dc0476c6281aa43",
-      "bytes": 41486
+      "sha256": "cf9a8bf65322052f2c32eba351b9bc3d9ef60bb426b36a5d8b32a43c28d80422",
+      "bytes": 43077
     },
     {
       "path": "docs/ARCHITECTURE.md",
@@ -97,8 +98,8 @@
     },
     {
       "path": "docs/OPERATIONS.md",
-      "sha256": "a3d026ee8f50af82b28dd1e9af44d4389f1b5ffad4f2ae7e5670d1242098fe54",
-      "bytes": 18811
+      "sha256": "57a7cf15121b4d8207ed90c8cbb2c1edda892de75368cdc54151d5422a7186de",
+      "bytes": 20468
     },
     {
       "path": "docs/PLAN.md",
@@ -142,13 +143,13 @@
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "a51c189014c445f0afedc8cd597f1d82391684da3a2faacad61a78f2206a478a",
-      "bytes": 31083
+      "sha256": "d0270e1aad4d1f8e32389477d0b89a5911de8c2d4146ab71b934d9c817a18a80",
+      "bytes": 31476
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "8dedf5a12eff6f0ed3d04a4fd697170bf46e91d216be5feb46851ee2dd660957",
-      "bytes": 64776
+      "sha256": "f109f0f9ac23aa224138240edf21176fd3b6af99de32cb4069a1ec238fb88ba7",
+      "bytes": 66039
     },
     {
       "path": "docs/WBS.md",
@@ -777,8 +778,8 @@
     },
     {
       "path": "scripts/buildkit-external-executor.py",
-      "sha256": "e43733febd617a04621c0990c73bc01f46d5a6d411be514b69d8d07fd18efe0f",
-      "bytes": 9886
+      "sha256": "33abab4b076da9c082394c875fa9b005daab6db4d64e471b5e4f97e3cfd7b6c4",
+      "bytes": 12402
     },
     {
       "path": "scripts/buildkit-freshness-authority.py",
@@ -927,8 +928,8 @@
     },
     {
       "path": "scripts/test-buildkit-external-executor.py",
-      "sha256": "de65282f010e674b5c8c5e14b12c3510829a705a4fc9a90b555a073401802aaf",
-      "bytes": 5903
+      "sha256": "34d14f43922d914eaed3eb2c86df2b1c76e985ff5037361931e11051c5e143da",
+      "bytes": 11064
     },
     {
       "path": "scripts/test-buildkit-freshness-authority.py",
