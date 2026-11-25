@@ -149,6 +149,12 @@ Linux ARM64에서 `/opt/dsg/bin/dsg buildkit-exact-service`는 `/run/dsg-buildki
 
 검사 성공은 `status: archived_settled_receipt`, `purpose: operating_controller`, `record_id`, `receipt_sha256`, `mutation_calls: 0`과 종료 0을 반환한다. 아카이브나 독립 입력이 누락되거나 일치하지 않으면 `{"status":"preserve","mutation_calls":0}`과 종료 1을 반환한다. 검증에는 별도 장애 영역에서 보관한 기존 아카이브 SHA-256을 사용한다. [보관 절차](OPERATIONS.md#buildkit-단일-대상-운영)
 
+### 격리된 프로젝트 전용 워커 검증
+
+Linux ARM64의 `scripts/check-dedicated-buildkit-fence.py <workspace> <daemon_sha256> <client_sha256>`는 기존 격리 시험에 프로젝트 입력을 추가할 수 있다. `--project-source <workspace/README.md>`, `--project-source-sha256 <64자리 SHA-256>`, `--project-id dsg`, `--project-revision <40자리 Git 커밋>`은 함께 지정한다. 입력은 동일 파일시스템의 단일 링크를 가진 루트 소유 0400 일반 파일이어야 한다. 최대 16 KiB를 읽고 경로·파일 식별자의 안정성과 내용 해시를 검증한다. 호출자가 고정한 Git 리비전은 검증 증거에 기록한다.
+
+격리된 native 워커에 입력을 빌드하고 LLB, OCI 레이어 및 정확 ID의 오프라인 조회 증거를 반환한다. `cache_read_only_evidence.project_registration`은 증거용 등록이며, 캐시 조회의 판정은 `preserve`다. `production_deployment_verified`, `exact_mutation_authorized`, `receipt_storage_verified`는 모두 `false`다. 운영 서비스 등록에는 지정된 실제 대상과 운영 등록 캡슐의 검증이 필요하다. 현재 캡슐 검증은 합성 레이아웃 범위다. [검증 스크립트](../scripts/check-dedicated-buildkit-fence.py)
+
 ## 계획 API (미구현)
 - `dsg inspect <resource-id>`
 - `dsg docker reuse --project <id>`

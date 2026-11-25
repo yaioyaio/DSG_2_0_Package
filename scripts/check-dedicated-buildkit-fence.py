@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Verify the pinned BuildKit daemon's dedicated owner lock in an isolated Linux VM."""
 
+import argparse
 from contextlib import contextmanager
 import fcntl
 import hashlib
@@ -16,6 +17,54 @@ import struct
 import subprocess
 import sys
 import time
+
+
+PROJECT_SOURCE_NAME = "README.md"
+PROJECT_SOURCE_LIMIT = 16 * 1024
+
+
+def source_identity(info):
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid,
+            info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
+def read_project_source(workspace, source, checksum, project_id, revision):
+    assert source == workspace / PROJECT_SOURCE_NAME, "project_source_path"
+    assert project_id == "dsg" and re.fullmatch(r"[a-f0-9]{40}", revision), "project_identity"
+    assert re.fullmatch(r"[a-f0-9]{64}", checksum), "project_source_digest"
+
+    directory = os.open(workspace, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK | getattr(os, "O_NOATIME", 0)
+        fd = os.open(PROJECT_SOURCE_NAME, flags, dir_fd=directory)
+        with os.fdopen(fd, "rb") as reader:
+            before = os.fstat(reader.fileno())
+            assert before.st_mode == stat.S_IFREG | 0o400 and before.st_uid == 0, "project_source_permissions"
+            assert before.st_nlink == 1 and before.st_dev == os.fstat(directory).st_dev, "project_source_boundary"
+            assert 0 < before.st_size <= PROJECT_SOURCE_LIMIT, "project_source_size"
+            payload = reader.read(before.st_size + 1)
+            after = os.fstat(reader.fileno())
+            named = os.stat(PROJECT_SOURCE_NAME, dir_fd=directory, follow_symlinks=False)
+            identity = source_identity(before)
+            assert source_identity(after) == identity == source_identity(named) and len(payload) == before.st_size, (
+                "project_source_changed"
+            )
+    finally:
+        os.close(directory)
+
+    assert hashlib.sha256(payload).hexdigest() == checksum, "project_source_digest"
+    registration = {
+        "evidence_scope": "isolated_project_source",
+        "project_id": project_id,
+        "project_revision": revision,
+        "project_source_name": PROJECT_SOURCE_NAME,
+        "project_source_sha256": checksum,
+        "project_source_bytes": len(payload),
+        "production_deployment_verified": False,
+        "exact_mutation_authorized": False,
+        "receipt_storage_verified": False,
+    }
+    return payload, registration
 
 
 @contextmanager
@@ -89,7 +138,7 @@ def await_listener(proc, path):
     raise AssertionError("daemon socket deadline")
 
 
-def create_cache_evidence(workspace, client, addr, daemon, sock):
+def create_cache_evidence(workspace, client, addr, daemon, sock, payload=None):
     fixture = runpy.run_path(str(workspace / "check-buildkit-native.py"))
     environment = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C", "HOME": str(workspace),
                    "TMPDIR": str(workspace), "XDG_RUNTIME_DIR": str(workspace)}
@@ -103,7 +152,8 @@ def create_cache_evidence(workspace, client, addr, daemon, sock):
     generation = fixture["socket_generation"](sock, daemon.pid)
     before = inventory()
     assert not before, "only a new isolated store may run the producer"
-    payload = b"DSG dedicated worker synthetic project " + os.urandom(16).hex().encode("ascii") + b"\n"
+    if payload is None:
+        payload = b"DSG dedicated worker synthetic project " + os.urandom(16).hex().encode("ascii") + b"\n"
     definition = fixture["scratch_definition"](payload)
     llb, image = workspace / "source.llb", workspace / "source.oci.tar"
     llb.write_bytes(definition)
@@ -123,7 +173,9 @@ def create_cache_evidence(workspace, client, addr, daemon, sock):
             "daemon_generation": generation, "before_count": len(before), "after_count": len(current)}
 
 
-def qualify(workspace, daemon_hash, client_hash):
+def qualify(workspace, daemon_hash, client_hash, project_options=None):
+    if sys.flags.optimize:
+        raise ValueError("optimized_execution")
     assert sys.platform == "linux" and os.uname().machine == "aarch64" and os.geteuid() == 0
     assert workspace == workspace.resolve(strict=True) and workspace.is_mount()
     assert workspace.stat().st_uid == 0 and stat.S_IMODE(workspace.stat().st_mode) == 0o700
@@ -133,6 +185,7 @@ def qualify(workspace, daemon_hash, client_hash):
     assert interfaces == {"lo"}
     assert not Path("/run/docker.sock").is_socket() and not Path("/run/containerd/containerd.sock").is_socket()
 
+    payload, registration = (None, None) if project_options is None else read_project_source(workspace, *project_options)
     daemon = check_binary(workspace, "buildkitd", daemon_hash)
     client = check_binary(workspace, "buildctl", client_hash)
     store, other = workspace / "store", workspace / "other"
@@ -177,7 +230,7 @@ def qualify(workspace, daemon_hash, client_hash):
         assert workers[0]["gcPolicy"] in (None, [])
         worker_id = workers[0]["id"]
         assert re.fullmatch(r"[a-z0-9]{25}", worker_id)
-        candidate = create_cache_evidence(workspace, client, addr, running, sock)
+        candidate = create_cache_evidence(workspace, client, addr, running, sock, payload)
 
     with directory_lock(store) as recovered:
         assert recovered == identity
@@ -211,6 +264,8 @@ def qualify(workspace, daemon_hash, client_hash):
     assert observation["record"]["metadata_only_candidate"] is False
     assert re.fullmatch(r"[a-f0-9]{64}", observation["record"]["bindings_sha256"])
     candidate["disposition"] = "preserve"
+    if registration is not None:
+        candidate["project_registration"] = registration
     evidence = json.dumps(candidate, sort_keys=True, separators=(",", ":")).encode("utf-8")
     candidate["evidence_sha256"] = hashlib.sha256(evidence).hexdigest()
     with directory_lock(store) as recovered:
@@ -226,10 +281,31 @@ def qualify(workspace, daemon_hash, client_hash):
     }
 
 
+def arguments():
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
+    parser.add_argument("workspace", type=Path)
+    parser.add_argument("daemon_sha256")
+    parser.add_argument("client_sha256")
+    parser.add_argument("--project-source", type=Path)
+    parser.add_argument("--project-source-sha256")
+    parser.add_argument("--project-id")
+    parser.add_argument("--project-revision")
+    args, unused = parser.parse_known_args()
+    if unused:
+        raise ValueError("arguments")
+    project = (args.project_source, args.project_source_sha256, args.project_id, args.project_revision)
+    if any(value is not None for value in project):
+        if any(value is None for value in project):
+            raise ValueError("project_arguments")
+    else:
+        project = None
+    return args.workspace, args.daemon_sha256, args.client_sha256, project
+
+
 if __name__ == "__main__":
     os.umask(0o077)
     try:
-        result = qualify(Path(sys.argv[1]), sys.argv[2], sys.argv[3])
+        result = qualify(*arguments())
     except (AssertionError, OSError, KeyError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
         location = error.__traceback__
         fixture_line = location.tb_lineno
