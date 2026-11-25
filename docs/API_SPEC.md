@@ -135,7 +135,19 @@ Windows SCM 어댑터는 고정 로컬 named pipe에서 `/_ping`, `/info`, `/dsg
 | `apply` | 실행자 | `{"status":"applied","receipt":{…}}`. 승인·세대·같은 마운트의 현재 증거를 재확인하고 승인 1회 소비와 변경을 연결한다. |
 | `receipt` | 실행자 | `{"status":"settled","receipt":{…}}`. 저장된 변경의 영수증을 확인하며 네이티브 변경을 다시 호출하지 않는다. 논리 회수와 물리 회수량을 별도로 표시한다. |
 
-운영 제어기는 SHA-256이 고정된 네이티브 `dsg-buildkit-exact`에 메서드와 등록 ID를 전달한다. 관리자가 보호한 등록에서 승인·출처·실행 파일·보유 프로세스·같은 마운트와 원장 체크포인트를 독립적으로 검증한다. 클라이언트가 경로, 임의 명령, UID 또는 승인 원문을 지정할 수 없다. 자체 권한 거절은 `{"status":"preserved","reason":"controller_admission"}`과 종료 5, 네이티브 보존 판정은 본문 없이 종료 5다. 승인 원장 또는 체크포인트를 읽을 수 없는 상태에서는 적용과 실시간 영수증 조회가 모두 거절된다. 게스트 유실 후 호스트에 사전 보관한 영수증은 별도 검사기로 읽기 검증만 할 수 있다. [API 실측](HANDOFF.md#buildkit-공개-api와-승인-원장-복구)
+요청 제어기는 SHA-256이 고정된 네이티브 `dsg-buildkit-exact`에 메서드와 등록 ID를 전달한다. 관리자가 보호한 등록에서 승인·출처·실행 파일·보유 프로세스·같은 마운트와 원장 체크포인트를 독립적으로 검증한다. 클라이언트가 경로, 임의 명령, UID 또는 승인 원문을 지정할 수 없다. 요청 제어기의 권한 거절은 `{"status":"preserved","reason":"controller_admission"}`과 종료 5, 네이티브 보존 판정은 본문 없이 종료 5다. [기존 요청 제어기 실측](HANDOFF.md#buildkit-공개-api와-승인-원장-복구)
+
+### 운영 서비스 소켓
+
+Linux ARM64에서 `/opt/dsg/bin/dsg buildkit-exact-service`는 `/run/dsg-buildkit-exact/control.sock`으로 위 패킷 계약을 제공한다. 배포 unit은 `root:dsg-buildkit-access`로 실행하며 런타임 디렉터리는 0750, 소켓은 0660이다. 보호된 `/etc/dsg-buildkit-exact/operating.json`은 `version: 1`, `registration`, `keeper`를 받는다. `keeper`는 보유 증거의 같은 객체이며 `pid`, `start_ticks`, `boot_sha256`, `mount_namespace`, `network_namespace`를 포함한다. 서비스는 등록된 보유 프로세스와 두 네임스페이스를 고정하고 수락한 연결마다 자식 요청 제어기만 해당 네임스페이스에 진입시킨다. 그룹은 연결을 허용하며, 요청별 권한은 등록 캡슐의 `controller-policy.json`이 지정한 두 비루트 UID와 커널 자격을 대조해 판정한다. [배포와 접근 점검](OPERATIONS.md#buildkit-단일-대상-운영)
+
+운영 등록은 로컬 승인 원장, 로컬 체크포인트, 별도 장치에 등록한 원장 증거를 대조한다. 각 원장 단계는 로컬 DB 커밋, 체크포인트 `fsync`, 별도 원장 증거 `fsync` 순서로 기록한 뒤 후속 효과를 허용한다. 세 자료가 누락되거나 불일치하면 적용과 실시간 영수증 조회를 보존으로 처리한다. 이때 남은 파일에서 원장 증거를 재생성하지 않는다.
+
+### 보관된 운영 영수증 검증
+
+`scripts/check-buildkit-settled-receipt.py`는 `--archive`, `--archive-sha256`, `--custody-sha256`, `--record-id`를 받는다. 운영 실측 아카이브는 `purpose: operating_controller`와 `attempt.postconditions.completion_store_hashes`의 `checkpoint`, `ledger_witness`를 포함한다. 두 필드는 같은 64자리 소문자 SHA-256이어야 한다. 기존 원장·저널·네이티브 저장소 해시, 적용과 읽기 전용 복구의 동일 영수증, 같은 읽기 전용 마운트 및 DB 사후조건도 함께 검사한다. 이 계약의 입력은 운영 응답을 포함해 별도로 보관한 아카이브다.
+
+검사 성공은 `status: archived_settled_receipt`, `purpose: operating_controller`, `record_id`, `receipt_sha256`, `mutation_calls: 0`과 종료 0을 반환한다. 아카이브나 독립 입력이 누락되거나 일치하지 않으면 `{"status":"preserve","mutation_calls":0}`과 종료 1을 반환한다. 검증에는 별도 장애 영역에서 보관한 기존 아카이브 SHA-256을 사용한다. [보관 절차](OPERATIONS.md#buildkit-단일-대상-운영)
 
 ## 계획 API (미구현)
 - `dsg inspect <resource-id>`
