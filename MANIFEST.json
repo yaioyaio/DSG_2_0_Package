@@ -78,8 +78,8 @@
     },
     {
       "path": "docs/API_SPEC.md",
-      "sha256": "6e81c323cb64e938c1585fe4b8983097ef4e4fb9e8d6a4282d6a4e78df053a16",
-      "bytes": 29407
+      "sha256": "2cb97aa3efddc8f6072602b6b72fa85d20c2b8d5466e23c7a6cc46e64be05e6a",
+      "bytes": 29588
     },
     {
       "path": "docs/ARCHITECTURE.md",
@@ -138,13 +138,13 @@
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "b0d5901bf64c9a81a6940d95155bbc01e94401f6a98f539f01973c707fca2f41",
-      "bytes": 25146
+      "sha256": "005b5ac432dcd3fdec10e6a5b9d0f28db1fb43b105b5c90e5058134acc66fa9f",
+      "bytes": 25286
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "48365ed15937a87fd39bdb7d5c402ace9acd0467d74319aa69a4fe6b7cd6524d",
-      "bytes": 48206
+      "sha256": "674c72379bbafcf3d475f00b13a251d53546c644b96f6064933f5673a800159a",
+      "bytes": 49063
     },
     {
       "path": "docs/WBS.md",
@@ -182,9 +182,29 @@
       "bytes": 11214
     },
     {
+      "path": "integrations/buildkit-exact/cache/dsg_graph_allocations_linux.go",
+      "sha256": "660d4b93f13e4392634a93f8131032adc5fe6ce81f0e9b886942532ca13c73b4",
+      "bytes": 10185
+    },
+    {
+      "path": "integrations/buildkit-exact/cache/dsg_graph_allocations_linux_test.go",
+      "sha256": "59a2e4c801b043ed36bfd22017dbace032fd6ed200d9f076f0312bf4c765db53",
+      "bytes": 6613
+    },
+    {
       "path": "integrations/buildkit-exact/cache/dsg_graph_backend_linux.go",
       "sha256": "1b040b91905b9876375b1e71833c377449c9390caec0bb43b4ffa2e1b03a2e58",
       "bytes": 13624
+    },
+    {
+      "path": "integrations/buildkit-exact/cache/dsg_graph_cache_closure_linux.go",
+      "sha256": "0fd5a00ed0fc9a384b6348cb9d4bc3ba633b13f018db9c2bf39f2099a1966012",
+      "bytes": 3391
+    },
+    {
+      "path": "integrations/buildkit-exact/cache/dsg_graph_cache_closure_linux_test.go",
+      "sha256": "52187cb82925604424661841e00adf5918f2c538ad73393f0c061f54bebedfdc",
+      "bytes": 4249
     },
     {
       "path": "integrations/buildkit-exact/cache/dsg_graph_external_history_linux.go",
@@ -208,13 +228,13 @@
     },
     {
       "path": "integrations/buildkit-exact/cache/dsg_graph_linux.go",
-      "sha256": "2ab13cbab23bd4be06e5d7432160332004d4d5e0109e3f173306ec2b1e7b64ed",
-      "bytes": 13327
+      "sha256": "df20a8d08565bddfb528e5bdfbfeae1d3ba2528043e2a7a036bc1ae829509e09",
+      "bytes": 14318
     },
     {
       "path": "integrations/buildkit-exact/cache/dsg_graph_linux_test.go",
-      "sha256": "6039bbf80dc0a4433f5a63d7f38e096f255fe1b34ae2ded382bb336a45b9f0d4",
-      "bytes": 9314
+      "sha256": "c044e09cd6cf9798c4cf17c8b3ebf8959d11431dc2edfa3602f251e589c1983f",
+      "bytes": 9457
     },
     {
       "path": "integrations/buildkit-exact/cache/dsg_graph_transitive_gc_linux.go",
@@ -223,8 +243,8 @@
     },
     {
       "path": "integrations/buildkit-exact/cache/dsg_graph_transitive_linux.go",
-      "sha256": "c365056202eb3b436b58fd01eee984cbfa3890be94c6c1b6a545c673432006e0",
-      "bytes": 5146
+      "sha256": "1622091d986d5a702b02e90e270fd9c508c9de4b530bef9fc90e94b83164d683",
+      "bytes": 5184
     },
     {
       "path": "integrations/buildkit-exact/cache/dsg_graph_transitive_linux_test.go",
@@ -248,8 +268,13 @@
     },
     {
       "path": "integrations/buildkit-exact/cache/dsg_native_recovery_linux_test.go",
-      "sha256": "b2660f9af5b092b51251fa1bfd14866276c420ff65dcbcfaa826a5d9783b4fba",
-      "bytes": 16774
+      "sha256": "5b5dccc9fdb35b4c7c040b25380e9100012f3a1d31e4ae2a8bef6d7f71e6f559",
+      "bytes": 18489
+    },
+    {
+      "path": "integrations/buildkit-exact/cache/dsg_native_recovery_participants_linux_test.go",
+      "sha256": "2e077312a905c27c963c9aa90d853b4c31aa777362ba48e460c41b30206eb54e",
+      "bytes": 8590
     },
     {
       "path": "integrations/buildkit-exact/cache/dsg_quiescence_linux.go",
@@ -263,8 +288,8 @@
     },
     {
       "path": "integrations/buildkit-exact/cache/dsg_recovery.go",
-      "sha256": "61c1dd51dabe6ac1d2ac53514559a3422869733415c63abaad1290b3b6b7c2b6",
-      "bytes": 10165
+      "sha256": "28e8d7a10d7169b3758b2d067e01b365680fc53e076fea45203bb16da0034643",
+      "bytes": 10652
     },
     {
       "path": "integrations/buildkit-exact/cache/dsg_recovery_test.go",
@@ -638,8 +663,8 @@
     },
     {
       "path": "scripts/check-buildkit-offline-recovery.py",
-      "sha256": "e799d8f749964a949a1a452dfb26b683cf2d0aa32ff299433472d7621f20c149",
-      "bytes": 12234
+      "sha256": "75cf5cb1012090de2f0dff759f4fe64b5b2e8b9eb0622492892ff669d8de186b",
+      "bytes": 15955
     },
     {
       "path": "scripts/check-cleanup.py",

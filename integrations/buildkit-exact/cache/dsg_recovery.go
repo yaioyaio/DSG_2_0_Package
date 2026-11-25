@@ -14,6 +14,7 @@ import (
 )
 
 const dsgRecoverySynthetic = "synthetic-bbolt-v1"
+const dsgNativeTrialMode = "native-five-stage-trial-v1"
 const dsgRecoveryBucket = "_dsg_recovery_journal_v1"
 const dsgRecoveryClaimsSchema = "domain-selector-reservations-v1"
 
@@ -82,10 +83,11 @@ type dsgRecoveryJournal struct {
 }
 
 type dsgRecoveryState struct {
-	Plan      dsgRecoveryPlan
-	Confirmed int  // number of durable participant proofs acknowledged in order
-	Armed     bool // the next participant may already have committed
-	Receipt   *DSGExactReceipt
+	Plan       dsgRecoveryPlan
+	Confirmed  int  // number of durable participant proofs acknowledged in order
+	Armed      bool // the next participant may already have committed
+	Receipt    *DSGExactReceipt
+	TrialProof string `json:",omitempty"` // evidence of retention, never a deletion receipt
 }
 
 func (s dsgRecoveryState) valid(plan dsgRecoveryPlan) bool {
@@ -93,9 +95,12 @@ func (s dsgRecoveryState) valid(plan dsgRecoveryPlan) bool {
 		return false
 	}
 	if s.Confirmed < len(plan.Objects) {
-		return s.Receipt == nil
+		return s.Receipt == nil && s.TrialProof == ""
 	}
-	return !s.Armed && s.Receipt != nil && s.Receipt.Request == plan.Request &&
+	if plan.Mode == dsgNativeTrialMode {
+		return !s.Armed && s.Receipt == nil && s.TrialProof == plan.proof(len(plan.Objects)-1)
+	}
+	return plan.Mode == dsgRecoverySynthetic && !s.Armed && s.TrialProof == "" && s.Receipt != nil && s.Receipt.Request == plan.Request &&
 		s.Receipt.LogicalRecords == 1 && s.Receipt.PhysicalBytes == nil
 }
 
@@ -253,7 +258,7 @@ func (j *dsgRecoveryJournal) save(previous, next dsgRecoveryState) error {
 		if err != nil {
 			return err
 		}
-		if state.Receipt != nil || state.Confirmed != previous.Confirmed || state.Armed != previous.Armed || !next.valid(previous.Plan) {
+		if state.Confirmed == len(previous.Plan.Objects) || state.Confirmed != previous.Confirmed || state.Armed != previous.Armed || !next.valid(previous.Plan) {
 			return ErrDSGExactPreserve
 		}
 		intent, _ := previous.Plan.claimKeys()
@@ -274,7 +279,7 @@ func (j *dsgRecoveryJournal) advance(ctx context.Context, p dsgRecoveryPlan, bar
 		if err != nil {
 			return err
 		}
-		if state.Receipt != nil {
+		if state.Confirmed == len(p.Objects) {
 			return ErrDSGExactPreserve
 		}
 		current, err := j.inspect(ctx, state)
@@ -315,7 +320,11 @@ func (j *dsgRecoveryJournal) advance(ctx context.Context, p dsgRecoveryPlan, bar
 		next.Confirmed++
 		next.Armed = false
 		if next.Confirmed == len(p.Objects) {
-			next.Receipt = &DSGExactReceipt{Request: p.Request, LogicalRecords: 1}
+			if p.Mode == dsgNativeTrialMode {
+				next.TrialProof = p.proof(n)
+			} else {
+				next.Receipt = &DSGExactReceipt{Request: p.Request, LogicalRecords: 1}
+			}
 		}
 		if err := j.save(state, next); err != nil {
 			return err

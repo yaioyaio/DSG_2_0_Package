@@ -11,7 +11,6 @@ import (
 	"hash"
 	"strings"
 
-	"github.com/moby/buildkit/cache/metadata"
 	"github.com/moby/buildkit/solver"
 	bolt "go.etcd.io/bbolt"
 )
@@ -22,16 +21,17 @@ const dsgGraphMaxEntries = 16384
 // stores. Each checked section has an independent traversal and shared budget.
 // The graph is evidence for preservation and carries no mutation authority.
 type DSGDedicatedGraph struct {
-	Cache        *DSGGraphCache      `json:"cache,omitempty"`
-	Solver       *DSGGraphSolver     `json:"solver,omitempty"`
-	Containerd   *DSGGraphBackend    `json:"containerd,omitempty"`
-	Snapshot     *DSGGraphSnapshot   `json:"native_snapshot,omitempty"`
-	Blob         *DSGGraphBlob       `json:"local_blob,omitempty"`
-	Transitive   *DSGGraphTransitive `json:"transitive,omitempty"`
-	External     *DSGGraphExternal   `json:"external,omitempty"`
-	EvidenceHash string              `json:"references_sha256"`
-	Unverified   []string            `json:"unverified"`
-	Disposition  string              `json:"disposition"`
+	Cache        *DSGGraphCache       `json:"cache,omitempty"`
+	Solver       *DSGGraphSolver      `json:"solver,omitempty"`
+	Containerd   *DSGGraphBackend     `json:"containerd,omitempty"`
+	Snapshot     *DSGGraphSnapshot    `json:"native_snapshot,omitempty"`
+	Blob         *DSGGraphBlob        `json:"local_blob,omitempty"`
+	Allocations  *DSGGraphAllocations `json:"native_allocations,omitempty"`
+	Transitive   *DSGGraphTransitive  `json:"transitive,omitempty"`
+	External     *DSGGraphExternal    `json:"external,omitempty"`
+	EvidenceHash string               `json:"references_sha256"`
+	Unverified   []string             `json:"unverified"`
+	Disposition  string               `json:"disposition"`
 }
 
 type DSGGraphCache struct {
@@ -73,12 +73,19 @@ func (r *dsgGraphReader) each(b *bolt.Bucket, visit func([]byte, []byte) error) 
 		return nil
 	}
 	return b.ForEach(func(k, v []byte) error {
-		r.remaining--
-		if r.remaining < 0 || r.ctx.Err() != nil || len(k) > 1024 {
+		if len(k) > 1024 || !r.spend(1) {
 			return ErrDSGExactPreserve
 		}
 		return visit(k, v)
 	})
+}
+
+func (r *dsgGraphReader) spend(entries int) bool {
+	if entries > r.remaining || r.ctx.Err() != nil {
+		return false
+	}
+	r.remaining -= entries
+	return true
 }
 
 func dsgGraphBucket(b *bolt.Bucket, key string) (*bolt.Bucket, error) {
@@ -127,13 +134,11 @@ func dsgObserveNativeGraph(ctx context.Context, workerID, recordID string, solve
 
 	o := &DSGDedicatedGraph{
 		Disposition: "preserve",
-		Unverified: []string{
-			"cache_record_transitive_parents_and_aliases",
-			"native_allocation_contents",
-		},
+		Transitive:  &DSGGraphTransitive{},
+		Unverified:  []string{"native_allocation_contents"},
 	}
 	r := &dsgGraphReader{ctx: ctx, remaining: dsgGraphMaxEntries, evidence: sha256.New()}
-	r.edge("dsg-native-reference-graph-v2", workerID, recordID)
+	r.edge("dsg-native-reference-graph-v3", workerID, recordID)
 	warn := func(code string) {
 		o.Unverified = append(o.Unverified, code)
 		r.edge("unverified", code)
@@ -142,6 +147,9 @@ func dsgObserveNativeGraph(ctx context.Context, workerID, recordID string, solve
 	snapshot, blob, err := r.cache(o, cacheTx, recordID)
 	if err != nil {
 		warn("cache_reference_projection")
+	}
+	if o.Transitive.CacheRecords == nil {
+		warn("cache_record_transitive_parents_and_aliases")
 	}
 	if err := r.solver(o, solverTx, workerID+"::"+recordID); err != nil {
 		warn("solver_result_or_link_indexes")
@@ -163,6 +171,7 @@ func dsgObserveNativeGraph(ctx context.Context, workerID, recordID string, solve
 					warn("local_blob_metadata_or_allocation")
 				}
 			}
+			r.allocations(o, snapshotTx, workerFD, snapshotterFD, native, blob, size, warn)
 		}
 	}
 	r.extendedGraph(o, solverTx, cacheTx, containerdTx, history, workerID, recordID, snapshot, blob, warn)
@@ -187,9 +196,12 @@ func dsgGraphValue[T any](b *bolt.Bucket, key string, dst *T) error {
 	if len(raw) == 0 {
 		return nil
 	}
-	var value metadata.Value
 	var parsed *T
-	if len(raw) > 4096 || json.Unmarshal(raw, &value) != nil || value.Unmarshal(&parsed) != nil || parsed == nil {
+	// The pinned writer marshals these fields through metadata.Value with no
+	// Index. Decode the value only and leave any other properties opaque.
+	payload, prefix := bytes.CutPrefix(raw, []byte(`{"value":`))
+	payload, suffix := bytes.CutSuffix(payload, []byte("}"))
+	if len(raw) > 4096 || !prefix || !suffix || json.Unmarshal(payload, &parsed) != nil || parsed == nil {
 		return ErrDSGExactPreserve
 	}
 	*dst = *parsed
@@ -238,6 +250,11 @@ func dsgReadGraphRecord(b *bolt.Bucket, id string) (dsgGraphRecord, error) {
 	}
 	var merged []string
 	if err := dsgGraphValue(b, keyMergeParents, &merged); err != nil || len(merged) > 64 {
+		return a, ErrDSGExactPreserve
+	}
+	// BuildKit's parentRefs is a disjoint union of layer, merge and diff
+	// parents. Diff parents can have both a lower and an upper reference.
+	if (len(a.parents) > 1 && a.parents[0].role == keyParent) || (len(a.parents) > 0 && len(merged) > 0) {
 		return a, ErrDSGExactPreserve
 	}
 	for _, parent := range merged {
@@ -289,13 +306,14 @@ func (r *dsgGraphReader) cache(o *DSGDedicatedGraph, tx *bolt.Tx, id string) (st
 		out.AliasesOut++
 		r.edge("cache-alias-out", target.alias)
 	}
+	graph := dsgCacheGraph{records: make(map[string]struct{})}
 	err = r.each(main, func(k, v []byte) error {
 		if v != nil || !dsgFullID.Match(k) {
 			return ErrDSGExactPreserve
 		}
 		other := string(k)
 		if other == id {
-			return nil
+			return graph.add(r, id, target)
 		}
 		peer, err := dsgReadGraphRecord(main.Bucket(k), other)
 		if err != nil {
@@ -319,7 +337,7 @@ func (r *dsgGraphReader) cache(o *DSGDedicatedGraph, tx *bolt.Tx, id string) (st
 			out.BlobPeers++
 			r.edge("cache-blob-peer", other)
 		}
-		return nil
+		return graph.add(r, other, peer)
 	})
 	if err != nil {
 		return "", "", err
@@ -337,6 +355,7 @@ func (r *dsgGraphReader) cache(o *DSGDedicatedGraph, tx *bolt.Tx, id string) (st
 		}
 	}
 	o.Cache = out
+	o.Transitive.CacheRecords = r.cacheClosure(&graph, id)
 	return target.snapshot, target.blob, nil
 }
 
