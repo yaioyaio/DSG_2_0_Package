@@ -28,43 +28,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const dsgDeletionCalls = "_dsg_fixture_native_delete_calls_v1"
-
-func (s *dsgDeletionFixture) callMarker(p dsgRecoveryPlan, stage int) (recorded bool, err error) {
-	key := []byte(p.Request.Intent + "/" + p.stages()[stage])
-	err = s.db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(dsgDeletionCalls))
-		if b == nil {
-			return nil
-		}
-		raw := b.Get(key)
-		if b.Bucket(key) != nil || (raw != nil && string(raw) != p.proof(stage)) {
-			return ErrDSGExactPreserve
-		}
-		recorded = raw != nil
-		return nil
-	})
-	return recorded, err
-}
-
-func (s *dsgDeletionFixture) recordCall(ctx context.Context, p dsgRecoveryPlan, stage int) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
-		state, err := dsgRecoveryLoad(tx, p)
-		if err != nil || !state.Armed || state.Confirmed != stage || !dsgRecoveryAuthorized(ctx, p) {
-			return ErrDSGExactPreserve
-		}
-		b, err := tx.CreateBucketIfNotExists([]byte(dsgDeletionCalls))
-		if err != nil {
-			return err
-		}
-		key := []byte(p.Request.Intent + "/" + p.stages()[stage])
-		if b.Get(key) != nil || b.Bucket(key) != nil {
-			return ErrDSGExactPreserve
-		}
-		return b.Put(key, []byte(p.proof(stage)))
-	})
-}
-
 func (s *dsgDeletionFixture) evidence(ctx context.Context, stage int) (target, peer string, err error) {
 	identities, err := s.identities()
 	if err != nil || identities != s.layout.Identities {

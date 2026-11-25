@@ -1,5 +1,4 @@
-// DSG cross-store recovery protocol. The native worker exposes no participant
-// implementation or mutation entry point. Qualification participants are installed only by tests.
+// Cross-store recovery for the isolated stores. The stock daemon has no mutation entry point.
 package cache
 
 import (
@@ -17,6 +16,7 @@ const dsgRecoverySynthetic = "synthetic-bbolt-v1"
 const dsgNativeTrialMode = "native-five-stage-trial-v1"
 const dsgNativeDeletionQualification = "native-backing-deletion-qualification-v1"
 const dsgNativeReclamationQualification = "native-record-reclamation-qualification-v1"
+const dsgNativeSameMount = "registered-native-same-mount-v1"
 const dsgRecoveryBucket = "_dsg_recovery_journal_v1"
 const dsgRecoveryClaimsSchema = "domain-selector-reservations-v1"
 
@@ -34,8 +34,12 @@ type dsgRecoveryPlan struct {
 	View              dsgRecoveryObject `json:",omitzero"` // preserve the encoding of existing plans
 }
 
+func (p dsgRecoveryPlan) recordStages() bool {
+	return p.Mode == dsgNativeReclamationQualification || p.Mode == dsgNativeSameMount
+}
+
 func (p dsgRecoveryPlan) stages() []string {
-	if p.Mode == dsgNativeReclamationQualification {
+	if p.recordStages() {
 		return dsgReclamationDomains[:]
 	}
 	if p.Mode == dsgNativeDeletionQualification {
@@ -47,14 +51,14 @@ func (p dsgRecoveryPlan) stages() []string {
 // The view and its committed parent use the same native snapshot participant,
 // with separate selector evidence, intent, crash boundary and acknowledgement.
 func (p dsgRecoveryPlan) participantIndex(stage int) int {
-	if p.Mode == dsgNativeReclamationQualification && stage >= 3 {
+	if p.recordStages() && stage >= 3 {
 		return stage - 1
 	}
 	return stage
 }
 
 func (p dsgRecoveryPlan) object(stage int) dsgRecoveryObject {
-	if p.Mode == dsgNativeReclamationQualification && stage == 2 {
+	if p.recordStages() && stage == 2 {
 		return p.View
 	}
 	return p.Objects[p.participantIndex(stage)]
@@ -68,7 +72,7 @@ func (p dsgRecoveryPlan) valid(mode string) bool {
 	if p.Mode != mode || !p.Request.valid() || !dsgDigest.MatchString(p.GraphSHA256) {
 		return false
 	}
-	if mode != dsgNativeReclamationQualification && p.View != (dsgRecoveryObject{}) {
+	if !p.recordStages() && p.View != (dsgRecoveryObject{}) {
 		return false
 	}
 	stages := p.stages()
@@ -125,17 +129,19 @@ type dsgRecoveryParticipant interface {
 
 type dsgRecoveryJournal struct {
 	root              string
-	qualificationMode string   // empty selects the synthetic fixture
-	db                *bolt.DB // dedicated protected journal, with synchronous commits
+	qualificationMode string       // empty selects the synthetic fixture
+	verifyNativeFence func() error // validates the already-held enrollment fence
+	db                *bolt.DB     // dedicated protected journal, with synchronous commits
 	store             [len(dsgRecoveryDomains)]dsgRecoveryParticipant
 }
 
 type dsgRecoveryState struct {
-	Plan       dsgRecoveryPlan
-	Confirmed  int  // number of durable participant proofs acknowledged in order
-	Armed      bool // the next participant may already have committed
-	Receipt    *DSGExactReceipt
-	TrialProof string `json:",omitempty"` // qualification evidence, never a production receipt
+	Plan        dsgRecoveryPlan
+	Confirmed   int  // number of durable participant proofs acknowledged in order
+	Armed       bool // the next participant may already have committed
+	Receipt     *DSGExactReceipt
+	NativeProof string `json:",omitempty"` // present only with the exact native receipt
+	TrialProof  string `json:",omitempty"` // qualification evidence, never a production receipt
 }
 
 func (s dsgRecoveryState) valid(plan dsgRecoveryPlan) bool {
@@ -144,12 +150,12 @@ func (s dsgRecoveryState) valid(plan dsgRecoveryPlan) bool {
 		return false
 	}
 	if s.Confirmed < stages {
-		return s.Receipt == nil && s.TrialProof == ""
+		return s.Receipt == nil && s.TrialProof == "" && s.NativeProof == ""
 	}
 	if plan.qualification() {
-		return !s.Armed && s.Receipt == nil && s.TrialProof == plan.proof(stages-1)
+		return s.NativeProof == "" && !s.Armed && s.Receipt == nil && s.TrialProof == plan.proof(stages-1)
 	}
-	return plan.Mode == dsgRecoverySynthetic && !s.Armed && s.TrialProof == "" && s.Receipt != nil && s.Receipt.Request == plan.Request &&
+	return ((plan.Mode == dsgRecoverySynthetic && s.NativeProof == "") || (plan.Mode == dsgNativeSameMount && s.NativeProof == plan.proof(stages-1))) && !s.Armed && s.TrialProof == "" && s.Receipt != nil && s.Receipt.Request == plan.Request &&
 		s.Receipt.LogicalRecords == 1 && s.Receipt.PhysicalBytes == nil
 }
 
@@ -165,6 +171,15 @@ func (j *dsgRecoveryJournal) fenced(ctx context.Context, p dsgRecoveryPlan, run 
 		if j.store[p.participantIndex(n)] == nil {
 			return ErrDSGExactPreserve
 		}
+	}
+	if mode == dsgNativeSameMount {
+		if j.verifyNativeFence == nil || j.verifyNativeFence() != nil {
+			return ErrDSGExactPreserve
+		}
+		if err := run(); err != nil {
+			return err
+		}
+		return j.verifyNativeFence()
 	}
 	return DSGWithDedicatedMaintenance(j.root, run)
 }
@@ -375,6 +390,9 @@ func (j *dsgRecoveryJournal) advance(ctx context.Context, p dsgRecoveryPlan, bar
 				next.TrialProof = p.proof(n)
 			} else {
 				next.Receipt = &DSGExactReceipt{Request: p.Request, LogicalRecords: 1}
+				if p.Mode == dsgNativeSameMount {
+					next.NativeProof = p.proof(n)
+				}
 			}
 		}
 		if err := j.save(state, next); err != nil {
