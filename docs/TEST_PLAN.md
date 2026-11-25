@@ -138,6 +138,12 @@ WBS 1.4·2.3의 비공개 실행기와 마운트 보유 프로세스가 전용 �
 
 운영 대상에는 현재 활성 증거를 특정한 별도 승인이 필요하다. 별도 사전 관측은 생성 출처·전체 ID·마운트 보유 증거와 양쪽 유효 기간을 대조하고, 승인 대기 중 적용·prune을 0건으로 유지한다. 호스트 유효 시각과 게스트 벽시계·부팅 후 경과 시간을 확인하며, 만료 또는 마운트 보유 상태 변경 시 다시 검증한다. [별도 승인 사전 증거](../dist/dsg-same-mount-c7883af0a86e/PREAPPROVAL.json) 표준 BuildKit 공개 API 연결과 마운트 보유 프로세스·승인 원장·VM 유실은 이번 예행시험의 검증 범위 밖이다. 물리 회수량과 호스트 전원 차단은 별도로 검증한다. [보유 검증 실행기](../scripts/check-buildkit-approval-custody.py) · [Ubuntu 회귀](../dist/dsg-same-mount-regression-2effb1cd80c6/QUALIFICATION.json)
 
+### BuildKit 동일 마운트의 단일 승인 회수
+
+WBS 1.4·2.3은 유효 기간이 지난 후보의 적용 0건과 시험 세대 정리를 확인한다. 승인 범위의 새 전용 ext4 합성 레코드에 현재 마운트 보유 증거·출처·전체 ID를 결속하고 동일 마운트에서 네이티브 6단계를 한 번 적용한다. 적용 전후 마운트 일치, 논리 회수 1건 및 독립 사후 조건 6개의 비대상 피어 보존이 통과 조건이다. 물리 회수량을 측정하지 않은 경우 결과는 `null`이다. [만료 정리](../dist/dsg-same-mount-c7883af0a86e/EXPIRED-RETIRED.json) · [적용 결과](../dist/dsg-same-mount-a4a90d9c6a36/AUTHORIZED-RESULT.json)
+
+영수증을 재조회해 같은 정규화 해시를 확인한다. 재조회 중 변경 호출 0건과 DB 5개·네이티브 저널·승인 원장의 바이트 불변을 대조한다. 사용자·시스템 캐시 변경과 prune은 각각 0건이어야 한다. 공개 API·운영 연결과 마운트 보유 프로세스·승인 원장·전체 VM 유실, 격리 물리 장비의 전원 장애는 별도로 검증한다. [적용 결과](../dist/dsg-same-mount-a4a90d9c6a36/AUTHORIZED-RESULT.json)
+
 ### Linux ARM64 로컬 제어 서비스 프로브
 
 WBS 5.1의 로컬 읽기 확인은 보호된 root 소켓과 예상 프로세스의 프로토콜 선언을 검증한다. 등록한 서비스의 성공과 소켓 링크·권한·상대 PID·선언 불일치 거절을 확인하고, 성공과 실패 모두 `mutation_authorized=false`와 보존 게이트를 확인한다. 운영 제어기의 출처·권한·배타 변경 경계는 별도로 검증한다. [프로브 구현과 시험](../rust-scaffold/crates/dsg-core/src/docker_control_local.rs)
