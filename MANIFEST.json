@@ -34,7 +34,8 @@
     "buildkit_external_freshness": "Independent issuance verified a stopped Ubuntu ARM64 worker with five native DBs unchanged. Public apply was preserved when external freshness was absent or denied. The actual Go freshness client used a protected relay to a host authority outside a QEMU full snapshot. One synthetic external claim was recorded and a request after the pre-request restore was denied. Native mutation calls were zero. Production rollout, restoration after the success reply, and a physical power cut remain separate.",
     "buildkit_external_execution": "The external executor reserved one isolated append effect and returned the same settled receipt after bare QEMU full restores at approval and receipt boundaries. The isolated approval store was restored to its earlier state while the independent execution journal and claim remained intact. Ubuntu ARM64 verified the actual CLI with a pinned synthetic child, stale execution state and exact replay. Actual operating deployment, physical power cuts and joint rollback of execution state and claim remained separate in that run.",
     "buildkit_independent_execution_fence": "The Ubuntu ARM64 external executor CLI required an independent one-time reservation outside the guest before a digest-pinned synthetic effect. The saved execution ledger and local marker were jointly rolled back. macOS admitted one reservation, rejected the repeat, and one effect occurred. After restoring the settled files, the same receipt returned without the socket. Production worker mutation, physical power loss, and rollback of the independent reservation were outside this qualification.",
-    "local_reclaim_measurement": "The installed macOS ARM64 CLI reclaimed one generated 16,777,216-byte Cargo artifact; expected size and independently observed pre-cleanup file allocation agreed. The protected witness was preserved. The host volume delta is observational. Ubuntu Parallels independently measured 8,192 expected payload allocation bytes for a new exact BuildKit fixture before separate approval, with zero mutations."
+    "local_reclaim_measurement": "The installed macOS ARM64 CLI reclaimed one generated 16,777,216-byte Cargo artifact; expected size and independently observed pre-cleanup file allocation agreed. The protected witness was preserved. The host volume delta is observational. Ubuntu Parallels independently measured 8,192 expected payload allocation bytes for a new exact BuildKit fixture before separate approval, with zero mutations.",
+    "local_reclaim_witness": "The initial local BuildKit fixture was rejected before apply because its ledger witness was on tmpfs; the exact target stayed read-only and no apply was dispatched. A replacement local Ubuntu ext4 candidate uses a distinct disk-backed witness and has 8,192 expected payload allocation bytes. The replacement requires its own approval."
   },
   "files": [
     {
@@ -149,8 +150,8 @@
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "d1b49ba1b715aeb6bde6c3b2b841480cd28288f86f6342b6aec36e1ddfcad0fe",
-      "bytes": 67035
+      "sha256": "a59f7f8218be8f25498556fdef68451f6184777d298c85fd2b7bf335d91a21ab",
+      "bytes": 67169
     },
     {
       "path": "docs/WBS.md",
