@@ -16,9 +16,11 @@ import (
 const dsgRecoverySynthetic = "synthetic-bbolt-v1"
 const dsgNativeTrialMode = "native-five-stage-trial-v1"
 const dsgNativeDeletionQualification = "native-backing-deletion-qualification-v1"
+const dsgNativeReclamationQualification = "native-record-reclamation-qualification-v1"
 const dsgRecoveryBucket = "_dsg_recovery_journal_v1"
 const dsgRecoveryClaimsSchema = "domain-selector-reservations-v1"
 
+var dsgReclamationDomains = [...]string{"solver", "lease", "snapshot-view", "snapshot", "blob", "cache"}
 var dsgRecoveryDomains = [...]string{"solver", "lease", "snapshot", "blob", "cache"}
 
 type dsgRecoveryObject struct {
@@ -29,27 +31,54 @@ type dsgRecoveryPlan struct {
 	Mode, GraphSHA256 string
 	Request           DSGExactIntent
 	Objects           [len(dsgRecoveryDomains)]dsgRecoveryObject
+	View              dsgRecoveryObject `json:",omitzero"` // preserve the encoding of existing plans
 }
 
 func (p dsgRecoveryPlan) stages() []string {
+	if p.Mode == dsgNativeReclamationQualification {
+		return dsgReclamationDomains[:]
+	}
 	if p.Mode == dsgNativeDeletionQualification {
 		return dsgRecoveryDomains[2:4] // snapshot and blob only
 	}
 	return dsgRecoveryDomains[:]
 }
 
+// The view and its committed parent use the same native snapshot participant,
+// with separate selector evidence, intent, crash boundary and acknowledgement.
+func (p dsgRecoveryPlan) participantIndex(stage int) int {
+	if p.Mode == dsgNativeReclamationQualification && stage >= 3 {
+		return stage - 1
+	}
+	return stage
+}
+
+func (p dsgRecoveryPlan) object(stage int) dsgRecoveryObject {
+	if p.Mode == dsgNativeReclamationQualification && stage == 2 {
+		return p.View
+	}
+	return p.Objects[p.participantIndex(stage)]
+}
+
+func (p dsgRecoveryPlan) qualification() bool {
+	return p.Mode == dsgNativeTrialMode || p.Mode == dsgNativeDeletionQualification || p.Mode == dsgNativeReclamationQualification
+}
+
 func (p dsgRecoveryPlan) valid(mode string) bool {
 	if p.Mode != mode || !p.Request.valid() || !dsgDigest.MatchString(p.GraphSHA256) {
 		return false
 	}
+	if mode != dsgNativeReclamationQualification && p.View != (dsgRecoveryObject{}) {
+		return false
+	}
 	stages := p.stages()
-	for n, obj := range p.Objects {
-		if n >= len(stages) {
-			if obj != (dsgRecoveryObject{}) {
-				return false
-			}
-			continue
+	for n := len(stages); n < len(p.Objects); n++ {
+		if p.Objects[n] != (dsgRecoveryObject{}) {
+			return false
 		}
+	}
+	for n := range stages {
+		obj := p.object(n)
 		if !dsgFullID.MatchString(obj.Key) && !(strings.HasPrefix(obj.Key, "sha256:") && dsgDigest.MatchString(obj.Key[7:])) {
 			return false
 		}
@@ -117,7 +146,7 @@ func (s dsgRecoveryState) valid(plan dsgRecoveryPlan) bool {
 	if s.Confirmed < stages {
 		return s.Receipt == nil && s.TrialProof == ""
 	}
-	if plan.Mode == dsgNativeTrialMode || plan.Mode == dsgNativeDeletionQualification {
+	if plan.qualification() {
 		return !s.Armed && s.Receipt == nil && s.TrialProof == plan.proof(stages-1)
 	}
 	return plan.Mode == dsgRecoverySynthetic && !s.Armed && s.TrialProof == "" && s.Receipt != nil && s.Receipt.Request == plan.Request &&
@@ -132,8 +161,8 @@ func (j *dsgRecoveryJournal) fenced(ctx context.Context, p dsgRecoveryPlan, run 
 	if !p.valid(mode) || j.db == nil || j.db.NoSync || ctx.Err() != nil {
 		return ErrDSGExactPreserve
 	}
-	for _, store := range j.store[:len(p.stages())] {
-		if store == nil {
+	for n := range p.stages() {
+		if j.store[p.participantIndex(n)] == nil {
 			return ErrDSGExactPreserve
 		}
 	}
@@ -151,7 +180,7 @@ func dsgRecoveryAuthorized(ctx context.Context, p dsgRecoveryPlan) bool {
 func (p dsgRecoveryPlan) claimKeys() (intent []byte, claims [][]byte) {
 	claims = append(claims, []byte("approval/"+p.Request.Approval))
 	for n, domain := range p.stages() {
-		claims = append(claims, []byte("object/"+domain+"/"+p.Objects[n].Key))
+		claims = append(claims, []byte("object/"+domain+"/"+p.object(n).Key))
 	}
 	return []byte("intent/" + p.Request.Intent), claims
 }
@@ -232,7 +261,8 @@ func (j *dsgRecoveryJournal) load(p dsgRecoveryPlan) (state dsgRecoveryState, er
 // An unexplained missing row can never be treated as a completed effect.
 func (j *dsgRecoveryJournal) inspect(ctx context.Context, state dsgRecoveryState) (dsgRecoveryObservation, error) {
 	current := dsgRecoveryUnknown
-	for n, store := range j.store[:len(state.Plan.stages())] {
+	for n := range state.Plan.stages() {
+		store := j.store[state.Plan.participantIndex(n)]
 		if err := ctx.Err(); err != nil {
 			return dsgRecoveryUnknown, err
 		}
@@ -323,7 +353,7 @@ func (j *dsgRecoveryJournal) advance(ctx context.Context, p dsgRecoveryPlan, bar
 			if barrier != nil {
 				barrier("armed")
 			}
-			if err := j.store[n].commit(ctx, p, n); err != nil {
+			if err := j.store[p.participantIndex(n)].commit(ctx, p, n); err != nil {
 				return err
 			}
 			if barrier != nil {
@@ -341,7 +371,7 @@ func (j *dsgRecoveryJournal) advance(ctx context.Context, p dsgRecoveryPlan, bar
 		next.Confirmed++
 		next.Armed = false
 		if next.Confirmed == stages {
-			if p.Mode == dsgNativeTrialMode || p.Mode == dsgNativeDeletionQualification {
+			if p.qualification() {
 				next.TrialProof = p.proof(n)
 			} else {
 				next.Receipt = &DSGExactReceipt{Request: p.Request, LogicalRecords: 1}
