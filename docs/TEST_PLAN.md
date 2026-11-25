@@ -126,6 +126,12 @@ WBS 1.4·2.3의 소유권 시험은 레코드·변형 lease와 읽기 전용 자
 
 별도 쓰기 가능 시험 저장소의 저널에서 스냅샷과 blob의 실제 삭제를 각각 시험한다. 각 효과 전후에 자식 종료를 주입하고 저장소를 다시 연다. 예상한 삭제 효과가 있으면 저널 확인만 기록한다. 효과 전 예상 객체가 없거나 효과 후 상태의 일부가 일치하지 않으면 보존한다. 실제 시험 결과는 대상 삭제 각 1건, 복구 중 삭제 재호출·비대상 변경·운영 회수 영수증 각각 0건이다. 전체 레코드의 승인 회수와 실제 호스트 전원 장애는 각각 별도 게이트로 검증한다. [네이티브 삭제 복구 시험](../integrations/buildkit-exact/cache/dsg_native_deletion_linux_test.go) · [Ubuntu 실측](../dist/dsg-exact-ownership-8d9e8b065edd/QUALIFICATION.json)
 
+### BuildKit 매니페스트 없는 캐시와 전체 레코드 회수 시험
+
+WBS 1.4·2.3의 읽기 전용 관측은 격리 네이티브 `CacheManager`의 `GetRemotes(true)`로 생성한 단일 레이어의 해시·tar·데이터를 독립 대조한다. 생성 프로세스를 종료한 뒤 읽기 전용 ext4에서 정확 ID의 메타데이터·참조·할당 증거를 두 번 조회한다. DB 5개가 불변이고 소유 lease 2개, 자식 view 1개, 콘텐츠 노드 1개와 외부 매니페스트 참조 0건이 일치하면 전체 참조 범위를 배타로 판정한다. 표준 OCI 내보내기에서 외부 매니페스트가 해당 범위를 참조하는 레코드는 보존해야 한다. [캐시 생성 및 관측 시험](../integrations/buildkit-exact/cache/dsg_manifestless_candidate_linux_test.go) · [Ubuntu 실측](../dist/dsg-exact-reclamation-c24288576c86/QUALIFICATION.json)
+
+같은 생성기의 폐기 가능한 단일 레코드와 비대상 피어를 한 저널에 연결한다. 솔버, lease·네임스페이스 메타데이터, 자식 snapshot view, snapshot, blob, cache 각각의 효과 직전과 직후에 자식 종료를 주입한다. 출처에 결속한 증거와 독립 네이티브 API의 최종 조회로 논리적 시험 레코드 1건의 제거를 확인한다. 이미 반영된 효과의 재실행·비대상 변경·운영 회수 영수증이 각각 0건이어야 한다. 운영 수용 시험은 새 활성 대상의 별도 승인과 동일 오프라인 마운트에서의 승인 검증·배타 변경 연결을 요구한다. 호스트 전원 차단은 격리 물리 장비의 별도 검증이다. [전체 레코드 복구 시험](../integrations/buildkit-exact/cache/dsg_native_reclamation_linux_test.go) · [Ubuntu 실측](../dist/dsg-exact-reclamation-c24288576c86/QUALIFICATION.json)
+
 ### Linux ARM64 로컬 제어 서비스 프로브
 
 WBS 5.1의 로컬 읽기 확인은 보호된 root 소켓과 예상 프로세스의 프로토콜 선언을 검증한다. 등록한 서비스의 성공과 소켓 링크·권한·상대 PID·선언 불일치 거절을 확인하고, 성공과 실패 모두 `mutation_authorized=false`와 보존 게이트를 확인한다. 운영 제어기의 출처·권한·배타 변경 경계는 별도로 검증한다. [프로브 구현과 시험](../rust-scaffold/crates/dsg-core/src/docker_control_local.rs)
