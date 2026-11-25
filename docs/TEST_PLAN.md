@@ -160,6 +160,12 @@ Linux ARM64의 전용 변경 어댑터는 동일 배타 슬롯 아래 승인 전
 
 WBS 1.4·5.1은 전용 Ubuntu Parallels ARM64 Moby에서 합성 이미지 한 건의 배포 정책, 프로젝트 등록부, 소유 등록의 전체 ID, 커널이 확인한 현재 피어와 제어기가 보유한 저장소 디렉터리를 대조한다. 독립 Docker 정보의 저장소 경로와 이미지 개수도 확인한다. 미등록 프로젝트와 미등록 전체 ID, 쓰기 가능한 등록, 다른 디렉터리 FD·실행 파일 해시·저장소 표지·프로젝트 지문·배포 정책 원본 해시, 존재하는 SQLite WAL은 모두 보존과 종료 코드 5를 반환해야 한다. 비특권 승인자·실행자의 엔진 직접 연결을 거절하고 TCP 리스너 0개, 등록부 불변, 이미지 1→1, 변경 요청 0건을 확인한다. 별도 관측으로 데몬 리스너의 소유와 격리 경로를 확인한다. 시험에서 대상 API 소켓 한 곳과 경로상 metrics·libnetwork 내부 소켓 두 곳을 root 전용 저장소에서 확인했다. [리스너 실측](../dist/dsg-backend-sockets-b151d4d4d829/QUALIFICATION.json) 두 결과 모두 `mutation_authorized=false`와 `exclusive_mutation=unverified`를 유지해야 한다. [명령 계약](API_SPEC.md#전용-docker-백엔드-읽기-전용-점검) · [Moby 실측](../dist/dsg-backend-ownership-5fbb83f5a031/QUALIFICATION.json) · [Linux 단위 시험 3건](../dist/dsg-backend-unit-2b0490cc66b4/QUALIFICATION.json)
 
+### BuildKit 공개 API와 승인 원장 VM 유실 시험
+
+- 권한 분리. Linux ARM64 제어기는 수락된 로컬 `SOCK_SEQPACKET`에서 커널 UID·PID와 실행 파일 해시를 확인한다. 잘못된 역할, 루트, 요청 본문에 넣은 UID, 적용 의도 불일치, 승인 이전 적용이 모두 거절되어야 한다. 승인 후 폐기 가능한 전용 합성 레코드 한 건은 한 번만 적용되고 재적용은 거절되어야 한다. 새 연결의 영수증은 원본과 같고 재조회 중 네이티브 변경이 0건이어야 한다. [제어기 시험 도구](../scripts/check-buildkit-controller.py)
+- 원장 장애. 원장 부재·다른 inode의 동일 바이트 복사본·절단·소비 전 상태 되감기, 체크포인트 부재·부분 기록에서 적용과 실시간 영수증 조회가 둘 다 거절되어야 한다. 네이티브 DB와 저널을 보존하고 원본 원장·체크포인트 복원 후 동일 영수증을 조회해야 한다. [Go 회귀](../integrations/buildkit-exact/cache/dsg_ledger_recovery_linux_test.go) · [Ubuntu Parallels 실측](../dist/dsg-controller-runtime-5b7ca8e3454a/AUTHORIZED-RESULT.json)
+- VM 유실. 기존 Parallels 밖의 폐기 가능한 VM에서 부팅 세대와 휘발 상태 유실을 확인한다. 이전 등록의 적용·실시간 영수증 요청은 거절되고, 게스트 밖에 사전 고정한 해시와 영수증만 읽기 검증되어야 한다. 물리 호스트 전원·전체 일치 스냅샷 롤백·호스트 아카이브와 고정값 동시 유실은 별도 범위다. [VM 실측](../dist/dsg-controller-runtime-5b7ca8e3454a/VM-LOSS.json) · [호스트 감사 회귀](../scripts/test-buildkit-settled-receipt.py)
+
 ## 에이전트 연동 검증
 
 `sh scripts/test-rust.sh`는 합성 프로젝트의 훅 설치·중복 방지·설정 보존·제거, 허용·거부·잘못된 JSON 응답과 MCP의 읽기 전용 목록·쓰기 거절을 확인한다. 정리 후보를 조회한 뒤 상태 폴더가 생기지 않아야 한다.

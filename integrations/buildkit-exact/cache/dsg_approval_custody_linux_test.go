@@ -64,6 +64,9 @@ func TestDSGNativeSameMountCustody(t *testing.T) {
 		entries, err := os.ReadDir(root)
 		require.NoError(t, err)
 		require.Empty(t, entries)
+		ledger, err := dsgCreateSameMountAuthority(filepath.Join(filepath.Dir(filepath.Dir(root)), "grants.db"))
+		require.NoError(t, err)
+		require.NoError(t, ledger.db.Close())
 		// Keep the original ext4 mount in the keeper's namespace. A separate
 		// procfs at this private staging path exposes the producer as PID 1.
 		proc := filepath.Join(filepath.Dir(filepath.Dir(root)), "producer-proc")

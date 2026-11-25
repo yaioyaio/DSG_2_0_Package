@@ -18,15 +18,12 @@ func TestDSGSameMountOneShotApproval(t *testing.T) {
 	stage := t.TempDir()
 	require.NoError(t, os.Chmod(stage, 0700))
 	path := filepath.Join(stage, "grants.db")
-	authority, err := dsgOpenSameMountAuthority(path)
+	authority, err := dsgCreateSameMountAuthority(path)
 	require.NoError(t, err)
 	defer func() { authority.db.Close() }()
 	hash := func(s string) string { return dsgRecoveryHash([]byte(s)) }
-	source := dsgSameMountSource{Project: hash("project"), Worker: strings.Repeat("a", 25), RecordID: strings.Repeat("b", 25), PayloadSHA256: hash("payload"), LayerSHA256: hash("layer"), Origin: hash("source"), PlanSHA256: hash("plan"), PayloadGeneration: hash("origin-generation")}
-	mount := dsgSameMountIdentity{BootSHA256: hash("boot"), EnrollmentSHA256: hash("enrollment"), MountNS: 1, MountID: 2, UniqueMountID: 3, RootInode: 4, Device: authority.device + 1, FSID: [2]int32{1, 2}}
-	e := dsgSameMountEvidence{source, mount, mount.generation(), dsgSameMountRecord{hash("graph"), hash("metadata"), [5]string{hash("1"), hash("2"), hash("3"), hash("4"), hash("5")}}}
-	r := DSGExactIntent{Project: source.Project, Worker: source.Worker, Generation: e.Generation, RecordID: source.RecordID, MetadataDigest: e.Record.MetadataDigest, Origin: source.Origin, Intent: hash("intent"), Approval: hash("approval"), ApprovedAtMS: time.Now().Add(-time.Second).UnixMilli(), ExpiresAtMS: time.Now().Add(time.Minute).UnixMilli()}
-	g := dsgSameMountGrant{Operation: dsgSameMountOperation, CustodySHA256: hash("custody"), Evidence: e, Request: r}
+	g := dsgTestLedgerGrant(authority.device + 1)
+	r := g.Request
 	require.NoError(t, authority.approve(ctx, g))
 	require.NoError(t, authority.admit(ctx, g))
 	require.ErrorIs(t, authority.approve(ctx, g), ErrDSGExactPreserve)
@@ -65,4 +62,13 @@ func TestDSGSameMountOneShotApproval(t *testing.T) {
 		return err
 	}))
 	require.ErrorIs(t, authority.advance(ctx, g, &receipt), ErrDSGExactPreserve)
+}
+
+func dsgTestLedgerGrant(device uint64) dsgSameMountGrant {
+	hash := func(s string) string { return dsgRecoveryHash([]byte(s)) }
+	source := dsgSameMountSource{Project: hash("project"), Worker: strings.Repeat("a", 25), RecordID: strings.Repeat("b", 25), PayloadSHA256: hash("payload"), LayerSHA256: hash("layer"), Origin: hash("source"), PlanSHA256: hash("plan"), PayloadGeneration: hash("origin-generation")}
+	mount := dsgSameMountIdentity{BootSHA256: hash("boot"), EnrollmentSHA256: hash("enrollment"), MountNS: 1, MountID: 2, UniqueMountID: 3, RootInode: 4, Device: device, FSID: [2]int32{1, 2}}
+	e := dsgSameMountEvidence{source, mount, mount.generation(), dsgSameMountRecord{hash("graph"), hash("metadata"), [5]string{hash("1"), hash("2"), hash("3"), hash("4"), hash("5")}}}
+	r := DSGExactIntent{Project: source.Project, Worker: source.Worker, Generation: e.Generation, RecordID: source.RecordID, MetadataDigest: e.Record.MetadataDigest, Origin: source.Origin, Intent: hash("intent"), Approval: hash("approval"), ApprovedAtMS: time.Now().Add(-time.Second).UnixMilli(), ExpiresAtMS: time.Now().Add(time.Minute).UnixMilli()}
+	return dsgSameMountGrant{Operation: dsgSameMountOperation, CustodySHA256: hash("custody"), Evidence: e, Request: r}
 }

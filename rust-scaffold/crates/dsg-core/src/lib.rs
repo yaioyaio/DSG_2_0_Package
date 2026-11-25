@@ -1,3 +1,5 @@
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+pub mod buildkit_exact_controller;
 pub mod cleanup;
 pub mod compose;
 pub mod docker;

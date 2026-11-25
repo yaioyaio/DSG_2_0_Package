@@ -1,7 +1,7 @@
 use super::*;
 
 mod backend_ownership;
-mod write_request;
+pub(crate) mod write_request;
 pub use backend_ownership::{
     verify_backend_ownership, BackendOwnershipEvidence, BackendOwnershipFailure,
 };
@@ -85,7 +85,7 @@ fn same_boot(configured: &str, current: &str) -> bool {
     configured.len() == 36 && configured == current.trim_end_matches('\n')
 }
 
-fn valid_hash(value: &str) -> bool {
+pub(crate) fn valid_hash(value: &str) -> bool {
     value.len() == 64
         && value
             .bytes()
@@ -157,12 +157,12 @@ impl<'a> ProtectedPolicy<'a> {
     }
 }
 
-fn readable(descriptor: &File) -> Result<File> {
+pub(crate) fn readable(descriptor: &File) -> Result<File> {
     // Reopen the already-validated O_PATH inode, independent of changes to the pathname.
     File::open(format!("/proc/self/fd/{}", descriptor.as_raw_fd())).map_err(io_failure)
 }
 
-fn bounded_read(reader: impl Read, limit: u64) -> Result<Vec<u8>> {
+pub(crate) fn bounded_read(reader: impl Read, limit: u64) -> Result<Vec<u8>> {
     let mut bytes = Vec::new();
     reader
         .take(limit + 1)
@@ -178,7 +178,7 @@ fn same_inode(left: &fs::Metadata, right: &fs::Metadata) -> bool {
     (left.dev(), left.ino()) == (right.dev(), right.ino())
 }
 
-fn compare_metadata(expected: &fs::Metadata, current: &fs::Metadata) -> Result<()> {
+pub(crate) fn compare_metadata(expected: &fs::Metadata, current: &fs::Metadata) -> Result<()> {
     // ctime covers writes, link changes, permission changes, and ownership changes.
     if !same_inode(expected, current)
         || expected.ctime() != current.ctime()
@@ -361,7 +361,11 @@ fn validate_credentials(status: &[u8], expected_uid: u32) -> Result<()> {
     Ok(())
 }
 
-fn executable_hash(file: &File, info: &fs::Metadata, deadline: Instant) -> Result<String> {
+pub(crate) fn executable_hash(
+    file: &File,
+    info: &fs::Metadata,
+    deadline: Instant,
+) -> Result<String> {
     if info.len() > MAX_EXECUTABLE_BYTES {
         return Err(QueryFailure::TooLarge);
     }

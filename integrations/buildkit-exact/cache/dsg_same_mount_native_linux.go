@@ -20,6 +20,8 @@ import (
 // worker was populated. No pathname, bucket or partial ID comes from the grant.
 type dsgSameMountNative struct {
 	input dsgReclaimInput
+	// The public supervisor pins the issuing keeper across every native step.
+	keeperAlive func() bool
 }
 
 func dsgSameMountNativeSource(in dsgReclaimInput) dsgSameMountSource {
@@ -174,6 +176,9 @@ func (n dsgSameMountNative) withJournal(ctx context.Context, fd int, g dsgSameMo
 	// journal transition. Full external-handle scans bracket the native call.
 	root := filepath.Dir(s.root)
 	j.verifyNativeFence = func() error {
+		if n.keeperAlive != nil && !n.keeperAlive() {
+			return ErrDSGExactPreserve
+		}
 		pin, err := dsgSameMountID(fd, root)
 		if err != nil || pin != g.Evidence.Identity {
 			return ErrDSGExactPreserve
