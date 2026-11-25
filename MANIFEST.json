@@ -78,8 +78,8 @@
     },
     {
       "path": "docs/API_SPEC.md",
-      "sha256": "2cb97aa3efddc8f6072602b6b72fa85d20c2b8d5466e23c7a6cc46e64be05e6a",
-      "bytes": 29588
+      "sha256": "039e0ac36a990fad858864a6555b9659f0b59177d068018c05261d31fc059293",
+      "bytes": 30342
     },
     {
       "path": "docs/ARCHITECTURE.md",
@@ -138,13 +138,13 @@
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "005b5ac432dcd3fdec10e6a5b9d0f28db1fb43b105b5c90e5058134acc66fa9f",
-      "bytes": 25286
+      "sha256": "95075ed4000d04c790c6557a213813f909bc710e95d8ae23054533820957fb7b",
+      "bytes": 26212
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "674c72379bbafcf3d475f00b13a251d53546c644b96f6064933f5673a800159a",
-      "bytes": 49063
+      "sha256": "027b9f9366e06f25a8f3c5698f3eebbb011a4c47bacc7104812da4e5d41d419d",
+      "bytes": 51046
     },
     {
       "path": "docs/WBS.md",
@@ -193,8 +193,8 @@
     },
     {
       "path": "integrations/buildkit-exact/cache/dsg_graph_backend_linux.go",
-      "sha256": "1b040b91905b9876375b1e71833c377449c9390caec0bb43b4ffa2e1b03a2e58",
-      "bytes": 13624
+      "sha256": "20cfb736f22ddfae8d7536c9c112d2f0d74edcfda7cffcfcfb9c1964fe4675a8",
+      "bytes": 13873
     },
     {
       "path": "integrations/buildkit-exact/cache/dsg_graph_cache_closure_linux.go",
@@ -228,8 +228,8 @@
     },
     {
       "path": "integrations/buildkit-exact/cache/dsg_graph_linux.go",
-      "sha256": "df20a8d08565bddfb528e5bdfbfeae1d3ba2528043e2a7a036bc1ae829509e09",
-      "bytes": 14318
+      "sha256": "53203aa67b63b43ffd05a654b83bba5193be09e101c051aff41fbb287f045760",
+      "bytes": 14856
     },
     {
       "path": "integrations/buildkit-exact/cache/dsg_graph_linux_test.go",
@@ -237,9 +237,19 @@
       "bytes": 9457
     },
     {
+      "path": "integrations/buildkit-exact/cache/dsg_graph_ownership_linux.go",
+      "sha256": "7d61f09ec8e4fc4f7212f368c6a40947fcac7690d658df15c1857313851981b4",
+      "bytes": 10988
+    },
+    {
+      "path": "integrations/buildkit-exact/cache/dsg_graph_ownership_linux_test.go",
+      "sha256": "d335ab0960597fffca83aa860722cb3316e109fb69a34434aca27ed164a807ff",
+      "bytes": 8868
+    },
+    {
       "path": "integrations/buildkit-exact/cache/dsg_graph_transitive_gc_linux.go",
-      "sha256": "1e6ae977a4ceb02b725d5e7a2ae4ddebc9aa7af18f698b389f4421262422bfd5",
-      "bytes": 11204
+      "sha256": "926aee9cd58c16195435557f9e49c39b36307d801918568351bb7db7ea0f8cf0",
+      "bytes": 11218
     },
     {
       "path": "integrations/buildkit-exact/cache/dsg_graph_transitive_linux.go",
@@ -260,6 +270,16 @@
       "path": "integrations/buildkit-exact/cache/dsg_native_cache_recovery_linux_test.go",
       "sha256": "64403cba105af86a43b567a917e781ea3894aa26562600f6d4b38330835384fa",
       "bytes": 7138
+    },
+    {
+      "path": "integrations/buildkit-exact/cache/dsg_native_deletion_evidence_linux_test.go",
+      "sha256": "0960dcbc440f2ef352d5f0d4575c27793b76d8b7e27be9c1663214808dd39d4d",
+      "bytes": 9536
+    },
+    {
+      "path": "integrations/buildkit-exact/cache/dsg_native_deletion_linux_test.go",
+      "sha256": "6973fa6296bdb74c02a2586572d5c1bc772657285a519d4159ef8d4ff7e81e84",
+      "bytes": 15062
     },
     {
       "path": "integrations/buildkit-exact/cache/dsg_native_isolation_test.go",
@@ -288,8 +308,8 @@
     },
     {
       "path": "integrations/buildkit-exact/cache/dsg_recovery.go",
-      "sha256": "28e8d7a10d7169b3758b2d067e01b365680fc53e076fea45203bb16da0034643",
-      "bytes": 10652
+      "sha256": "bb67a76cae47804212d152a715f3e62ec0b7943f48e3468b667eefb0e34f30b0",
+      "bytes": 11439
     },
     {
       "path": "integrations/buildkit-exact/cache/dsg_recovery_test.go",
@@ -663,8 +683,8 @@
     },
     {
       "path": "scripts/check-buildkit-offline-recovery.py",
-      "sha256": "75cf5cb1012090de2f0dff759f4fe64b5b2e8b9eb0622492892ff669d8de186b",
-      "bytes": 15955
+      "sha256": "423ea8451b46e3b20c1c10970b1dbdc70fb8e49f6ad7744ae0168c7f110b036e",
+      "bytes": 18346
     },
     {
       "path": "scripts/check-cleanup.py",
