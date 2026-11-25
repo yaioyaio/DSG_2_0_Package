@@ -30,7 +30,8 @@
     "dedicated_docker_preapproval": "Existing Ubuntu ARM64 verified read-only prerequisites, then a transient Docker 29.1.3 engine verified a private Unix peer, isolated mount and network, no TCP listener and denied unprivileged clients. Initial inventory was empty. Exactly one untagged no-layer synthetic image matched the expected configuration digest and deterministic archive digest. Delete requests: zero. Guest suspended; the next test used separate approval for this generation and image.",
     "dedicated_docker_live": "The pinned Ubuntu ARM64 engine and approved image were revalidated. One live no-force/no-parent-prune deletion removed the one disposable image (inventory 1 to 0). The reopened Rust registry settled the persisted receipt after a test-induced interruption. One intent, one applied audit, zero open leases; reuse was rejected. The isolated runtime and scratch directory were reclaimed and the guest was suspended. Default Python 14 and Rust 118 passed with the live test ignored by default. The exact live test passed once when explicitly selected.",
     "buildkit_operating_service": "Ubuntu Parallels ARM64 systemd operated one dedicated socket with two system roles. A single synthetic record was applied and the read-only receipt recovery did not call mutation. Same-generation ledger/checkpoint rollback and a diverging external witness were preserved without backend changes. Guest ext4 receipt and macOS-side independent pin were verified after service cleanup, with four availability cases. Physical host power loss and production project rollout remain separate.",
-    "buildkit_project_enrollment": "A pinned Ubuntu ARM64 BuildKit dedicated worker accepted tracked DSG README bytes. The project revision, source SHA-256, LLB, OCI export, native worker and record IDs were bound and four native DB digests were unchanged by read-only qualification. A separate QEMU full VM snapshot restored coherent synthetic RAM and ext4 markers. The off-VM latest marker differed. Production rollout, application-level full-snapshot rejection and physical power interruption are still unverified."
+    "buildkit_project_enrollment": "A pinned Ubuntu ARM64 BuildKit dedicated worker accepted tracked DSG README bytes. The project revision, source SHA-256, LLB, OCI export, native worker and record IDs were bound and four native DB digests were unchanged by read-only qualification. A separate QEMU full VM snapshot restored coherent synthetic RAM and ext4 markers. The off-VM latest marker differed. Production rollout, application-level full-snapshot rejection and physical power interruption are still unverified.",
+    "buildkit_external_freshness": "Independent issuance verified a stopped Ubuntu ARM64 worker with five native DBs unchanged. Public apply was preserved when external freshness was absent or denied. The actual Go freshness client used a protected relay to a host authority outside a QEMU full snapshot. One synthetic external claim was recorded and a request after the pre-request restore was denied. Native mutation calls were zero. Production rollout, restoration after the success reply, and a physical power cut remain separate."
   },
   "files": [
     {
@@ -80,8 +81,8 @@
     },
     {
       "path": "docs/API_SPEC.md",
-      "sha256": "6d933caf7c21ef6c1d9cc392ed64c66158a09e7af558699fbabe5a90fa442ac4",
-      "bytes": 36290
+      "sha256": "fecca5718610f1c3cf8802cfb888a151f3cdd68892baf91fb5199b757eaec625",
+      "bytes": 39215
     },
     {
       "path": "docs/ARCHITECTURE.md",
@@ -95,8 +96,8 @@
     },
     {
       "path": "docs/OPERATIONS.md",
-      "sha256": "6e677cb01473eabacbf251b10f7deab1395ac8142e659a109185f9196f1cfc4e",
-      "bytes": 13037
+      "sha256": "09acb6a04887ce43b200a8c683a6c3ba46a6dea908e9b060507ef0d7bb24c8a5",
+      "bytes": 15878
     },
     {
       "path": "docs/PLAN.md",
@@ -140,13 +141,13 @@
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "6442f8cff72ed2c5e8365844c2770483e3dd76a946a2a08700eeee60311e6c34",
-      "bytes": 30471
+      "sha256": "d6d795ad9fd874afe32039c4aa32c9d48d3054e8d82f1175b8afb2dde978435c",
+      "bytes": 30829
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "897c704ffe2bde4eaa6d7b11723c624d8ec47f7a95c56e3bf8f35b0fcf2cf50b",
-      "bytes": 62180
+      "sha256": "714c6f81c4e42ff3d9674b9c13609b4a4ccd11fbf41b7e1ec6e1d19a6be5d0ad",
+      "bytes": 63337
     },
     {
       "path": "docs/WBS.md",
@@ -187,6 +188,16 @@
       "path": "integrations/buildkit-exact/cache/dsg_exact_test.go",
       "sha256": "8116028ca79edc7424d841a471e9b173a3185e5771cc0edf51bee3274cdca176",
       "bytes": 11214
+    },
+    {
+      "path": "integrations/buildkit-exact/cache/dsg_external_freshness_linux.go",
+      "sha256": "1894ca80415053f474ece26d290da59acdf29fde2b54a6799023d94fb17f1c0f",
+      "bytes": 2785
+    },
+    {
+      "path": "integrations/buildkit-exact/cache/dsg_external_freshness_linux_test.go",
+      "sha256": "bd30f2ded9c8b034c7cb173c3b269bedba90fd1178d812a8841c995a19c1e806",
+      "bytes": 3515
     },
     {
       "path": "integrations/buildkit-exact/cache/dsg_graph_allocations_linux.go",
@@ -270,8 +281,8 @@
     },
     {
       "path": "integrations/buildkit-exact/cache/dsg_ledger_recovery_linux.go",
-      "sha256": "d1b7255f0394a32039ee887d7caa5e4dbd479c009e81560b50afef2b106d42d4",
-      "bytes": 8279
+      "sha256": "2ad98e431390640c31da4df2308a52a230c0dd212a34c5e009baf3185edc40f8",
+      "bytes": 8596
     },
     {
       "path": "integrations/buildkit-exact/cache/dsg_ledger_recovery_linux_test.go",
@@ -325,8 +336,8 @@
     },
     {
       "path": "integrations/buildkit-exact/cache/dsg_operator_linux.go",
-      "sha256": "13cf1605584f5f33405cf096f303c947f89fac65532ba4ee351f0e260e683caa",
-      "bytes": 11842
+      "sha256": "3edec586aaf5f25ac3196b0c5047acb84896f811dfe7e6498f97ddc4ce536f1c",
+      "bytes": 12019
     },
     {
       "path": "integrations/buildkit-exact/cache/dsg_operator_linux_test.go",
@@ -370,8 +381,8 @@
     },
     {
       "path": "integrations/buildkit-exact/cache/dsg_same_mount_linux.go",
-      "sha256": "f0b929e8ae5a51877634290edf054a51fad7a96bea0b2605be3385e4b2249b45",
-      "bytes": 16904
+      "sha256": "59fb5b54eb0f188985c64b03d9504cf1217db591ab82853cbf98814a5f8afd9e",
+      "bytes": 18090
     },
     {
       "path": "integrations/buildkit-exact/cache/dsg_same_mount_native_linux.go",
@@ -764,6 +775,11 @@
       "bytes": 3089
     },
     {
+      "path": "scripts/buildkit-freshness-authority.py",
+      "sha256": "1e99fe0ce65b2519d9ece3c093954579852c4634dbf078d8d0d184d242e19abe",
+      "bytes": 6972
+    },
+    {
       "path": "scripts/check-agent-integration.py",
       "sha256": "a386c7acae34d2c32b0e7bfb90b130e72b4c5b4867ff6d43cc85811156062546",
       "bytes": 22349
@@ -792,6 +808,11 @@
       "path": "scripts/check-buildkit-offline-recovery.py",
       "sha256": "f8e1a8600bf1813fe84679a39def6595d2958325d2c558b3783bb6767df07ef3",
       "bytes": 25167
+    },
+    {
+      "path": "scripts/check-buildkit-project-registration.py",
+      "sha256": "a0417f36b42f268394a171e5f117e368ef81506b59a361e44e6fe7508b55cd1c",
+      "bytes": 17258
     },
     {
       "path": "scripts/check-buildkit-settled-receipt.py",
@@ -897,6 +918,16 @@
       "path": "scripts/release-package.py",
       "sha256": "9ea0e66b725bb09bdde88abe62541c94eba1935675783f5f302c607a74b3dc0b",
       "bytes": 32071
+    },
+    {
+      "path": "scripts/test-buildkit-freshness-authority.py",
+      "sha256": "aa28412f29c0c9a80f79abaf9335c416e178ea5330e93843ae930505b1fda1cd",
+      "bytes": 7543
+    },
+    {
+      "path": "scripts/test-buildkit-project-registration.py",
+      "sha256": "2d8a5da9ee4c574666cbeb1ffec972f6011cb3c319b49bddb20e491421faa570",
+      "bytes": 9600
     },
     {
       "path": "scripts/test-buildkit-settled-receipt.py",

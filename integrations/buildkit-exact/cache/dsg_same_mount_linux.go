@@ -306,7 +306,11 @@ func dsgReadSameMountState(tx *bolt.Tx, g dsgSameMountGrant) (dsgSameMountState,
 }
 
 func (a *dsgSameMountAuthority) advance(ctx context.Context, g dsgSameMountGrant, receipt *DSGExactReceipt) error {
-	return a.update(func(tx *bolt.Tx) error {
+	return a.advanceFrom(ctx, g, receipt, nil)
+}
+
+func (a *dsgSameMountAuthority) advanceFrom(ctx context.Context, g dsgSameMountGrant, receipt *DSGExactReceipt, expected []byte) error {
+	return a.updateIfCurrent(expected, func(tx *bolt.Tx) error {
 		s, err := dsgReadSameMountState(tx, g)
 		if err != nil {
 			return err
@@ -385,6 +389,33 @@ func dsgSameMountFailure(phase string, err error) error {
 	return dsgSameMountPhaseError{phase, err}
 }
 
+// Bind the external claim to the approved phase and to the exact checkpoint
+// later used for the local transition. A lost reply leaves the mount read-only.
+func (a *dsgSameMountAuthority) claimApprovedCheckpoint(ctx context.Context, g dsgSameMountGrant) ([]byte, error) {
+	if a.claimFreshness == nil {
+		return nil, nil
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	digest := a.currentDigest()
+	if digest == nil || !g.active(ctx) {
+		return nil, ErrDSGExactPreserve
+	}
+	if err := a.db.View(func(tx *bolt.Tx) error {
+		state, err := dsgReadSameMountState(tx, g)
+		if err != nil || state.Phase != "approved" {
+			return ErrDSGExactPreserve
+		}
+		return nil
+	}); err != nil {
+		return nil, ErrDSGExactPreserve
+	}
+	if err := a.claimFreshness(ctx, g, string(digest)); err != nil {
+		return nil, ErrDSGExactPreserve
+	}
+	return digest, nil
+}
+
 func (a *dsgSameMountAuthority) apply(ctx context.Context, root string, g dsgSameMountGrant, native dsgSameMountParticipant, remount dsgSameMountRemount) (DSGExactReceipt, error) {
 	var empty DSGExactReceipt
 	if !a.admissible(g) || !g.active(ctx) || native == nil || remount == nil {
@@ -413,7 +444,11 @@ func (a *dsgSameMountAuthority) apply(ctx context.Context, root string, g dsgSam
 		return empty, dsgSameMountFailure("ro_evidence", nil)
 	}
 	// Sync the one-shot claim before the first attempt to make the mount writable.
-	if err = a.advance(ctx, g, nil); err != nil {
+	checkpoint, err := a.claimApprovedCheckpoint(ctx, g)
+	if err != nil {
+		return empty, dsgSameMountFailure("external_freshness", err)
+	}
+	if err = a.advanceFrom(ctx, g, nil, checkpoint); err != nil {
 		return empty, dsgSameMountFailure("consume", err)
 	}
 	applied, err := func() (out DSGExactReceipt, result error) {
