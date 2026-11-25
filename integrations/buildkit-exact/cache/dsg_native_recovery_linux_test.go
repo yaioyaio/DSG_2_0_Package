@@ -23,6 +23,7 @@ import (
 	"github.com/containerd/containerd/v2/core/metadata/boltutil"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/containerd/containerd/v2/plugins/snapshots/native"
+	"github.com/moby/buildkit/cache/metadata"
 	"github.com/moby/buildkit/identity"
 	"github.com/moby/buildkit/solver"
 	"github.com/moby/buildkit/solver/bboltcachestorage"
@@ -30,9 +31,9 @@ import (
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
+	"golang.org/x/sys/unix"
 )
 
-const dsgNativeTrialMode = "native-solver-and-protective-lease-trial-v1"
 const dsgSolverEscrow = "_dsg_trial_solver_escrow_v1"
 
 // Only the child that exclusively created this fresh worker seeds its native
@@ -40,6 +41,7 @@ const dsgSolverEscrow = "_dsg_trial_solver_escrow_v1"
 type dsgNativeTrial struct {
 	root                  string
 	solverDB, containerDB *bolt.DB
+	cacheStore            *metadata.Store
 	lm                    leases.Manager
 	p                     dsgRecoveryPlan
 }
@@ -160,8 +162,7 @@ func (s *dsgNativeTrial) leaseState(ctx context.Context, tx *bolt.Tx) (dsgRecove
 	return dsgRecoveryAfter, nil
 }
 
-// These three stages only observe the real trial cache DB, snapshot DB and
-// allocation directories, and all generated content blobs. They cannot commit.
+// Bounded physical inventory of generated fixture files.
 func dsgTrialAllocations(root string, n int) (string, error) {
 	var names []string
 	switch n {
@@ -174,6 +175,10 @@ func dsgTrialAllocations(root string, n int) (string, error) {
 	default:
 		return "", ErrDSGExactPreserve
 	}
+	return dsgTrialFiles(root, names)
+}
+
+func dsgTrialFiles(root string, names []string) (string, error) {
 	h := sha256.New()
 	var walk func(string, int) error
 	walk = func(rel string, depth int) error {
@@ -203,7 +208,11 @@ func dsgTrialAllocations(root string, n int) (string, error) {
 				return err
 			}
 			defer f.Close()
-			fmt.Fprintf(h, "%d:", st.Size())
+			var inode unix.Stat_t
+			if err := unix.Fstat(int(f.Fd()), &inode); err != nil {
+				return err
+			}
+			fmt.Fprintf(h, "%d:%d:%d:%d:%d:", st.Size(), inode.Dev, inode.Ino, inode.Mtim.Sec, inode.Mtim.Nsec)
 			if _, err := io.CopyN(h, f, st.Size()); err != nil {
 				return err
 			}
@@ -230,11 +239,7 @@ func (s *dsgNativeTrial) observe(ctx context.Context, p dsgRecoveryPlan, n int) 
 	case 1:
 		err = s.containerDB.View(func(tx *bolt.Tx) error { out, err = s.leaseState(ctx, tx); return err })
 	default:
-		hash, err := dsgTrialAllocations(s.root, n)
-		if err != nil || hash != p.Objects[n].BeforeSHA256 {
-			return dsgRecoveryUnknown, ErrDSGExactPreserve
-		}
-		return dsgRecoveryBefore, nil
+		return s.observeBacking(ctx, n)
 	}
 	return out, err
 }
@@ -286,7 +291,7 @@ func (s *dsgNativeTrial) commit(ctx context.Context, p dsgRecoveryPlan, n int) e
 			return nil
 		})
 	default:
-		return ErrDSGExactPreserve
+		return s.commitBacking(ctx, n)
 	}
 }
 
@@ -301,6 +306,10 @@ func dsgOpenNativeTrial(t *testing.T, root string, p dsgRecoveryPlan) (*dsgNativ
 		return db
 	}
 	s := &dsgNativeTrial{root: root, p: p, solverDB: open("cache.db"), containerDB: open("containerdmeta.db")}
+	_, err := os.Lstat(filepath.Join(root, "metadata.db"))
+	require.NoError(t, err)
+	s.cacheStore, err = metadata.NewStore(filepath.Join(root, "metadata.db"))
+	require.NoError(t, err)
 	s.lm = ctdmetadata.NewLeaseManager(ctdmetadata.NewDB(s.containerDB, nil, nil))
 	j := &dsgRecoveryJournal{root: root, qualificationMode: dsgNativeTrialMode, db: open("trial-journal.db")}
 	for n := range j.store {
@@ -310,6 +319,7 @@ func dsgOpenNativeTrial(t *testing.T, root string, p dsgRecoveryPlan) (*dsgNativ
 }
 func dsgCloseNativeTrial(t *testing.T, s *dsgNativeTrial, j *dsgRecoveryJournal) {
 	t.Helper()
+	require.NoError(t, s.cacheStore.Close())
 	require.NoError(t, s.solverDB.Close())
 	require.NoError(t, s.containerDB.Close())
 	require.NoError(t, j.db.Close())
@@ -331,15 +341,19 @@ func dsgSeedNativeTrial(t *testing.T, ctx context.Context, root string) (*dsgNat
 	db, err := bboltcachestorage.NewStore(filepath.Join(root, "cache.db"))
 	require.NoError(t, err)
 	for n := 0; n < 2; n++ {
-		record, err := worker.manager.New(ctx, nil, nil, CachePolicyRetain)
+		record, err := worker.manager.New(ctx, nil, nil, CachePolicyDefault)
 		require.NoError(t, err)
 		id := record.ID()
 		data := []byte("generated trial payload " + id)
 		dg := digest.FromBytes(data)
 		desc := ocispec.Descriptor{Digest: dg, Size: int64(len(data))}
 		require.NoError(t, content.WriteBlob(leases.WithLease(ctx, id), worker.cs, id, bytes.NewReader(data), desc))
-		_, err = worker.testSnapshotter.Stat(ctx, id)
+		mounts, err := worker.testSnapshotter.Mounts(ctx, id)
 		require.NoError(t, err)
+		require.Len(t, mounts, 1)
+		require.Equal(t, filepath.Join(root, "snapshots", "snapshots"), filepath.Dir(mounts[0].Source))
+		file := filepath.Join(mounts[0].Source, "trial-payload")
+		dsgBackingWrite(t, file, data)
 		_, err = worker.cs.Info(ctx, dg)
 		require.NoError(t, err)
 		node := digest.FromString("trial node " + id).String()
@@ -354,6 +368,12 @@ func dsgSeedNativeTrial(t *testing.T, ctx context.Context, root string) (*dsgNat
 			p.Objects[2].Key = id
 			p.Objects[3].Key = dg.String()
 			p.Objects[4].Key = id
+			// Seed the staging allocation with the actual target file. The
+			// original worker snapshot and its lease continue to resolve.
+			allocation := dsgBackingPrepare(t, ctx, sn, root, dsgTrialActive(p), "")
+			copyData, err := os.ReadFile(file)
+			require.NoError(t, err)
+			dsgBackingWrite(t, dsgBackingSnapshotPath(root, allocation, "trial-payload"), copyData)
 		}
 	}
 	require.NoError(t, db.Close())
@@ -366,101 +386,131 @@ func dsgSeedNativeTrial(t *testing.T, ctx context.Context, root string) (*dsgNat
 	require.NoError(t, s.solverDB.View(func(tx *bolt.Tx) error { p.Objects[0].NonTargetSHA256, err = s.solverPeers(tx); return err }))
 	require.NoError(t, s.containerDB.View(func(tx *bolt.Tx) error { p.Objects[1].NonTargetSHA256, err = s.containerPeers(tx); return err }))
 	p.Objects[1].BeforeSHA256 = p.Objects[1].NonTargetSHA256
-	for n := 2; n < len(p.Objects); n++ {
-		p.Objects[n].BeforeSHA256, err = dsgTrialAllocations(root, n)
-		require.NoError(t, err)
-		p.Objects[n].NonTargetSHA256 = p.Objects[n].BeforeSHA256
-	}
+	p.Objects[2], _, err = s.snapshotEvidence()
+	require.NoError(t, err)
+	p.Objects[3], _, err = s.blobEvidence()
+	require.NoError(t, err)
+	require.NoError(t, s.cacheStore.DB().View(func(tx *bolt.Tx) error {
+		g, err := s.cacheGrant(tx)
+		if err != nil {
+			return err
+		}
+		p.Objects[4].NonTargetSHA256, err = g.peers(tx)
+		if err != nil {
+			return err
+		}
+		p.Objects[4].BeforeSHA256, err = dsgTrialTree(tx, func([]string) bool { return false })
+		return err
+	}))
 	p.Request.MetadataDigest = p.Objects[4].BeforeSHA256
 	raw, err := json.Marshal(p.Objects)
 	require.NoError(t, err)
 	p.GraphSHA256 = dsgRecoveryHash(raw)
 	s.p = p
-	raw, err = json.Marshal(p)
-	require.NoError(t, err)
-	f, err := os.OpenFile(filepath.Join(root, "trial-plan.json"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-	require.NoError(t, err)
-	_, err = f.Write(raw)
-	require.NoError(t, err)
-	require.NoError(t, f.Sync())
-	require.NoError(t, f.Close())
 	return s, j
 }
 
-func TestDSGNativeSolverRecovery(t *testing.T) {
+func TestDSGNativeJournalRecovery(t *testing.T) {
 	ctx := namespaces.WithNamespace(t.Context(), dsgGraphNamespace)
 	args := os.Args
-	if len(args) > 2 && args[len(args)-2] == "dsg-new-native-trial" {
-		parent, err := os.Readlink("/proc/self/fd/3")
+	if len(args) > 2 && args[len(args)-2] == "dsg-native-journal-effect" {
+		stage := slices.Index(dsgRecoveryDomains[:], args[len(args)-1])
+		require.NotEqual(t, -1, stage)
+		root, err := os.Readlink("/proc/self/fd/3")
 		require.NoError(t, err)
-		root := filepath.Join(parent, "fresh-native-trial")
-		require.NoError(t, os.Mkdir(root, 0700)) // cannot open an existing worker
-		s, j := dsgSeedNativeTrial(t, ctx, root)
-		require.NoError(t, j.begin(ctx, s.p))
-		if args[len(args)-1] == "lease" {
-			require.NoError(t, j.advance(ctx, s.p, nil))
-		}
-		err = j.advance(ctx, s.p, func(point string) {
+		var p dsgRecoveryPlan
+		require.NoError(t, json.NewDecoder(io.LimitReader(os.Stdin, 8192)).Decode(&p))
+		require.True(t, p.valid(dsgNativeTrialMode))
+		s, j := dsgOpenNativeTrial(t, root, p)
+		state, err := j.status(ctx, s.p)
+		require.NoError(t, err)
+		require.False(t, state.Armed)
+		require.Equal(t, stage, state.Confirmed)
+		err = j.advance(ctx, p, func(point string) {
 			if point == "effect" {
 				os.Exit(86)
 			}
 		})
-		t.Fatalf("expected exit after native commit, got %v", err)
+		t.Fatalf("expected exit immediately after native effect, got %v", err)
 	}
-	for stage, domain := range []string{"solver", "lease"} {
-		t.Run(domain, func(t *testing.T) {
-			parent := t.TempDir()
-			dir, err := os.Open(parent)
-			require.NoError(t, err)
-			defer dir.Close()
-			exe, err := os.Executable()
-			require.NoError(t, err)
+
+	parent := t.TempDir()
+	root := filepath.Join(parent, "fresh-native-trial")
+	require.NoError(t, os.Mkdir(root, 0700))
+	var fs unix.Statfs_t
+	require.NoError(t, unix.Statfs(root, &fs))
+	require.Equal(t, int64(unix.EXT4_SUPER_MAGIC), int64(fs.Type))
+	dir, err := os.Open(root)
+	require.NoError(t, err)
+	defer dir.Close()
+	s, j := dsgSeedNativeTrial(t, ctx, root)
+	p := s.p
+	require.NoError(t, j.begin(ctx, p))
+	dsgCloseNativeTrial(t, s, j)
+	raw, err := json.Marshal(p)
+	require.NoError(t, err)
+	exe, err := os.Executable()
+	require.NoError(t, err)
+	for stage, domain := range dsgRecoveryDomains {
+		ok := t.Run(domain, func(t *testing.T) {
 			childCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
 			defer cancel()
-			cmd := exec.CommandContext(childCtx, exe, "-test.run=^TestDSGNativeSolverRecovery$", "--", "dsg-new-native-trial", domain)
+			cmd := exec.CommandContext(childCtx, exe, "-test.run=^TestDSGNativeJournalRecovery$", "--", "dsg-native-journal-effect", domain)
 			cmd.Env = []string{"TMPDIR=" + parent}
 			cmd.ExtraFiles = []*os.File{dir}
-			// Every child operates only on data that it generated in a new directory.
+			cmd.Stdin = bytes.NewReader(raw)
 			out, err := cmd.CombinedOutput()
 			require.NotNil(t, cmd.ProcessState)
 			if cmd.ProcessState.ExitCode() != 86 {
-				// Report only source locations from the generated test, never raw child logs.
-				lines := regexp.MustCompile(`dsg_native_recovery_linux_test\.go:[0-9]+`).FindAll(out, 6)
+				lines := regexp.MustCompile(`dsg_native_[a-z_]+_test\.go:[0-9]+`).FindAll(out, 6)
 				t.Fatalf("native child failed: %v (%s)", err, lines)
 			}
-			root := filepath.Join(parent, "fresh-native-trial")
-			raw, err := os.ReadFile(filepath.Join(root, "trial-plan.json"))
-			require.NoError(t, err)
-			var p dsgRecoveryPlan
-			require.NoError(t, json.Unmarshal(raw, &p))
 			s, j := dsgOpenNativeTrial(t, root, p)
+			defer dsgCloseNativeTrial(t, s, j)
 			state, err := j.status(ctx, p)
 			require.NoError(t, err)
 			require.True(t, state.Armed)
 			require.Equal(t, stage, state.Confirmed)
 			require.Nil(t, state.Receipt)
-			for n := stage; n < 2; n++ {
-				require.NoError(t, j.advance(ctx, p, nil))
-			}
+			require.Empty(t, state.TrialProof)
+			var barriers []string
+			require.NoError(t, j.advance(ctx, p, func(point string) { barriers = append(barriers, point) }))
+			require.Equal(t, []string{"ack"}, barriers)
 			state, err = j.status(ctx, p)
 			require.NoError(t, err)
-			require.Equal(t, 2, state.Confirmed)
+			require.False(t, state.Armed)
+			require.Equal(t, stage+1, state.Confirmed)
 			require.Nil(t, state.Receipt)
-			require.ErrorIs(t, j.advance(ctx, p, nil), ErrDSGExactPreserve)
-			require.ErrorIs(t, j.begin(ctx, p), ErrDSGExactPreserve)
-			dsgCloseNativeTrial(t, s, j)
-			db, err := bboltcachestorage.NewStore(filepath.Join(root, "cache.db"))
-			require.NoError(t, err)
-			_, err = db.Load(p.Objects[0].Key, p.Request.Worker+"::"+p.Request.RecordID)
-			require.ErrorIs(t, err, solver.ErrNotFound)
-			seen := 0
-			require.NoError(t, db.WalkIDsByResult(p.Request.Worker+"::"+p.Request.RecordID, func(string) error { seen++; return nil }))
-			require.Zero(t, seen)
-			require.NoError(t, db.Walk(func(node string) error {
-				return db.WalkResults(node, func(r solver.CacheResult) error { seen++; return nil })
-			}))
-			require.Equal(t, 1, seen)
-			require.NoError(t, db.Close())
+			if stage+1 == len(p.Objects) {
+				require.Equal(t, p.proof(stage), state.TrialProof)
+				fabricated := state
+				fabricated.TrialProof = ""
+				fabricated.Receipt = &DSGExactReceipt{Request: p.Request, LogicalRecords: 1}
+				require.False(t, fabricated.valid(p))
+				require.ErrorIs(t, j.advance(ctx, p, nil), ErrDSGExactPreserve)
+				require.ErrorIs(t, j.begin(ctx, p), ErrDSGExactPreserve)
+				target, ok := s.cacheStore.Get(p.Request.RecordID)
+				require.True(t, ok)
+				require.True(t, (&cacheMetadata{si: target}).HasCachePolicyRetain())
+			} else {
+				require.Empty(t, state.TrialProof)
+			}
 		})
+		if !ok {
+			t.FailNow()
+		}
 	}
+	db, err := bboltcachestorage.NewStore(filepath.Join(root, "cache.db"))
+	require.NoError(t, err)
+	_, err = db.Load(p.Objects[0].Key, p.Request.Worker+"::"+p.Request.RecordID)
+	require.ErrorIs(t, err, solver.ErrNotFound)
+	seen := 0
+	require.NoError(t, db.WalkIDsByResult(p.Request.Worker+"::"+p.Request.RecordID, func(string) error { seen++; return nil }))
+	require.Zero(t, seen)
+	require.NoError(t, db.Walk(func(node string) error {
+		return db.WalkResults(node, func(r solver.CacheResult) error { seen++; return nil })
+	}))
+	require.Equal(t, 1, seen)
+	require.NoError(t, db.Close())
+	t.Log(dsgNativeTrialMode)
 }

@@ -41,7 +41,7 @@ Linux ARM64의 `dsg --json buildkit-local-cache --socket <절대 Unix 소켓> --
 
 전용 모드와 오프라인 조회에 `--dsg-require-quiescence`를 주면 등록한 Linux PID 네임스페이스 세대와 로컬 ext4 저장소를 고정한다. 기동은 별도 PID 네임스페이스의 PID 1에서만 등록한다. 조회는 그 세대가 사라지고 ext4 전체가 읽기 전용인 시점에만 시작한다. 관련 마운트·태스크·열린 핸들을 읽기 전후에 점검하며, 가시성을 확인할 수 없는 경우는 거절한다. 엄격 조회의 `quiescence`에 네 경계의 검사 결과를 제공한다. [정지 점검 구현](../integrations/buildkit-exact/cache/dsg_quiescence_linux.go)
 
-정확 ID 조회는 하나의 전용 잠금에서 기존 네 저장소와 존재하는 빌드 이력 DB의 읽기 전용 트랜잭션을 고정한다. `graph`는 캐시, 솔버, containerd, 스냅샷, blob에서 확인한 직접 연결과 `references_sha256`, 미확인 범위 및 보존 판정을 반환한다. `transitive`는 솔버 양방향 인덱스와 지원하는 GC 라벨의 도달 범위 및 미해결 자원을 집계한다. `external`은 이미지·컨테이너·ingest·빌드 이력과 외부 캐시 메타데이터의 지원 형식을 집계한다. 해석할 수 없는 항목, 캐시 부모·별칭의 전이와 물리 내용은 미확인 범위로 기록하고 보존 판정을 유지한다. [참조 대조 구현](../integrations/buildkit-exact/cache/dsg_graph_linux.go)
+정확 ID 조회는 하나의 전용 잠금에서 기존 네 저장소와 존재하는 빌드 이력 DB의 읽기 전용 트랜잭션을 고정한다. `graph`는 캐시, 솔버, containerd, 스냅샷, blob에서 확인한 직접 연결과 `references_sha256`, 미확인 범위 및 보존 판정을 반환한다. `transitive`는 솔버 양방향 인덱스와 지원하는 GC 라벨의 도달 범위 및 미해결 자원을 집계한다. `external`은 이미지·컨테이너·ingest·빌드 이력과 외부 캐시 메타데이터의 지원 형식을 집계한다. `transitive.cache_records`는 캐시 부모·자식과 양방향 별칭 경로의 제한된 탐색 결과다. `native_allocations`에는 확인된 inode, 메타데이터 SHA-256과 할당 블록을 제공한다. 일반 조회에서 파일 내용과 확장 속성은 미확인으로 기록하고 보존 판정을 유지한다. [참조 대조 구현](../integrations/buildkit-exact/cache/dsg_graph_linux.go)
 
 ### 로컬 Docker 제어 서비스 읽기 확인
 

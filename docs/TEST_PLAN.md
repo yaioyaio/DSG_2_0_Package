@@ -118,6 +118,8 @@ BuildKit v0.35.1 소스 오버레이는 공식 캐시 관리자와 네이티브 
 
 Parallels의 별도 쓰기 가능 ext4 loop에서 시험용 실제 저장소를 사용한다. 공통 저널은 솔버 양방향 인덱스의 보관과 보호 lease 연결 커밋 직후 중단 및 재개를 확인한다. 별도 시험은 공식 native 스냅샷 커밋, 내용 주소 blob 기록, 캐시 보존 정책 retain을 각각 커밋하고 자식 종료 후 재개방한다. 모든 시험에서 비대상 불변과 중복 변경 거절을 확인한다. 실제 회수용 공통 저널의 스냅샷·blob·캐시 단계와 전체 회수 영수증은 닫힌 상태다. 별도 읽기 전용 실측에서는 정확 ID의 전이·외부 참조와 반복 조회 해시, 이력 포함 DB 5개 불변을 확인한다. [전용 네이티브 시험](../integrations/buildkit-exact/cache/dsg_native_recovery_linux_test.go) · [쓰기 실측](../dist/dsg-native-recovery-writable-ab1ea3f2191c/QUALIFICATION.json) · [읽기 실측](../dist/dsg-native-recovery-1b54a76ab439/QUALIFICATION.json)
 
+같은 시험 워커와 같은 저널의 네이티브 통합 시험은 솔버·lease·snapshot·blob·cache를 순서대로 적용한다. 각 효과 커밋 직후 자식을 종료하고 재개에서 저널 확인만 기록하는지 검증한다. 완료는 `native-five-stage-trial-v1` 시험 증명으로 확인하고 삭제 영수증 대입을 거절한다. 별도 읽기 전용 시험은 합성 scratch LLB의 OCI 계층과 inode가 일치하는 생성 파일·blob만 내용 대조에 사용한다. 일반 조회는 내용 없이 할당 구조를 판독한다. [네이티브 통합 시험](../integrations/buildkit-exact/cache/dsg_native_recovery_linux_test.go) · [Ubuntu 최종 실측](../dist/dsg-e2e-recovery-c306f911edac/QUALIFICATION.json) · [내보내기 없는 후보 실측](../dist/dsg-e2e-recovery-selection-169c44319405/QUALIFICATION.json)
+
 ### Linux ARM64 로컬 제어 서비스 프로브
 
 WBS 5.1의 로컬 읽기 확인은 보호된 root 소켓과 예상 프로세스의 프로토콜 선언을 검증한다. 등록한 서비스의 성공과 소켓 링크·권한·상대 PID·선언 불일치 거절을 확인하고, 성공과 실패 모두 `mutation_authorized=false`와 보존 게이트를 확인한다. 운영 제어기의 출처·권한·배타 변경 경계는 별도로 검증한다. [프로브 구현과 시험](../rust-scaffold/crates/dsg-core/src/docker_control_local.rs)

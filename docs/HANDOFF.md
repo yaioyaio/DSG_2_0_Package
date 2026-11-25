@@ -343,3 +343,12 @@ DSG-08의 `f6397b2`를 PR #15로 `develop`, PR #16으로 `main`에 반영했다.
 - 별도의 쓰기 가능 ext4에서 다섯 저장소에 시험용 실제 변경을 가하고 커밋 직후 각 자식 프로세스를 종료했다. 공통 저널은 솔버 인덱스 보관과 보호 lease를 확인하고 중복 적용을 차단했다. 독립 시험은 네이티브 스냅샷 커밋, 내용 주소 blob 기록, 캐시 정책 retain의 단계 증거를 재개방 후 확인했다. 각 시험의 비대상 변경은 0건이다. 실제 삭제와 전체 회수 영수증은 발생하지 않았다. [쓰기·중단 실측](../dist/dsg-native-recovery-writable-ab1ea3f2191c/QUALIFICATION.json)
 - macOS Python 14건, Go 최상위 13건·하위 50건을 통과했다. Ubuntu Go 회귀 27건과 별도 네이티브 시험 3건이 통과했다. 임시 loop와 시험 자료를 회수했으며 Ubuntu VM을 일시정지로 복귀시켰다. 보조 워크트리 생성·회수·잔여는 각 0개다. [macOS 근거](../dist/dsg-native-recovery-macos-667d98e/QUALIFICATION.json)
 - 미완료 범위는 스냅샷·blob·캐시의 실제 회수 단계를 공통 저널에 연결하고, 캐시 전이와 실제 할당 관계를 포함한 정확 범위를 확인하는 일이다. 이 경계를 통과한 활성 새 대상에서만 별도 회수 승인을 요청한다. 격리 물리 시험기에 대한 기존 보류 상태도 유지한다. [백로그](BACKLOG.md#환경승인-조건이-남은-항목)
+
+## BuildKit 다섯 단계 네이티브 저널과 할당 검증
+
+- 2026-11-25, DSG-03·05·07, WBS 1.4·2.3·5.1. `feature/20261125-buildkit-end-to-end-recovery`, 기준 HEAD `23e0c21`. 남은 캐시 부모·별칭 전이와 네이티브 할당 검증, 한 저널의 다섯 저장소 변경·중단 복구를 이어서 진행한다. 실제 파괴적 회수는 유효한 새 대상의 증거에 대해 별도 승인을 적용한다. [작업 대조표](TASK.md)
+- Ubuntu ARM64의 같은 쓰기 가능 ext4 시험 워커와 저널에서 솔버 인덱스 보관, 보호 lease, 네이티브 스냅샷 커밋, blob 기록, 캐시 retain을 순서대로 실행했다. 각 효과 커밋 직후 자식을 종료하고 이어서 저널 확인만 기록했다. 단계 중복 변경과 비대상 변경은 0건이었다. 다섯 단계의 완료는 `native-five-stage-trial-v1`로 확인했고 전체 삭제 영수증을 대입하면 거절됐다. [통합 실측](../dist/dsg-e2e-recovery-c306f911edac/QUALIFICATION.json) · [시험 코드](../integrations/buildkit-exact/cache/dsg_native_recovery_linux_test.go)
+- 실제 읽기 전용 워커에서 캐시 부모·별칭 전이와 스냅샷·blob inode, 할당 블록·메타데이터 해시를 확인했다. 이 시험에서 생성한 정확한 파일과 blob의 바이트를 OCI 계층과 대조했다. 반복 조회가 일치했고 DB 5개가 그대로였다. 전체 ID `t526lj0a32xvomrnop2csn063`, 증거 SHA-256 `22b70011654473a251d7da505c68b618e2991bc9d575c21ea4dfe977371cb2c8`는 보존 루트 2개와 자식 스냅샷 1개가 남아 보존했다. [할당 증거](../dist/dsg-e2e-recovery-c306f911edac/QUALIFICATION.json)
+- 내보내기 없이 별도로 생성한 scratch LLB의 전체 ID `gel62x0ude4d6t9pwldw0o0qq`에는 blob 결합과 솔버 결과가 없었다. 가변 별칭과 보존 루트 1개가 남아 보존했다. 두 시험 워커를 정리했고 삭제·prune 요청은 각 0건이다. 승인에 제출할 활성 대상은 0건이다. [후보 선별 실측](../dist/dsg-e2e-recovery-selection-169c44319405/QUALIFICATION.json)
+- macOS Python 14건 및 Go 최상위 13건·하위 50건, Ubuntu Go 회귀 34건 및 별도 네이티브 시험 3건이 통과했다. 첫 Ubuntu 실행에서 native snapshotter의 경로 가정을 수정한 뒤 통합 실측을 통과했다. 임시 시험 저장소를 회수하고 VM을 일시정지로 복귀시켰다. [macOS 실측](../dist/dsg-e2e-recovery-macos-final-23e0c21/QUALIFICATION.json) · [Ubuntu 회귀 집계](../dist/dsg-e2e-recovery-c2f943171792/QUALIFICATION.json)
+- 실제 회수에는 GC 보존 루트와 자식 스냅샷이 같은 대상의 전용 자원인지 증명하고, 실제 삭제 효과를 시험용 보존 단계와 구분하는 원장 연결이 필요하다. 검증을 통과한 새 활성 대상에 대해서만 별도 승인을 받는다. 격리 물리 시험기의 전원 장애 검증은 기존 보류 상태다. [백로그](BACKLOG.md#환경승인-조건이-남은-항목)
