@@ -29,7 +29,8 @@
     "docker_pending_target": "macOS: eight controlled Docker GC tests, 17 registry tests and four image tests passed. An unresolved intent blocks new plans, approvals and old tokens for the same endpoint/kind/ID until receipt recovery settles it. Full Python 14 and Rust 118 plus scoped inventory and Buildx passed. Live dedicated-engine application and recovery remain unverified.",
     "dedicated_docker_preapproval": "Existing Ubuntu ARM64 verified read-only prerequisites, then a transient Docker 29.1.3 engine verified a private Unix peer, isolated mount and network, no TCP listener and denied unprivileged clients. Initial inventory was empty. Exactly one untagged no-layer synthetic image matched the expected configuration digest and deterministic archive digest. Delete requests: zero. Guest suspended; the next test used separate approval for this generation and image.",
     "dedicated_docker_live": "The pinned Ubuntu ARM64 engine and approved image were revalidated. One live no-force/no-parent-prune deletion removed the one disposable image (inventory 1 to 0). The reopened Rust registry settled the persisted receipt after a test-induced interruption. One intent, one applied audit, zero open leases; reuse was rejected. The isolated runtime and scratch directory were reclaimed and the guest was suspended. Default Python 14 and Rust 118 passed with the live test ignored by default. The exact live test passed once when explicitly selected.",
-    "buildkit_operating_service": "Ubuntu Parallels ARM64 systemd operated one dedicated socket with two system roles. A single synthetic record was applied and the read-only receipt recovery did not call mutation. Same-generation ledger/checkpoint rollback and a diverging external witness were preserved without backend changes. Guest ext4 receipt and macOS-side independent pin were verified after service cleanup, with four availability cases. Physical host power loss and production project rollout remain separate."
+    "buildkit_operating_service": "Ubuntu Parallels ARM64 systemd operated one dedicated socket with two system roles. A single synthetic record was applied and the read-only receipt recovery did not call mutation. Same-generation ledger/checkpoint rollback and a diverging external witness were preserved without backend changes. Guest ext4 receipt and macOS-side independent pin were verified after service cleanup, with four availability cases. Physical host power loss and production project rollout remain separate.",
+    "buildkit_project_enrollment": "A pinned Ubuntu ARM64 BuildKit dedicated worker accepted tracked DSG README bytes. The project revision, source SHA-256, LLB, OCI export, native worker and record IDs were bound and four native DB digests were unchanged by read-only qualification. A separate QEMU full VM snapshot restored coherent synthetic RAM and ext4 markers. The off-VM latest marker differed. Production rollout, application-level full-snapshot rejection and physical power interruption are still unverified."
   },
   "files": [
     {
@@ -79,8 +80,8 @@
     },
     {
       "path": "docs/API_SPEC.md",
-      "sha256": "dd2ea5330c7bc0c0c668826c99ca13670258b2e867690f9666384072a8df95d7",
-      "bytes": 35025
+      "sha256": "6d933caf7c21ef6c1d9cc392ed64c66158a09e7af558699fbabe5a90fa442ac4",
+      "bytes": 36290
     },
     {
       "path": "docs/ARCHITECTURE.md",
@@ -94,8 +95,8 @@
     },
     {
       "path": "docs/OPERATIONS.md",
-      "sha256": "4573ae243aec09f5fbdffdbe22120016637481269067e0753c89706ffea0e56f",
-      "bytes": 12357
+      "sha256": "6e677cb01473eabacbf251b10f7deab1395ac8142e659a109185f9196f1cfc4e",
+      "bytes": 13037
     },
     {
       "path": "docs/PLAN.md",
@@ -139,13 +140,13 @@
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "7913c5af3aa51bd35c046f756a8d7f4af4c54bd044fd08430c0c41f7f0e28c6c",
-      "bytes": 29988
+      "sha256": "6442f8cff72ed2c5e8365844c2770483e3dd76a946a2a08700eeee60311e6c34",
+      "bytes": 30471
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "4ae83f4572275cef68acbc838a7ca0e3bf432ab7527e23237a48e1278f180013",
-      "bytes": 60536
+      "sha256": "897c704ffe2bde4eaa6d7b11723c624d8ec47f7a95c56e3bf8f35b0fcf2cf50b",
+      "bytes": 62180
     },
     {
       "path": "docs/WBS.md",
@@ -814,8 +815,8 @@
     },
     {
       "path": "scripts/check-dedicated-buildkit-fence.py",
-      "sha256": "f6bf6064673b34d24533eb32287fe31fbe424dde91b360753900af0dcd059461",
-      "bytes": 11970
+      "sha256": "ad7319f4937f08ac71b94f4b876b8f9aaca5f1dd357153eacb328e1906ad61b7",
+      "bytes": 15454
     },
     {
       "path": "scripts/check-dedicated-docker-apply.py",
@@ -901,6 +902,11 @@
       "path": "scripts/test-buildkit-settled-receipt.py",
       "sha256": "dea7230baf8ad1fcbde8198bbb0f39ecc4da1e6ec92cddd6198c23b1b8fc535b",
       "bytes": 9689
+    },
+    {
+      "path": "scripts/test-dedicated-buildkit-fence.py",
+      "sha256": "a392e88f82e50e6511d592de837900223b15df8b385cc6a5fd600c9ffc7359f1",
+      "bytes": 4413
     },
     {
       "path": "scripts/test-rust.sh",

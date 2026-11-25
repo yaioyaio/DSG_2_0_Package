@@ -177,6 +177,11 @@ WBS 1.4·5.1은 전용 Ubuntu Parallels ARM64 Moby에서 합성 이미지 한 �
 - 원장과 체크포인트를 같은 inode에서 함께 과거 단계로 돌리거나 별도 증거가 불일치하는 경우를 시험한다. 적용과 실시간 영수증 조회가 모두 거절되고, DB 5개와 네이티브 저널이 같아야 한다. 원본 복원 후 동일 영수증을 확인한다. 원장·체크포인트·별도 증거 동기화 중단은 별도 Go 회귀에서 보존을 확인한다. [Linux 원장 시험](../dist/dsg-buildkit-operating-verification-6bee21e/LINUX-LEDGER-REGRESSION.json)
 - Ubuntu ext4 아카이브와 macOS 독립 해시는 서비스가 닫힌 뒤에도 같은 영수증을 확인해야 한다. 아카이브·해시 입력의 단독·동시 유실은 보존이며 재적용은 0건이어야 한다. 물리 호스트 전원 차단은 별도 격리 장비에서 검증한다. [분리 보관과 장애 매트릭스](../dist/dsg-buildkit-operating-runtime-bc17a618d978/STORAGE-MATRIX.json)
 
+### BuildKit 전체 VM 스냅샷과 프로젝트 전용 워커
+
+- **전체 VM 스냅샷.** Ubuntu ARM64 initramfs의 합성 세대값으로 QEMU RAM과 qcow2를 저장하고 복원했다. 부팅 식별자와 RAM 세대가 돌아왔고, 게스트의 원장·체크포인트·별도 ext4 증거 세 값은 모두 복원 시점과 일치했다. VM 외부에 보관한 최신 관측값을 대조해 되감기를 탐지했다. 운영 권한 호출과 네이티브 변경은 각각 0건이다. 실제 장비 전원 차단과 운영 원장에 대한 수용 시험은 별도로 남아 있다. [전체 스냅샷 결과](../dist/dsg-buildkit-project-verification-d3ea856/VM-FULL-SNAPSHOT.json) · [VM 외부 최신 관측값](../dist/dsg-buildkit-project-verification-d3ea856/OFF-VM-LATEST.json)
+- **프로젝트 전용 워커.** DSG 커밋 `d3ea856`의 추적 파일 `README.md`를 해시 대조한 뒤 격리된 Ubuntu ARM64의 native 워커 1개에 등록해 LLB 빌드와 OCI 레이어를 검증했다. 동일한 정확 ID 1건을 오프라인에서 조회했다. 잠금이 잡힌 저장소에서 데몬 기동 및 오프라인 조회가 거절됐고, 비루트 UID의 저장소 직접 접근도 2건 거절됐다. DB 4개의 해시는 유지됐으며 회수와 prune 요청은 각각 0건이었다. 실제 운영 대상은 지정되지 않아 운영 배포·변경 승인·영수증 저장 수용은 보류다. 프로젝트 입력 검증의 회귀 시험은 7건이다. [전용 워커 결과](../dist/dsg-buildkit-project-verification-d3ea856/PROJECT-WORKER-VERIFICATION.json) · [입력 회귀 시험](../scripts/test-dedicated-buildkit-fence.py)
+
 ## 에이전트 연동 검증
 
 `sh scripts/test-rust.sh`는 합성 프로젝트의 훅 설치·중복 방지·설정 보존·제거, 허용·거부·잘못된 JSON 응답과 MCP의 읽기 전용 목록·쓰기 거절을 확인한다. 정리 후보를 조회한 뒤 상태 폴더가 생기지 않아야 한다.
