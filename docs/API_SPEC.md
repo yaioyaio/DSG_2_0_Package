@@ -132,7 +132,7 @@ Windows SCM 어댑터는 고정 로컬 named pipe에서 `/_ping`, `/info`, `/dsg
 | 요청 | 역할 | 정상 응답 |
 |---|---|---|
 | `approve` | 승인자 | `{"status":"approved","receipt":null}` |
-| `apply` | 실행자 | `{"status":"applied","receipt":{…}}`. 승인·세대·같은 마운트의 현재 증거를 재확인하고 승인 1회 소비와 변경을 연결한다. |
+| `apply` | 실행자 | `{"status":"applied","receipt":{…}}`. 승인·세대·같은 마운트의 현재 증거를 재확인하고 외부 최초 적용 확인과 로컬 승인 소비를 거쳐 변경한다. |
 | `receipt` | 실행자 | `{"status":"settled","receipt":{…}}`. 저장된 변경의 영수증을 확인하며 네이티브 변경을 다시 호출하지 않는다. 논리 회수와 물리 회수량을 별도로 표시한다. |
 
 요청 제어기는 SHA-256이 고정된 네이티브 `dsg-buildkit-exact`에 메서드와 등록 ID를 전달한다. 관리자가 보호한 등록에서 승인·출처·실행 파일·보유 프로세스·같은 마운트와 원장 체크포인트를 독립적으로 검증한다. 클라이언트가 경로, 임의 명령, UID 또는 승인 원문을 지정할 수 없다. 요청 제어기의 권한 거절은 `{"status":"preserved","reason":"controller_admission"}`과 종료 5, 네이티브 보존 판정은 본문 없이 종료 5다. [기존 요청 제어기 실측](HANDOFF.md#buildkit-공개-api와-승인-원장-복구)
@@ -142,6 +142,14 @@ Windows SCM 어댑터는 고정 로컬 named pipe에서 `/_ping`, `/info`, `/dsg
 Linux ARM64에서 `/opt/dsg/bin/dsg buildkit-exact-service`는 `/run/dsg-buildkit-exact/control.sock`으로 위 패킷 계약을 제공한다. 배포 unit은 `root:dsg-buildkit-access`로 실행하며 런타임 디렉터리는 0750, 소켓은 0660이다. 보호된 `/etc/dsg-buildkit-exact/operating.json`은 `version: 1`, `registration`, `keeper`를 받는다. `keeper`는 보유 증거의 같은 객체이며 `pid`, `start_ticks`, `boot_sha256`, `mount_namespace`, `network_namespace`를 포함한다. 서비스는 등록된 보유 프로세스와 두 네임스페이스를 고정하고 수락한 연결마다 자식 요청 제어기만 해당 네임스페이스에 진입시킨다. 그룹은 연결을 허용하며, 요청별 권한은 등록 캡슐의 `controller-policy.json`이 지정한 두 비루트 UID와 커널 자격을 대조해 판정한다. [배포와 접근 점검](OPERATIONS.md#buildkit-단일-대상-운영)
 
 운영 등록은 로컬 승인 원장, 로컬 체크포인트, 별도 장치에 등록한 원장 증거를 대조한다. 각 원장 단계는 로컬 DB 커밋, 체크포인트 `fsync`, 별도 원장 증거 `fsync` 순서로 기록한 뒤 후속 효과를 허용한다. 세 자료가 누락되거나 불일치하면 적용과 실시간 영수증 조회를 보존으로 처리한다. 이때 남은 파일에서 원장 증거를 재생성하지 않는다.
+
+### 외부 최초 적용 확인
+
+공개 `apply`는 읽기 전용 마운트에서 로컬 증거를 대조한 후 `/run/dsg-buildkit-freshness/authority.sock`에 최초 적용을 요청한다. 네이티브 실행기는 루트 소유 0700 디렉터리, 루트 소유 0600 Unix 스트림 소켓, 커널 피어 UID 0을 요구한다. 로컬 소켓의 상대는 워커 VM 스냅샷 밖에 상태를 보관하는 외부 확인 서비스에 요청을 전달한다. [운영 배치](OPERATIONS.md#외부-최초-적용-확인-서비스)
+
+요청은 ASCII `DSG-FRESHNESS-1 <registration> <scope_sha256> <checkpoint_sha256> <nonce>` 한 줄과 개행이며, 클라이언트는 쓰기 방향을 닫아 EOF를 보낸다. 범위 해시는 마지막 개행을 포함한 ASCII `registration\ncustody_sha256\nintent\napproval\n`의 SHA-256이다. 체크포인트 해시는 승인 상태의 로컬 체크포인트와 일치해야 한다. 외부 서비스는 사전에 등록한 버전 1의 네 필드 `version`, `registration`, `scope_sha256`, `checkpoint_sha256`을 확인한다. 외부 서비스가 최초 소비 표식 파일과 부모 디렉터리를 각각 `fsync`한 뒤, 같은 nonce의 `DSG-FRESHNESS-1 CLAIMED <nonce>` 한 줄을 반환하고 연결을 닫는다. 소켓과 `--stdio` 전송 모두 EOF까지의 단일 요청을 읽는다. [외부 서비스 구현](../scripts/buildkit-freshness-authority.py)
+
+동일 체크포인트에서 로컬 승인을 소비하고 동기화한 뒤에만 마운트를 쓰기 가능으로 전환한다. 외부 상태·응답의 유실, 재요청, 타임아웃, 범위 불일치 또는 로컬 체크포인트 변경은 적용을 보존으로 처리한다. 새 적용은 기존 외부 표식을 보존한 상태에서 별도 등록과 승인을 거친다.
 
 ### 보관된 운영 영수증 검증
 
@@ -153,7 +161,11 @@ Linux ARM64에서 `/opt/dsg/bin/dsg buildkit-exact-service`는 `/run/dsg-buildki
 
 Linux ARM64의 `scripts/check-dedicated-buildkit-fence.py <workspace> <daemon_sha256> <client_sha256>`는 기존 격리 시험에 프로젝트 입력을 추가할 수 있다. `--project-source <workspace/README.md>`, `--project-source-sha256 <64자리 SHA-256>`, `--project-id dsg`, `--project-revision <40자리 Git 커밋>`은 함께 지정한다. 입력은 동일 파일시스템의 단일 링크를 가진 루트 소유 0400 일반 파일이어야 한다. 최대 16 KiB를 읽고 경로·파일 식별자의 안정성과 내용 해시를 검증한다. 호출자가 고정한 Git 리비전은 검증 증거에 기록한다.
 
-격리된 native 워커에 입력을 빌드하고 LLB, OCI 레이어 및 정확 ID의 오프라인 조회 증거를 반환한다. `cache_read_only_evidence.project_registration`은 증거용 등록이며, 캐시 조회의 판정은 `preserve`다. `production_deployment_verified`, `exact_mutation_authorized`, `receipt_storage_verified`는 모두 `false`다. 운영 서비스 등록에는 지정된 실제 대상과 운영 등록 캡슐의 검증이 필요하다. 현재 캡슐 검증은 합성 레이아웃 범위다. [검증 스크립트](../scripts/check-dedicated-buildkit-fence.py)
+격리된 native 워커에 입력을 빌드하고 LLB, OCI 레이어 및 정확 ID의 오프라인 조회 증거를 반환한다. `cache_read_only_evidence.project_registration`은 발급 당시의 프로젝트 식별자와 입력 해시를 기록한다. [발급 스크립트](../scripts/check-dedicated-buildkit-fence.py)
+
+`scripts/check-buildkit-project-registration.py WORKSPACE DAEMON_SHA256 ISSUANCE_SHA256 [--require-quiescence]`는 Linux ARM64의 보호된 격리 작업 위치에서 기존에 정지한 워커를 조회한다. 루트 소유 0400 `project-issuance.json`에는 기존 `cache_read_only_evidence` 객체를 넣고, 독립 보관한 파일 원본 바이트의 SHA-256을 인자로 전달한다. 스크립트는 발급 증거의 내부 해시, 실행 파일 해시, 워커·레코드의 전체 ID, 네이티브 결합 해시, 조회 전후 저장소 식별자와 DB 해시를 대조한다. 기본 조회는 전용 워커의 배타 잠금을 확인한다. `--require-quiescence`는 엄격 등록, 읽기 전용 파일시스템, 실행 세대 종료, 마운트 및 외부 열린 핸들의 네이티브 검사를 추가로 요구한다.
+
+일치하면 `schema: dsg-buildkit-project-read-only-registration-v1`과 `disposition: preserve`의 증거를 반환한다. `production_deployment_verified`, `production_operating_accounts_verified`, `production_exclusive_mutation_verified`, `exact_mutation_authorized`, `receipt_storage_verified`는 모두 `false`다. 운영 서비스 등록은 지정 호스트에서 운영 계정, 배타 변경 경계, 운영 등록 캡슐과 영수증 보관 지점을 확인해야 한다. [등록 검증기](../scripts/check-buildkit-project-registration.py)
 
 ## 계획 API (미구현)
 - `dsg inspect <resource-id>`
