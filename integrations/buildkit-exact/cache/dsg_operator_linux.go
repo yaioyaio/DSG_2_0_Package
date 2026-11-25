@@ -87,6 +87,7 @@ type DSGOperatorResult struct {
 }
 
 type dsgOperatorSeal struct {
+	Witness     dsgWitnessIdentity   `json:"ledger_witness"`
 	Schema      string               `json:"schema"`
 	Databases   map[string]string    `json:"native_databases_sha256"`
 	Evidence    string               `json:"evidence_sha256"`
@@ -138,7 +139,7 @@ func dsgOperatorEvidence(raw []byte, g dsgSameMountGrant) (dsgOperatorSeal, erro
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.UseNumber()
 	if json.Unmarshal(raw, &seal) != nil || d.Decode(&fields) != nil || seal.Schema != "dsg-buildkit-approval-custody-v1" ||
-		seal.Authority != g.Evidence || seal.Evidence != g.CustodySHA256 || g.Request.ExpiresAtMS > seal.Expires ||
+		seal.Witness.Device == 0 || seal.Witness.Inode == 0 || seal.Authority != g.Evidence || seal.Evidence != g.CustodySHA256 || g.Request.ExpiresAtMS > seal.Expires ||
 		!dsgDigest.MatchString(seal.Operator) || !dsgDigest.MatchString(seal.Source) || len(seal.Databases) != len(dsgSameMountDatabases) {
 		return seal, ErrDSGExactPreserve
 	}
@@ -272,12 +273,14 @@ func DSGRunExactOperator(ctx context.Context, op, registration string, req DSGOp
 	if !dsgOperatorKeeperAlive(pid) {
 		return empty, ErrDSGExactPreserve
 	}
-	a, err := dsgOpenSameMountAuthority(filepath.Join(stage, "grants.db"))
+	witness := &dsgLedgerWitness{path: filepath.Join("/var/lib/dsg-buildkit-witness", registration, "ledger.sha256"), identity: seal.Witness, workerDevice: uint64(worker.Dev)}
+	a, err := dsgAccessSameMountAuthority(filepath.Join(stage, "grants.db"), false, witness)
 	if err != nil {
 		return empty, dsgSameMountFailure("operator_ledger", err)
 	}
 	defer a.db.Close()
-	native := dsgSameMountNative{input: input, keeperAlive: func() bool { return dsgOperatorKeeperAlive(pid) }}
+	authorityAlive := func() bool { return dsgOperatorKeeperAlive(pid) && a.verified() }
+	native := dsgSameMountNative{input: input, keeperAlive: authorityAlive}
 	if op == DSGOperatorApprove {
 		fd, err := dsgLockRoot(root)
 		if err != nil {
@@ -294,7 +297,7 @@ func DSGRunExactOperator(ctx context.Context, op, registration string, req DSGOp
 		return DSGOperatorResult{Status: "approved"}, nil
 	}
 	remount := func(fd int, ro bool) error {
-		if !ro && (!dsgOperatorKeeperAlive(pid) || ctx.Err() != nil) {
+		if !ro && (!authorityAlive() || ctx.Err() != nil) {
 			return ErrDSGExactPreserve
 		}
 		return dsgCustodyRemount(fd, ro)
@@ -309,6 +312,9 @@ func DSGRunExactOperator(ctx context.Context, op, registration string, req DSGOp
 	}
 	if err != nil {
 		return empty, err
+	}
+	if !authorityAlive() {
+		return empty, ErrDSGExactPreserve
 	}
 	return DSGOperatorResult{Status: status, Receipt: &receipt}, nil
 }

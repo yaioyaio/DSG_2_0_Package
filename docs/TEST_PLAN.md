@@ -171,6 +171,12 @@ WBS 1.4·5.1은 전용 Ubuntu Parallels ARM64 Moby에서 합성 이미지 한 �
 - **운영 사전 점검.** Ubuntu Parallels Linux ARM64에서 읽기 전용 systemd 기본 질의로 BuildKit exact 서비스, 관련 빌더, keeper 및 등록, `dsgd` 설치 여부를 확인한다. 변경·배포 요청은 0건이어야 하며 VM의 시작·종료 상태를 기록한다. 운영 수용에는 정확한 서비스·등록 자산, 보호 정책·역할, 독점 마운트의 실제 호스트 증거가 필요하다. BuildKit 전용 읽기 전용 프로브는 기존 Docker 프로브와 별도 구현 항목이다. [사전 점검 결과](../dist/dsg-recovery-qualification-28ba0a3/OPERATING-PREFLIGHT.json)
 - **복구 회귀.** macOS Python은 정상·아카이브만 유실·핀만 유실·동시 유실을 검증한다. 기존 예행 아카이브는 정상 검증돼야 하고 자료 유실 시 보존 판정, 변경 0건, 대체 0건이어야 한다. 동일 파일시스템의 별도 파일로 수행하며 독립 장애 영역은 추후 실측한다. Linux Go는 두 유효 단계의 로컬 검증과 독립 완료값이 구분되는지 확인한다. 실제 동시 롤백·재승인·변경 성공은 미실행이다. 기존 QEMU는 VM 유실 범위이며 물리 전원 차단에는 별도로 지정된 격리 장비가 필요하다. [호스트 회귀](../dist/dsg-recovery-qualification-28ba0a3/HOST-RECEIPT-REGRESSION.json) · [Linux 회귀](../dist/dsg-recovery-qualification-28ba0a3/LINUX-LEDGER-REGRESSION.json) · [핸드오프](HANDOFF.md#buildkit-운영-사전-점검과-복구-회귀)
 
+### BuildKit 상시 소켓과 별도 원장 증거 실측
+
+- Ubuntu Linux ARM64의 실제 systemd 서비스와 두 비루트 역할 계정으로 시험한다. 소켓 0660, 부모 0750, 두 계정과 보호 정책 일치, 외부 계정의 연결 거절, 두 역할의 직접 저장소 쓰기 거절을 확인한다. 승인 전과 권한 불일치 요청은 보존하고 승인 후 합성 대상의 적용은 한 번으로 제한한다. keeper 종료 후 리스너가 닫혀야 한다. [서비스 검증](../dist/dsg-buildkit-operating-runtime-bc17a618d978/OPERATING-RESULT-VERIFIED.json)
+- 원장과 체크포인트를 같은 inode에서 함께 과거 단계로 돌리거나 별도 증거가 불일치하는 경우를 시험한다. 적용과 실시간 영수증 조회가 모두 거절되고, DB 5개와 네이티브 저널이 같아야 한다. 원본 복원 후 동일 영수증을 확인한다. 원장·체크포인트·별도 증거 동기화 중단은 별도 Go 회귀에서 보존을 확인한다. [Linux 원장 시험](../dist/dsg-buildkit-operating-verification-6bee21e/LINUX-LEDGER-REGRESSION.json)
+- Ubuntu ext4 아카이브와 macOS 독립 해시는 서비스가 닫힌 뒤에도 같은 영수증을 확인해야 한다. 아카이브·해시 입력의 단독·동시 유실은 보존이며 재적용은 0건이어야 한다. 물리 호스트 전원 차단은 별도 격리 장비에서 검증한다. [분리 보관과 장애 매트릭스](../dist/dsg-buildkit-operating-runtime-bc17a618d978/STORAGE-MATRIX.json)
+
 ## 에이전트 연동 검증
 
 `sh scripts/test-rust.sh`는 합성 프로젝트의 훅 설치·중복 방지·설정 보존·제거, 허용·거부·잘못된 JSON 응답과 MCP의 읽기 전용 목록·쓰기 거절을 확인한다. 정리 후보를 조회한 뒤 상태 폴더가 생기지 않아야 한다.

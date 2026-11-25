@@ -305,7 +305,7 @@ pub(crate) fn check_seqpacket(fd: RawFd) -> Result<()> {
     Ok(())
 }
 
-fn enable_credentials(fd: RawFd) -> Result<()> {
+pub(crate) fn enable_credentials(fd: RawFd) -> Result<()> {
     let enabled: libc::c_int = 1;
     for option in [libc::SO_PASSCRED, libc::SO_PASSPIDFD] {
         // enabled is a valid integer SOL_SOCKET option input.

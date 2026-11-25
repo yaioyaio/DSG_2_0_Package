@@ -19,14 +19,77 @@ import (
 )
 
 type dsgSameMountAuthority struct {
-	db     *bolt.DB
-	device uint64
-	inode  uint64
-	path   string
-	mu     sync.Mutex
+	db      *bolt.DB
+	device  uint64
+	inode   uint64
+	path    string
+	mu      sync.Mutex
+	witness *dsgLedgerWitness
 }
 
 const dsgLedgerLimit = 16 << 20
+
+type dsgWitnessIdentity struct {
+	Device uint64 `json:"device"`
+	Inode  uint64 `json:"inode"`
+}
+
+type dsgLedgerWitness struct {
+	path         string
+	identity     dsgWitnessIdentity
+	workerDevice uint64
+}
+
+func (w dsgLedgerWitness) open(flags int, ledgerDevice uint64) (*os.File, error) {
+	var base unix.Stat_t
+	if unix.Lstat(filepath.Dir(filepath.Dir(w.path)), &base) != nil || int(base.Uid) != os.Geteuid() ||
+		base.Mode != unix.S_IFDIR|0700 || uint64(base.Dev) != w.identity.Device || w.identity.Device == ledgerDevice || w.identity.Device == w.workerDevice {
+		return nil, ErrDSGExactPreserve
+	}
+	f, st, err := dsgLedgerFile(w.path, flags)
+	if err != nil {
+		return nil, err
+	}
+	var fs unix.Statfs_t
+	if unix.Fstatfs(int(f.Fd()), &fs) != nil || fs.Type == unix.TMPFS_MAGIC || uint32(fs.Type) == unix.RAMFS_MAGIC ||
+		w.identity.Device != uint64(st.Dev) || w.identity.Inode != st.Ino || st.Size != 2*sha256.Size {
+		f.Close()
+		return nil, ErrDSGExactPreserve
+	}
+	return f, nil
+}
+
+func dsgWitnessEqual(f *os.File, expected []byte) bool {
+	var data [2 * sha256.Size]byte
+	_, err := f.ReadAt(data[:], 0)
+	return err == nil && bytes.Equal(data[:], expected)
+}
+
+func (w dsgLedgerWitness) matches(expected []byte, ledgerDevice uint64) bool {
+	f, err := w.open(unix.O_RDONLY, ledgerDevice)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	return dsgWitnessEqual(f, expected)
+}
+
+// Update only the enrolled inode, and only if it still holds the digest
+// observed before the Bolt transaction. An interrupted update stays closed.
+func (w dsgLedgerWitness) advance(previous, next []byte, ledgerDevice uint64) error {
+	f, err := w.open(unix.O_RDWR, ledgerDevice)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if !dsgWitnessEqual(f, previous) {
+		return ErrDSGExactPreserve
+	}
+	if _, err := f.WriteAt(next, 0); err != nil || f.Sync() != nil {
+		return ErrDSGExactPreserve
+	}
+	return nil
+}
 
 // Open an existing supervised file, or create it exclusively at first
 // enrollment. Never give bbolt a missing or empty file during recovery.
@@ -73,31 +136,34 @@ func dsgLedgerDigest(file *os.File, st unix.Stat_t) ([]byte, error) {
 	return []byte(hex.EncodeToString(h.Sum(nil))), nil
 }
 
-func dsgLedgerMatches(path string, file *os.File, st unix.Stat_t) bool {
-	witness, ws, err := dsgLedgerFile(path+".checkpoint", unix.O_RDONLY)
+func (a *dsgSameMountAuthority) matchedDigest(file *os.File, st unix.Stat_t) []byte {
+	witness, ws, err := dsgLedgerFile(a.path+".checkpoint", unix.O_RDONLY)
 	if err != nil {
-		return false
+		return nil
 	}
 	defer witness.Close()
 	if ws.Size != 2*sha256.Size || ws.Dev != st.Dev || ws.Ino == st.Ino {
-		return false
+		return nil
 	}
 	expected := make([]byte, ws.Size)
 	_, err = io.ReadFull(witness, expected)
 	actual, digestErr := dsgLedgerDigest(file, st)
-	return err == nil && digestErr == nil && bytes.Equal(expected, actual)
+	if err != nil || digestErr != nil || !bytes.Equal(expected, actual) || (a.witness != nil && !a.witness.matches(actual, uint64(st.Dev))) {
+		return nil
+	}
+	return actual
 }
 
 func dsgCreateSameMountAuthority(path string) (*dsgSameMountAuthority, error) {
-	return dsgAccessSameMountAuthority(path, true)
+	return dsgAccessSameMountAuthority(path, true, nil)
 }
 
 func dsgOpenSameMountAuthority(path string) (*dsgSameMountAuthority, error) {
-	return dsgAccessSameMountAuthority(path, false)
+	return dsgAccessSameMountAuthority(path, false, nil)
 }
 
-func dsgAccessSameMountAuthority(path string, create bool) (*dsgSameMountAuthority, error) {
-	a := &dsgSameMountAuthority{path: path}
+func dsgAccessSameMountAuthority(path string, create bool, witness *dsgLedgerWitness) (*dsgSameMountAuthority, error) {
+	a := &dsgSameMountAuthority{path: path, witness: witness}
 	flags := unix.O_RDWR
 	if create {
 		// Any existing checkpoint identifies prior enrollment even when the
@@ -112,7 +178,7 @@ func dsgAccessSameMountAuthority(path string, create bool) (*dsgSameMountAuthori
 		if err != nil {
 			return nil, err
 		}
-		if !create && !dsgLedgerMatches(path, f, st) {
+		if !create && a.matchedDigest(f, st) == nil {
 			f.Close()
 			return nil, ErrDSGExactPreserve
 		}
@@ -124,7 +190,7 @@ func dsgAccessSameMountAuthority(path string, create bool) (*dsgSameMountAuthori
 	}
 	a.db = db
 	if create {
-		err = a.checkpoint(true)
+		err = a.checkpoint(true, nil)
 	} else if !a.verified() {
 		err = ErrDSGExactPreserve
 	}
@@ -138,16 +204,19 @@ func dsgAccessSameMountAuthority(path string, create bool) (*dsgSameMountAuthori
 func (a *dsgSameMountAuthority) verified() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.matchesCheckpoint()
+	return a.currentDigest() != nil
 }
 
-func (a *dsgSameMountAuthority) matchesCheckpoint() bool {
+func (a *dsgSameMountAuthority) currentDigest() []byte {
 	f, st, err := dsgLedgerFile(a.path, unix.O_RDONLY)
 	if err != nil {
-		return false
+		return nil
 	}
 	defer f.Close()
-	return uint64(st.Dev) == a.device && st.Ino == a.inode && dsgLedgerMatches(a.path, f, st)
+	if uint64(st.Dev) != a.device || st.Ino != a.inode {
+		return nil
+	}
+	return a.matchedDigest(f, st)
 }
 
 // Each durable phase precedes its checkpoint. An interruption between syncs
@@ -156,16 +225,17 @@ func (a *dsgSameMountAuthority) matchesCheckpoint() bool {
 func (a *dsgSameMountAuthority) update(fn func(*bolt.Tx) error) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if !a.matchesCheckpoint() {
+	previous := a.currentDigest()
+	if previous == nil {
 		return ErrDSGExactPreserve
 	}
 	if err := a.db.Update(fn); err != nil {
 		return err
 	}
-	return a.checkpoint(false)
+	return a.checkpoint(false, previous)
 }
 
-func (a *dsgSameMountAuthority) checkpoint(create bool) error {
+func (a *dsgSameMountAuthority) checkpoint(create bool, previous []byte) error {
 	f, st, err := dsgLedgerFile(a.path, unix.O_RDONLY)
 	if err != nil {
 		return err
@@ -201,6 +271,11 @@ func (a *dsgSameMountAuthority) checkpoint(create bool) error {
 		}
 		defer dir.Close()
 		if dir.Sync() != nil {
+			return ErrDSGExactPreserve
+		}
+	}
+	if a.witness != nil {
+		if err := a.witness.advance(previous, digest, a.device); err != nil || !bytes.Equal(a.currentDigest(), digest) {
 			return ErrDSGExactPreserve
 		}
 	}

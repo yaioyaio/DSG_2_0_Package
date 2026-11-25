@@ -1,0 +1,23 @@
+[Unit]
+Description=DSG dedicated BuildKit approval and receipt socket
+
+[Service]
+Type=exec
+User=root
+Group=dsg-buildkit-access
+ExecStart=/opt/dsg/bin/dsg buildkit-exact-service
+RuntimeDirectory=dsg-buildkit-exact
+RuntimeDirectoryMode=0750
+UMask=0077
+NoNewPrivileges=yes
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+TasksMax=48
+MemoryMax=384M
+CPUQuota=100%
+LimitNOFILE=256
+TimeoutStopSec=70s
+KillMode=mixed
+Restart=no
+
+[Install]
+WantedBy=multi-user.target

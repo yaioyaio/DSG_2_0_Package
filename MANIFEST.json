@@ -28,7 +28,8 @@
     "macos_lease_scope": "Runner, registry and process identity tests passed. Owned detached processes retained expired leases during normal exit and forced supervisor termination; when they exited, lease reacquisition and audit passed in throwaway state.",
     "docker_pending_target": "macOS: eight controlled Docker GC tests, 17 registry tests and four image tests passed. An unresolved intent blocks new plans, approvals and old tokens for the same endpoint/kind/ID until receipt recovery settles it. Full Python 14 and Rust 118 plus scoped inventory and Buildx passed. Live dedicated-engine application and recovery remain unverified.",
     "dedicated_docker_preapproval": "Existing Ubuntu ARM64 verified read-only prerequisites, then a transient Docker 29.1.3 engine verified a private Unix peer, isolated mount and network, no TCP listener and denied unprivileged clients. Initial inventory was empty. Exactly one untagged no-layer synthetic image matched the expected configuration digest and deterministic archive digest. Delete requests: zero. Guest suspended; the next test used separate approval for this generation and image.",
-    "dedicated_docker_live": "The pinned Ubuntu ARM64 engine and approved image were revalidated. One live no-force/no-parent-prune deletion removed the one disposable image (inventory 1 to 0). The reopened Rust registry settled the persisted receipt after a test-induced interruption. One intent, one applied audit, zero open leases; reuse was rejected. The isolated runtime and scratch directory were reclaimed and the guest was suspended. Default Python 14 and Rust 118 passed with the live test ignored by default. The exact live test passed once when explicitly selected."
+    "dedicated_docker_live": "The pinned Ubuntu ARM64 engine and approved image were revalidated. One live no-force/no-parent-prune deletion removed the one disposable image (inventory 1 to 0). The reopened Rust registry settled the persisted receipt after a test-induced interruption. One intent, one applied audit, zero open leases; reuse was rejected. The isolated runtime and scratch directory were reclaimed and the guest was suspended. Default Python 14 and Rust 118 passed with the live test ignored by default. The exact live test passed once when explicitly selected.",
+    "buildkit_operating_service": "Ubuntu Parallels ARM64 systemd operated one dedicated socket with two system roles. A single synthetic record was applied and the read-only receipt recovery did not call mutation. Same-generation ledger/checkpoint rollback and a diverging external witness were preserved without backend changes. Guest ext4 receipt and macOS-side independent pin were verified after service cleanup, with four availability cases. Physical host power loss and production project rollout remain separate."
   },
   "files": [
     {
@@ -78,8 +79,8 @@
     },
     {
       "path": "docs/API_SPEC.md",
-      "sha256": "db445ce265a97ae998dcde22dc59ba0fbcdaea5ae961b54504410fe6cdc25dfd",
-      "bytes": 32699
+      "sha256": "dd2ea5330c7bc0c0c668826c99ca13670258b2e867690f9666384072a8df95d7",
+      "bytes": 35025
     },
     {
       "path": "docs/ARCHITECTURE.md",
@@ -93,8 +94,8 @@
     },
     {
       "path": "docs/OPERATIONS.md",
-      "sha256": "821ec81c6f4105495106653e96d80d122178b78e2bfc8db211cf3b639030e946",
-      "bytes": 8413
+      "sha256": "4573ae243aec09f5fbdffdbe22120016637481269067e0753c89706ffea0e56f",
+      "bytes": 12357
     },
     {
       "path": "docs/PLAN.md",
@@ -138,13 +139,13 @@
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "2ef88d819b237aa439c807ae9d9923f0f16dad74ba56c461b1bd7af0a65d760e",
-      "bytes": 29447
+      "sha256": "7913c5af3aa51bd35c046f756a8d7f4af4c54bd044fd08430c0c41f7f0e28c6c",
+      "bytes": 29988
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "256fa5d12d1eab15e12c54dc8bcec1399f14d2ad7f99d941de2ed02fe8bd5742",
-      "bytes": 59014
+      "sha256": "4ae83f4572275cef68acbc838a7ca0e3bf432ab7527e23237a48e1278f180013",
+      "bytes": 60536
     },
     {
       "path": "docs/WBS.md",
@@ -268,13 +269,13 @@
     },
     {
       "path": "integrations/buildkit-exact/cache/dsg_ledger_recovery_linux.go",
-      "sha256": "bd2728d897b8191c14e6eb3098bc6eeb1a045bc3f6ae5835e6a7b95cb39c719b",
-      "bytes": 5952
+      "sha256": "d1b7255f0394a32039ee887d7caa5e4dbd479c009e81560b50afef2b106d42d4",
+      "bytes": 8279
     },
     {
       "path": "integrations/buildkit-exact/cache/dsg_ledger_recovery_linux_test.go",
-      "sha256": "0e6720d3a6e4f21f6055f2f45e8cc6f479beca7343115705113575717ff3a82c",
-      "bytes": 5689
+      "sha256": "2b2dce880ba57d694a140da509dc1d18caab37c8674636b56e74171b17e82dee",
+      "bytes": 8924
     },
     {
       "path": "integrations/buildkit-exact/cache/dsg_manifestless_candidate_linux_test.go",
@@ -323,8 +324,8 @@
     },
     {
       "path": "integrations/buildkit-exact/cache/dsg_operator_linux.go",
-      "sha256": "74acadc6b2a3e8a7ebe02d6baa0c0212b53236931dffc35de4ba0f1fe4947b28",
-      "bytes": 11436
+      "sha256": "13cf1605584f5f33405cf096f303c947f89fac65532ba4ee351f0e260e683caa",
+      "bytes": 11842
     },
     {
       "path": "integrations/buildkit-exact/cache/dsg_operator_linux_test.go",
@@ -445,6 +446,11 @@
       "path": "integrations/launchd/LOCAL.DSG.DSGD.plist",
       "sha256": "38ceea49914efc69431a6c4cfc0d4676ee21ffcd888393993c825c37d9364860",
       "bytes": 1010
+    },
+    {
+      "path": "integrations/systemd/dsg-buildkit-exact.service",
+      "sha256": "0011b3067e9bcf334a222e9372b66467b2709c73de2a1fcb79f016f9928a40cb",
+      "bytes": 453
     },
     {
       "path": "integrations/systemd/dsgd.service",
@@ -583,8 +589,8 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/src/main.rs",
-      "sha256": "6eda9abb72e7e14293e36f2dee4dbb243ed5a7bf55fa9f97b12fbf61662b52d2",
-      "bytes": 33912
+      "sha256": "7f8802bc4d2afe5e8b21f2378d8ee1de287eebc4cfff463f3d37b3400f53d937",
+      "bytes": 34348
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/src/mcp.rs",
@@ -613,8 +619,13 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/buildkit_exact_controller.rs",
-      "sha256": "98bd001e80cc0902fb7b58cac72b4cd780a0603e72ec526094a729f53946a08b",
-      "bytes": 10395
+      "sha256": "b9a017a8af2dcbc59fe430486e6ad8789aa42135fc9ff1087d925fa8d56c2a1b",
+      "bytes": 10447
+    },
+    {
+      "path": "rust-scaffold/crates/dsg-core/src/buildkit_exact_controller/operating.rs",
+      "sha256": "288445d30e2f5f0601dc70b56c808dd73a823e806e9450d44384c1786f539d19",
+      "bytes": 7289
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/cleanup.rs",
@@ -653,8 +664,8 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/docker_control_local.rs",
-      "sha256": "7c45a7818f33ce46f2e58b7dd9736e1d7c5a41371e46e20040c3dc1183a9c657",
-      "bytes": 12862
+      "sha256": "089b70c3b96520132312d15c7a7acad74b24cce55600a78d603315bb6ff398d2",
+      "bytes": 12873
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/docker_control_local/admission.rs",
@@ -668,8 +679,8 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/docker_control_local/admission/write_request.rs",
-      "sha256": "8e788cf483378d7752326899d16c36e1514229749a40b6b3cd533b30f43d2f1b",
-      "bytes": 26150
+      "sha256": "e5f9600c527583a29cdb7b988653037800996500bbb961be1d98f74c27bddb1c",
+      "bytes": 26161
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/docker_gc_apply.rs",
@@ -763,13 +774,13 @@
     },
     {
       "path": "scripts/check-buildkit-approval-custody.py",
-      "sha256": "45129251c1e06bde709e780c59ef744193e63910d9639206f2422e4e3cea8b33",
-      "bytes": 17454
+      "sha256": "44cee097ee3ac6ba0c863b557348988ffda10b4e05941a13f7ea5241b0528f7d",
+      "bytes": 19390
     },
     {
       "path": "scripts/check-buildkit-controller.py",
-      "sha256": "e60e6065d89c4bd7ec49fd7ce2a7aac788175006a141dd5dc0554a534139f123",
-      "bytes": 9561
+      "sha256": "d2c70e130eb90a59b04e7a712fd8610387988fdbe1a0b3889918499913d4b8a1",
+      "bytes": 11537
     },
     {
       "path": "scripts/check-buildkit-native.py",
@@ -783,8 +794,8 @@
     },
     {
       "path": "scripts/check-buildkit-settled-receipt.py",
-      "sha256": "6db1fa90e84803828eab770694e0db41c8e01a8e4b51bcf435ffa0b234ba5689",
-      "bytes": 4215
+      "sha256": "919151b64caf4059f20632aed39df9bb11e87b3d75d0693288651bc2d1830a85",
+      "bytes": 4388
     },
     {
       "path": "scripts/check-cleanup.py",
@@ -888,8 +899,8 @@
     },
     {
       "path": "scripts/test-buildkit-settled-receipt.py",
-      "sha256": "c1e45316f2523f8e34bfeba079841e0c9dd488587f1e2ef360c3158d394275fb",
-      "bytes": 7269
+      "sha256": "dea7230baf8ad1fcbde8198bbb0f39ecc4da1e6ec92cddd6198c23b1b8fc535b",
+      "bytes": 9689
     },
     {
       "path": "scripts/test-rust.sh",

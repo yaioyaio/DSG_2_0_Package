@@ -91,6 +91,44 @@ class SettledReceiptTest(unittest.TestCase):
                         with self.assertRaises(ValueError):
                             checker["inspect_archive"](path, pin, digest, record)
 
+    def test_operating_controller_requires_both_archive_witnesses(self):
+        for fault in (None, "missing-checkpoint", "missing-ledger_witness", "malformed-checkpoint",
+                      "malformed-ledger_witness", "divergent-ledger_witness", "wrong-pin", "wrong-custody",
+                      "wrong-record", "writable-mount"):
+            with self.subTest(fault=fault), tempfile.TemporaryDirectory() as temporary:
+                path = Path(temporary) / "AUTHORIZED-RESULT.json"
+                result = finalized()
+                result["purpose"] = "operating_controller"
+                post = result["attempt"]["postconditions"]
+                hashes = post["completion_store_hashes"]
+                hashes.update(checkpoint=digest, ledger_witness=digest)
+                if fault == "divergent-ledger_witness":
+                    hashes["ledger_witness"] = hashlib.sha256(b"other phase").hexdigest()
+                if fault and fault.startswith("missing-"):
+                    del hashes[fault.removeprefix("missing-")]
+                if fault and fault.startswith("malformed-"):
+                    hashes[fault.removeprefix("malformed-")] = "invalid"
+                if fault == "writable-mount":
+                    post["same_read_only_mount_after_recovery"] = False
+                raw = json.dumps(result).encode()
+                path.write_bytes(raw)
+                pin = "0" * 64 if fault == "wrong-pin" else hashlib.sha256(raw).hexdigest()
+                args = ["check", "--archive", str(path), "--archive-sha256", pin,
+                        "--custody-sha256", "f" * 64 if fault == "wrong-custody" else digest,
+                        "--record-id", "a" * 25 if fault == "wrong-record" else record]
+                output = io.StringIO()
+                with patch("sys.argv", args), contextlib.redirect_stdout(output):
+                    code = checker["main"]()
+                reply = json.loads(output.getvalue())
+                self.assertEqual(reply["mutation_calls"], 0)
+                if fault is None:
+                    self.assertEqual(code, 0)
+                    self.assertEqual(reply["status"], "archived_settled_receipt")
+                    self.assertEqual(reply["purpose"], "operating_controller")
+                else:
+                    self.assertEqual(code, 1)
+                    self.assertEqual(reply, {"status": "preserve", "mutation_calls": 0})
+
     def test_archived_receipt(self):
         for fault in ("none", "wrong-pin", "wrong-custody", "wrong-record", "unsettled", "foreign-receipt",
                       "incomplete-stores", "duplicate-field", "boolean-count", "expired-intent", "truncated", "missing"):

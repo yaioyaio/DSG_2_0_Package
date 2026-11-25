@@ -39,7 +39,8 @@ def inspect_archive(path, pin, custody, record):
     result = json.loads(data, object_pairs_hook=unique)
     require(result["custody_sha256"] == custody and result["record_id"] == record)
     purpose = result["purpose"]
-    require(purpose in ("candidate", "controller_rehearsal") and is_integer(result["guest_response_code"], 0))
+    require(purpose in ("candidate", "controller_rehearsal", "operating_controller"))
+    require(is_integer(result["guest_response_code"], 0))
     require(is_integer(result["exact_mutation_calls"], 1) and is_integer(result["receipt_recovery_mutation_calls"], 0))
     attempt = result["attempt"]
     applied, recovered = attempt["application"], attempt["recovered"]
@@ -63,9 +64,11 @@ def inspect_archive(path, pin, custody, record):
     hashes = post["completion_store_hashes"]
     require(DIGEST.fullmatch(hashes["authority"]) and DIGEST.fullmatch(hashes["journal"]))
     require(hashes["native"].keys() == NATIVE and all(DIGEST.fullmatch(v) for v in hashes["native"].values()))
+    if purpose == "operating_controller":
+        require(DIGEST.fullmatch(hashes["checkpoint"]) and hashes["checkpoint"] == hashes["ledger_witness"])
     reply = {"status": "archived_settled_receipt", "record_id": record,
              "receipt_sha256": hashlib.sha256(canonical).hexdigest(), "mutation_calls": 0}
-    if purpose == "controller_rehearsal":
+    if purpose != "candidate":
         reply["purpose"] = purpose
     return reply
 

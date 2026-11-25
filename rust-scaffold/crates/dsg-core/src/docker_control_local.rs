@@ -222,7 +222,7 @@ pub(crate) fn check_alive(process: &File) -> Result<()> {
     Ok(())
 }
 
-fn process_start(pid: i32) -> Result<u64> {
+pub(crate) fn process_start(pid: i32) -> Result<u64> {
     let stat = fs::read(format!("/proc/{pid}/stat")).map_err(io_failure)?;
     // The process name can contain closing parentheses and non-UTF-8 bytes.
     let name_end = stat

@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import pwd
 import re
 import signal
 import socket
@@ -15,6 +16,24 @@ import sys
 DENIAL = {"status": "preserved", "reason": "controller_admission"}
 # SO_PASSPIDFD was introduced in Linux 6.5; older Python lacks the symbolic name.
 SO_PASSPIDFD = getattr(socket, "SO_PASSPIDFD", 76)
+OPERATING_SOCKET = "/run/dsg-buildkit-exact/control.sock"
+SERVICE_CLIENT = """import errno, socket, sys
+try:
+    with socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET) as connection:
+        connection.settimeout(42)
+        connection.connect(sys.argv[1])
+        frame = sys.stdin.buffer.read(4097)
+        if not 0 < len(frame) <= 4096 or connection.send(frame) != len(frame):
+            sys.exit(3)
+        reply, _, flags, _ = connection.recvmsg(4097)
+        if flags & socket.MSG_TRUNC or len(reply) > 4096:
+            sys.exit(3)
+        sys.stdout.buffer.write(reply)
+except PermissionError as error:
+    sys.exit(13 if error.errno == errno.EACCES else 3)
+except OSError:
+    sys.exit(3)
+"""
 
 
 class QualificationFailure(Exception):
@@ -126,11 +145,26 @@ def exchange(binary, registration, uid, packet):
                 os.waitpid(child, 0)
 
 
+def exchange_service(uid, packet):
+    account = pwd.getpwuid(uid)
+    groups = os.getgrouplist(account.pw_name, account.pw_gid) if uid else []
+    result = subprocess.run(
+        [sys.executable, "-IB", "-c", SERVICE_CLIENT, OPERATING_SOCKET], input=packet, capture_output=True,
+        env={}, cwd="/", timeout=45, user=uid, group=account.pw_gid, extra_groups=groups,
+    )
+    if result.returncode == 13:
+        return 13, None
+    demand(result.returncode == 0, "operating_socket_transport", client_exit=result.returncode)
+    reply = json.loads(result.stdout) if result.stdout else None
+    return (5 if reply is None or reply == DENIAL else 0), reply
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("dsg", type=Path)
     parser.add_argument("registration")
     parser.add_argument("operation", choices=("check-denials", "approve", "apply", "receipt"))
+    parser.add_argument("--operating", action="store_true", help="use the installed BuildKit service's fixed socket")
     args = parser.parse_args()
     demand(os.getuid() == os.geteuid() == 0 and os.uname().machine == "aarch64", "linux_root_arm64")
     demand(re.fullmatch("[a-f0-9]{12,64}", args.registration), "registration")
@@ -148,7 +182,10 @@ def main():
 
     def send(operation, uid, selectors, extra=None):
         request = {"version": 1, "operation": operation, "scope": selectors, **(extra or {})}
-        return exchange(args.dsg, args.registration, uid, json.dumps(request).encode("ascii"))
+        payload = json.dumps(request).encode("ascii")
+        if args.operating:
+            return exchange_service(uid, payload)
+        return exchange(args.dsg, args.registration, uid, payload)
 
     if args.operation == "check-denials":
         changed = dict(scope)
@@ -169,7 +206,14 @@ def main():
                 raise
             except OSError as error:
                 raise QualificationFailure("socket_or_launch", case=case, errno=error.errno) from None
-        print(json.dumps({"controller_denials": len(rejected)}))
+        result = {"controller_denials": len(rejected)}
+        if args.operating:
+            unrelated = pwd.getpwnam("nobody").pw_uid
+            demand(unrelated not in (0, approve, execute), "unrelated_role")
+            code, reply = send("receipt", unrelated, scope)
+            demand(code == 13 and reply is None, "socket_group_not_enforced")
+            result["outside_socket_group_denied"] = True
+        print(json.dumps(result))
         return
     status, result = send(args.operation, approve if args.operation == "approve" else execute, scope)
     if status == 5 and result is None:

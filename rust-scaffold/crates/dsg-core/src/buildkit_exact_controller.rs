@@ -7,6 +7,9 @@ use crate::docker_control_local::{
     },
     check_alive, io_failure, open_protected,
 };
+mod operating;
+pub use operating::serve_operating;
+
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{self, Write};
