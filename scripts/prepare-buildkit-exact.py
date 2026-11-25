@@ -44,11 +44,14 @@ def prepare(archive, destination):
         '\t\t&cli.StringFlag{\n\t\t\tName:  "root",': (
             '\t\t&cli.BoolFlag{Name: "dsg-dedicated-worker", Usage: "own a private native OCI worker root for the daemon lifetime"},\n'
             '\t\t&cli.BoolFlag{Name: "dsg-inspect-dedicated-worker", Usage: "inspect an offline dedicated native worker"},\n'
+            '\t\t&cli.BoolFlag{Name: "dsg-require-quiescence", Usage: "require the dedicated Linux process and read-only storage boundary"},\n'
             '\t\t&cli.StringFlag{Name: "dsg-record-id", Usage: "inspect one full native cache record ID offline"},\n'
         ),
         '\t\tlogFormat := cfg.Log.Format': (
             '\t\tif c.Bool("dsg-inspect-dedicated-worker") {\n'
             '\t\t\treturn dsgInspectWorker(c, cfg.Root)\n\t\t}\n'
+            '\t\tif c.Bool("dsg-require-quiescence") && !c.Bool("dsg-dedicated-worker") {\n'
+            '\t\t\treturn errors.New("dsg-require-quiescence requires a dedicated worker or offline inspection")\n\t\t}\n'
             '\t\tif c.IsSet("dsg-record-id") {\n\t\t\treturn errors.New("dsg-record-id requires offline inspection")\n\t\t}\n'
             '\t\tif err := dsgStartWorker(c, cfg.Root, &cfg); err != nil {\n\t\t\treturn err\n\t\t}\n\n'
         ),

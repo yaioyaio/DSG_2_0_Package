@@ -112,6 +112,10 @@ BuildKit v0.35.1 소스 오버레이는 공식 캐시 관리자와 네이티브 
 
 전용 워커 시험은 macOS·Ubuntu의 합성 bbolt에서 같은 inode를 사용하는 쓰기 경합과 커밋 전후 자식 프로세스 종료를 주입한다. 커밋 전에는 대상과 미소비 승인·영수증 부재, 커밋 뒤에는 논리적 제거·승인 소비·영수증과 재적용 거절을 대조한다. 동일 워커의 비대상과 독립 워커의 동일 ID를 함께 확인한다. Ubuntu에서 공식 pinned 소스로 만든 패치 데몬을 격리 실행해 선점된 root의 초기화 거절, 실행 중 유지보수와 오프라인 명령 거절, 다른 root 잠금 가능, 동일 inode 재획득, 오프라인 DB 해시 불변을 확인한다. 격리 데몬의 빈 저장소에 scratch LLB로 합성 캐시 하나를 만들고 독립 OCI 계층의 출처와 공식 정확 ID 조회, 정지 후 캐시 메타데이터의 네이티브 결합을 대조한다. 현재 경로에서 결합이 발견되면 실제 적용을 보존한다. [장애 시험](../integrations/buildkit-exact/cache/dsg_worker_boundary_test.go) · [데몬 실측 실행기](../scripts/check-dedicated-buildkit-fence.py) · [Ubuntu 공통 잠금 및 정확 ID 실측](../dist/dsg-dedicated-worker-dbae7c58d25d/QUALIFICATION.json)
 
+정지 경계 실측은 Parallels ARM64의 전용 ext4 loop 저장소에서 수행한다. 별도 PID 네임스페이스의 PID 1로 데몬을 시작하고 scratch LLB 출처를 OCI 계층과 대조한다. 등록 세대 종료 뒤 쓰기 가능한 마운트, 외부 열린 FD, 추가 bind 마운트를 각각 거절한다. 읽기 전용 superblock에서 root의 쓰기 열기 실패, 정확 ID 직접 참조와 DB 해시 불변, 시험 loop 회수를 확인한다. [오프라인 실측 실행기](../scripts/check-buildkit-offline-recovery.py) · [Ubuntu 최종 실측](../dist/dsg-offline-recovery-d7b73b2013d5/QUALIFICATION.json)
+
+합성 다중 저장소 저널은 solver·lease·snapshot·blob·cache의 정확 선택자 5개 및 승인을 한 번 예약한다. 단계 의도를 기록하고 각 저장소의 변경과 증거는 같은 하위 트랜잭션으로 기록한다. 단계 의도 기록 뒤, 개별 저장소 효과 뒤, 저널 확인 뒤의 자식 프로세스 종료 지점 6개를 재현한다. 알려진 상태에서만 재개하고 불일치, 선택자 경합, 만료, 오염된 증거 또는 예약 유실은 추가 변경 없이 거절해야 한다. 실제 네이티브 삭제에는 연결하지 않는다. [다중 저장소 시험](../integrations/buildkit-exact/cache/dsg_recovery_test.go)
+
 ### Linux ARM64 로컬 제어 서비스 프로브
 
 WBS 5.1의 로컬 읽기 확인은 보호된 root 소켓과 예상 프로세스의 프로토콜 선언을 검증한다. 등록한 서비스의 성공과 소켓 링크·권한·상대 PID·선언 불일치 거절을 확인하고, 성공과 실패 모두 `mutation_authorized=false`와 보존 게이트를 확인한다. 운영 제어기의 출처·권한·배타 변경 경계는 별도로 검증한다. [프로브 구현과 시험](../rust-scaffold/crates/dsg-core/src/docker_control_local.rs)

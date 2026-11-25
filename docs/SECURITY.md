@@ -34,6 +34,8 @@ BuildKit v0.35.1의 DSG 소스 오버레이는 캐시 관리자의 메모리에�
 
 패치된 OCI/native 전용 데몬은 초기화 전에 보호된 디렉터리의 inode에 배타 잠금을 잡고 프로세스 종료까지 유지한다. 오프라인 조회와 합성 적용은 같은 잠금을 사용한다. 공통 잠금의 보장은 전용 모드를 준수하는 프로세스에 적용된다. 실제 backing을 변경하려면 잔존 실행기·마운트와 독립 작성자가 없는지 확인하고, solver·cache·containerd·native snapshot 저장소 사이의 대상 참조 및 중단 복구를 추가로 검증한다. [공통 잠금 구현](../integrations/buildkit-exact/cache/dsg_worker_boundary_unix.go)
 
+엄격 조회는 별도 PID 네임스페이스와 전용 ext4의 디렉터리 식별자를 등록 표지로 고정한다. 초기 PID 네임스페이스의 관측 가능한 프로세스·태스크·마운트·핸들을 제한된 범위에서 점검한다. 읽기 전용 superblock으로 쓰기를 차단한다. 신뢰 경계에는 커널, 스토리지와 VM 관리자 권한이 포함된다. 이후 쓰기 허용 상태에서의 회수와 다중 저장소 실제 정산은 별도 경계 검증이 필요하다. [경계 구현](../integrations/buildkit-exact/cache/dsg_quiescence_linux.go)
+
 에이전트 훅 실패 시 차단 여부는 CLI의 동작에 따른다. macOS에서 Docker 직접 접근을 통제하는 수용 기준은 샌드박스와 검증된 서비스 경계로 적용한다. Windows의 경우 SCM이 소유한 named pipe에서 허용 SID를 검증한다. [에이전트 운영](OPERATIONS.md#에이전트-연동-운영)
 
 ## Python POC 경고

@@ -39,6 +39,10 @@ Linux ARM64의 `dsg --json buildkit-local-cache --socket <절대 Unix 소켓> --
 
 공식 v0.35.1에서 준비한 DSG 전용 Linux 데몬은 미리 만든 빈 0700 root에서 `buildkitd --dsg-dedicated-worker --root <절대경로> --oci-worker=true --oci-worker-snapshotter=native --containerd-worker=false`로 최초 등록한다. 외부 snapshotter는 거절한다. `buildkitd --dsg-inspect-dedicated-worker --root <절대경로>`는 같은 디렉터리 inode를 잠근 상태에서 오프라인 DB만 읽는다. 결과는 `worker`, `solver_tx`, `cache_tx`, `containerd_tx`, `snapshot_tx`다. native 스냅샷 DB가 생성되기 전에는 `snapshot_tx=null`이다. 데몬이나 다른 도구가 잠금을 보유했거나 등록·소유권이 확인되지 않으면 거절한다. 오프라인 명령에 `--dsg-record-id <25자리 전체 ID>`를 함께 주면 정확한 레코드의 존재와 스냅샷·가변 별칭·blob 결합, 해당 결합의 SHA-256을 반환한다. 이 명령은 캐시 회수 승인을 발급하지 않는다. [전용 데몬과 조회 구현](../integrations/buildkit-exact/cache/dsg_dedicated_daemon_linux.go)
 
+전용 모드와 오프라인 조회에 `--dsg-require-quiescence`를 주면 등록한 Linux PID 네임스페이스 세대와 로컬 ext4 저장소를 고정한다. 기동은 별도 PID 네임스페이스의 PID 1에서만 등록한다. 조회는 그 세대가 사라지고 ext4 전체가 읽기 전용인 시점에만 시작한다. 관련 마운트·태스크·열린 핸들을 읽기 전후에 점검하며, 가시성을 확인할 수 없는 경우는 거절한다. 엄격 조회의 `quiescence`에 네 경계의 검사 결과를 제공한다. [정지 점검 구현](../integrations/buildkit-exact/cache/dsg_quiescence_linux.go)
+
+정확 ID 조회는 하나의 전용 잠금에서 네 저장소의 읽기 전용 트랜잭션을 고정한다. `graph`는 캐시, 솔버, containerd, 스냅샷, blob에서 확인한 직접 연결과 `references_sha256`, 미확인 범위 및 보존 판정을 반환한다. 전이 참조·GC 라벨, 이미지·컨테이너·ingest, 빌드 이력과 물리 내용은 미확인 범위에 포함된다. [참조 대조 구현](../integrations/buildkit-exact/cache/dsg_graph_linux.go)
+
 ### 로컬 Docker 제어 서비스 읽기 확인
 
 Linux ARM64의 `dsg --json docker-controller-probe --socket <절대 Unix 소켓> --expected-pid <서비스 PID>`는 로컬 Unix 소켓과 상대 프로세스가 선언한 프로토콜을 확인한다. 경로 구성 요소는 심볼릭 링크 없이 열고, 상위 경로의 root 소유와 그룹·기타 쓰기 제한, 소켓 부모의 0700 권한, root 소유 단일 링크 소켓의 0600 권한을 확인한다. 예상 PID와 root 상대 자격을 대조하고, pidfd로 고정한 프로세스의 생존·시작 시각과 소켓 식별자를 요청 전후에 확인한다. 연결에는 2초 기한과 512바이트 응답 한도를 적용한다.
