@@ -3,13 +3,17 @@
 package cache
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/containerd/containerd/v2/plugins/content/local"
@@ -212,7 +216,7 @@ func (s *dsgReclaimFixture) snapshotPayload(ctx context.Context, id, role string
 	return dsgDeletionHash([]string{observed.MetadataSHA256, data}), err
 }
 
-func (s *dsgReclaimFixture) layerHash(ctx context.Context, desc ocispec.Descriptor) (string, error) {
+func (s *dsgReclaimFixture) layerHash(ctx context.Context, desc ocispec.Descriptor, role string) (string, error) {
 	if !dsgGraphSHA256(desc.Digest.String()) || desc.Size < 1 || desc.Size > 65536 {
 		return "", ErrDSGExactPreserve
 	}
@@ -231,6 +235,20 @@ func (s *dsgReclaimFixture) layerHash(ctx context.Context, desc ocispec.Descript
 	}
 	raw, err := io.ReadAll(io.LimitReader(f, desc.Size+1))
 	if err != nil || int64(len(raw)) != desc.Size || digest.FromBytes(raw) != desc.Digest || !dsgAllocationMatches(fd, "", st) {
+		return "", ErrDSGExactPreserve
+	}
+	archive := tar.NewReader(bytes.NewReader(raw))
+	entry, err := archive.Next()
+	payload := s.payload("snapshot", role)
+	if err != nil || entry.Typeflag != tar.TypeReg || strings.TrimPrefix(entry.Name, "./") != dsgManifestlessFile ||
+		entry.Size != int64(len(payload)) {
+		return "", ErrDSGExactPreserve
+	}
+	data, err := io.ReadAll(io.LimitReader(archive, int64(len(payload))+1))
+	if err != nil || !bytes.Equal(data, []byte(payload)) {
+		return "", ErrDSGExactPreserve
+	}
+	if _, err = archive.Next(); !errors.Is(err, io.EOF) {
 		return "", ErrDSGExactPreserve
 	}
 	alloc, err := dsgObserveAllocation(ctx, int(s.dir.Fd()), parts, nil, false, uint64(desc.Size))
@@ -256,11 +274,11 @@ func (s *dsgReclaimFixture) content(ctx context.Context) (target, peer string, e
 	if err != nil {
 		return "", "", err
 	}
-	peer, err = s.layerHash(ctx, peerBlob)
+	peer, err = s.layerHash(ctx, peerBlob, "peer")
 	if err != nil || !exists {
 		return "", peer, err
 	}
-	target, err = s.layerHash(ctx, targetBlob)
+	target, err = s.layerHash(ctx, targetBlob, "target")
 	return
 }
 
@@ -305,7 +323,7 @@ func (s *dsgReclaimFixture) evidence(ctx context.Context, stage int) (target, pe
 }
 
 func (s *dsgReclaimFixture) observe(ctx context.Context, p dsgRecoveryPlan, stage int) (dsgRecoveryObservation, error) {
-	if p != s.plan || !p.valid(dsgNativeReclamationQualification) || stage < 0 || stage >= len(p.stages()) {
+	if p != s.plan || !(p.valid(dsgNativeReclamationQualification) || p.valid(dsgNativeSameMount)) || stage < 0 || stage >= len(p.stages()) {
 		return dsgRecoveryUnknown, ErrDSGExactPreserve
 	}
 	target, peer, err := s.evidence(ctx, stage)
