@@ -32,6 +32,8 @@ Linux ARM64 코어는 쓰기 요청의 연결 피어와 메시지별 커널 자�
 
 BuildKit v0.35.1의 DSG 소스 오버레이는 캐시 관리자의 메모리에서 전체 ID, 참조, 가변·불변 별칭과 공유 스냅샷·blob을 조회한다. 적용 진입점은 모든 작성자가 공유하는 내부 변경 경계를 요구한다. 표준 워커에는 이 경계가 없어 적용은 보존한다. 격리 트랜잭션은 참조와 저장소 객체가 없는 독립 메타데이터만 대상으로 하며 논리적 제거 및 영속 영수증을 시험한다. 물리 회수량은 독립 할당량 측정이 있을 때만 기록한다. [캐시 관측과 적용 경로](../integrations/buildkit-exact/cache/dsg_exact_apply.go)
 
+패치된 OCI/native 전용 데몬은 초기화 전에 보호된 디렉터리의 inode에 배타 잠금을 잡고 프로세스 종료까지 유지한다. 오프라인 조회와 합성 적용은 같은 잠금을 사용한다. 공통 잠금의 보장은 전용 모드를 준수하는 프로세스에 적용된다. 실제 backing을 변경하려면 잔존 실행기·마운트와 독립 작성자가 없는지 확인하고, solver·cache·containerd·native snapshot 저장소 사이의 대상 참조 및 중단 복구를 추가로 검증한다. [공통 잠금 구현](../integrations/buildkit-exact/cache/dsg_worker_boundary_unix.go)
+
 에이전트 훅 실패 시 차단 여부는 CLI의 동작에 따른다. macOS에서 Docker 직접 접근을 통제하는 수용 기준은 샌드박스와 검증된 서비스 경계로 적용한다. Windows의 경우 SCM이 소유한 named pipe에서 허용 SID를 검증한다. [에이전트 운영](OPERATIONS.md#에이전트-연동-운영)
 
 ## Python POC 경고

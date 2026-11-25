@@ -110,6 +110,8 @@ BuildKit v0.35.1 소스 오버레이는 공식 캐시 관리자와 네이티브 
 
 공식 커밋의 codeload 아카이브를 확보한 뒤 `python3 scripts/prepare-buildkit-exact.py <공식 아카이브> <신규 임시 디렉터리>`로 준비한다. 아카이브 SHA-256 불일치는 디렉터리 생성 전에 거절한다. 준비한 소스 디렉터리에서 `go test -mod=vendor -p=2 -vet=off -run '^TestDSGExact' -timeout=60s ./cache`로 모델 시험을 실행한다. Linux에서만 실제 native snapshotter 통합 시험을 실행한다. [준비기](../scripts/prepare-buildkit-exact.py) · [공식 소스 커밋](https://github.com/moby/buildkit/tree/412cc86ad3c4252b82e929f9b1b1ad167376ded8)
 
+전용 워커 시험은 macOS·Ubuntu의 합성 bbolt에서 같은 inode를 사용하는 쓰기 경합과 커밋 전후 자식 프로세스 종료를 주입한다. 커밋 전에는 대상과 미소비 승인·영수증 부재, 커밋 뒤에는 논리적 제거·승인 소비·영수증과 재적용 거절을 대조한다. 동일 워커의 비대상과 독립 워커의 동일 ID를 함께 확인한다. Ubuntu에서 공식 pinned 소스로 만든 패치 데몬을 격리 실행해 선점된 root의 초기화 거절, 실행 중 유지보수와 오프라인 명령 거절, 다른 root 잠금 가능, 동일 inode 재획득, 오프라인 DB 해시 불변을 확인한다. 격리 데몬의 빈 저장소에 scratch LLB로 합성 캐시 하나를 만들고 독립 OCI 계층의 출처와 공식 정확 ID 조회, 정지 후 캐시 메타데이터의 네이티브 결합을 대조한다. 현재 경로에서 결합이 발견되면 실제 적용을 보존한다. [장애 시험](../integrations/buildkit-exact/cache/dsg_worker_boundary_test.go) · [데몬 실측 실행기](../scripts/check-dedicated-buildkit-fence.py) · [Ubuntu 공통 잠금 및 정확 ID 실측](../dist/dsg-dedicated-worker-dbae7c58d25d/QUALIFICATION.json)
+
 ### Linux ARM64 로컬 제어 서비스 프로브
 
 WBS 5.1의 로컬 읽기 확인은 보호된 root 소켓과 예상 프로세스의 프로토콜 선언을 검증한다. 등록한 서비스의 성공과 소켓 링크·권한·상대 PID·선언 불일치 거절을 확인하고, 성공과 실패 모두 `mutation_authorized=false`와 보존 게이트를 확인한다. 운영 제어기의 출처·권한·배타 변경 경계는 별도로 검증한다. [프로브 구현과 시험](../rust-scaffold/crates/dsg-core/src/docker_control_local.rs)
