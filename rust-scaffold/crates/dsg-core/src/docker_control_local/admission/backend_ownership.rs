@@ -1,5 +1,5 @@
 use super::*;
-use crate::docker_gc_apply::DockerGcKind;
+use crate::docker_gc_apply::{Binding, DockerGcKind};
 use crate::registry::protected_docker_gc_project_owner;
 use std::collections::HashSet;
 
@@ -59,7 +59,6 @@ impl OwnershipManifest {
             || !valid_hash(&value.controller_executable_sha256)
             || !valid_hash(&value.engine_executable_sha256)
             || !valid_hash(&value.store_id)
-            || value.resources.is_empty()
             || value.resources.len() > MAX_RESOURCES
         {
             return Err(QueryFailure::InvalidSelector);
@@ -75,6 +74,27 @@ impl OwnershipManifest {
             }
         }
         Ok(value)
+    }
+
+    fn matches_policy(&self, policy: &ProtectedPolicy<'_>) -> bool {
+        self.admission_policy_sha256 == policy.digest
+            && self.controller_executable_sha256 == policy.value.controller.executable_sha256
+            && self.engine_executable_sha256 == policy.value.engine.executable_sha256
+    }
+
+    fn permits(&self, request: &WriteRequest, binding: &Binding, namespace: &str) -> bool {
+        if binding.endpoint != namespace {
+            return false;
+        }
+        match request {
+            // The controller resolves the exact stored intent before looking up its receipt.
+            // A retired assignment must not strand the last outstanding receipt in this store.
+            WriteRequest::Recover { project_id, .. } => binding.project == *project_id,
+            WriteRequest::Approve { project_id, .. } | WriteRequest::Apply { project_id, .. } => {
+                binding.project == *project_id
+                    && self.owns(*project_id, &binding.owner, binding.kind, &binding.id)
+            }
+        }
     }
 
     fn owns(&self, project: i64, owner: &str, kind: DockerGcKind, id: &str) -> bool {
@@ -105,16 +125,7 @@ pub fn verify_backend_ownership(
     }
     let deadline = Instant::now() + ADMISSION_TIMEOUT;
     check_host_root().map_err(|_| AdmissionUnverified)?;
-    if manifest_path.file_name() != Some(OsStr::new(MANIFEST_FILENAME)) {
-        return Err(ManifestUnverified);
-    }
-    let manifest_file = ProtectedRead::open(manifest_path).map_err(|_| ManifestUnverified)?;
-    let manifest = OwnershipManifest::parse(
-        &manifest_file
-            .read(MAX_MANIFEST_BYTES)
-            .map_err(|_| ManifestUnverified)?,
-    )
-    .map_err(|_| ManifestUnverified)?;
+    let (manifest_file, manifest) = read_manifest(manifest_path).map_err(|_| ManifestUnverified)?;
     let owner = protected_docker_gc_project_owner(state_dir, project)
         .map_err(|_| ProjectOwnershipUnverified)?;
     if !manifest.owns(project, &owner, kind, id) {
@@ -122,10 +133,7 @@ pub fn verify_backend_ownership(
     }
 
     let policy = ProtectedPolicy::open(policy_path).map_err(|_| AdmissionUnverified)?;
-    if manifest.admission_policy_sha256 != policy.digest
-        || manifest.controller_executable_sha256 != policy.value.controller.executable_sha256
-        || manifest.engine_executable_sha256 != policy.value.engine.executable_sha256
-    {
+    if !manifest.matches_policy(&policy) {
         return Err(ManifestUnverified);
     }
     let peers = PinnedPeers::open(&policy.value, deadline).map_err(|_| AdmissionUnverified)?;
@@ -157,6 +165,52 @@ pub fn verify_backend_ownership(
         kind,
         resource_id: id.to_owned(),
     })
+}
+
+fn read_manifest(path: &Path) -> Result<(ProtectedRead, OwnershipManifest)> {
+    if path.file_name() != Some(OsStr::new(MANIFEST_FILENAME)) {
+        return Err(QueryFailure::InvalidSelector);
+    }
+    let file = ProtectedRead::open(path)?;
+    let manifest = OwnershipManifest::parse(&file.read(MAX_MANIFEST_BYTES)?)?;
+    Ok((file, manifest))
+}
+
+/// Pins the assignment and the store held by this controller while its live registry and
+/// engine transaction are in use. Only the separate read-only probe opens an immutable DB.
+pub(crate) struct PinnedBackendOwnership {
+    file: ProtectedRead,
+    manifest: OwnershipManifest,
+    store: PrivateStore,
+}
+
+impl PinnedBackendOwnership {
+    pub(super) fn open(policy: &ProtectedPolicy<'_>) -> Result<Self> {
+        check_host_root()?;
+        let path = policy.path.with_file_name(MANIFEST_FILENAME);
+        let (file, manifest) = read_manifest(&path)?;
+        if !manifest.matches_policy(policy) {
+            return Err(QueryFailure::InvalidSelector);
+        }
+        let store = PrivateStore::open(&manifest, policy.value.controller.pid)?;
+        let ownership = Self {
+            file,
+            manifest,
+            store,
+        };
+        ownership.check_current()?;
+        Ok(ownership)
+    }
+
+    pub(crate) fn permits(&self, request: &WriteRequest, binding: &Binding) -> bool {
+        self.manifest
+            .permits(request, binding, &self.store.namespace)
+    }
+
+    pub(crate) fn check_current(&self) -> Result<()> {
+        self.file.check_current()?;
+        self.store.check_current()
+    }
 }
 
 fn check_host_root() -> Result<()> {
@@ -210,16 +264,16 @@ impl ProtectedRead {
     }
 }
 
-struct PrivateStore<'a> {
-    directory: &'a Path,
+struct PrivateStore {
+    directory: PathBuf,
     held_path: PathBuf,
     descriptor: File,
     marker: ProtectedRead,
     namespace: String,
 }
 
-impl<'a> PrivateStore<'a> {
-    fn open(manifest: &'a OwnershipManifest, controller_pid: i32) -> Result<Self> {
+impl PrivateStore {
+    fn open(manifest: &OwnershipManifest, controller_pid: i32) -> Result<Self> {
         let directory = manifest.store_directory.as_path();
         let held_path = PathBuf::from(format!(
             "/proc/{controller_pid}/fd/{}",
@@ -233,7 +287,7 @@ impl<'a> PrivateStore<'a> {
         let marker = ProtectedRead::open(&marker_path)?;
         let namespace = store_namespace(&marker.read(65)?, &manifest.store_id)?;
         let store = Self {
-            directory,
+            directory: directory.to_owned(),
             held_path,
             descriptor,
             marker,
@@ -244,7 +298,7 @@ impl<'a> PrivateStore<'a> {
     }
 
     fn check_current(&self) -> Result<()> {
-        let current = open_protected(self.directory, false)?
+        let current = open_protected(&self.directory, false)?
             .metadata()
             .map_err(io_failure)?;
         let directory = self.descriptor.metadata().map_err(io_failure)?;
@@ -310,6 +364,50 @@ mod tests {
         assert!(!ownership.owns(1, &"a".repeat(64), DockerGcKind::Image, image));
         assert!(!ownership.owns(1, owner, DockerGcKind::BuildCache, image));
         assert!(!ownership.owns(1, owner, DockerGcKind::Image, &image[..16]));
+    }
+
+    #[test]
+    fn empty_assignment_allows_only_receipt_lookup_for_the_same_project_and_store() {
+        let mut value = manifest();
+        let original = parse(&value).unwrap();
+        let resource = &original.resources[0];
+        let store_id = value["store_id"].as_str().unwrap();
+        let namespace = store_namespace(format!("{store_id}\n").as_bytes(), store_id).unwrap();
+        let binding = Binding {
+            project: resource.project_id,
+            owner: resource.project_owner_sha256.clone(),
+            kind: resource.kind,
+            id: resource.id.clone(),
+            endpoint: namespace.clone(),
+            generation: "1".repeat(64),
+            snapshot: "2".repeat(64),
+        };
+        value["resources"] = json!([]);
+        let empty = parse(&value).unwrap();
+        let project_id = binding.project;
+        let recover = WriteRequest::Recover {
+            project_id,
+            intent_id: "3".repeat(64),
+        };
+        assert!(empty.permits(&recover, &binding, &namespace));
+        assert!(!empty.permits(&recover, &binding, &"4".repeat(64)));
+        let other_project = WriteRequest::Recover {
+            project_id: project_id + 1,
+            intent_id: "3".repeat(64),
+        };
+        assert!(!empty.permits(&other_project, &binding, &namespace));
+        for request in [
+            WriteRequest::Approve {
+                project_id,
+                plan_id: 1,
+            },
+            WriteRequest::Apply {
+                project_id,
+                plan_id: 1,
+            },
+        ] {
+            assert!(!empty.permits(&request, &binding, &namespace));
+        }
     }
 
     #[test]

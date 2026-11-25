@@ -1,7 +1,7 @@
 use super::super::{hash, Binding, Effect, Observation, Receipt, Usage};
 use super::*;
 use crate::docker_cache::CacheRecordState;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use std::cell::Cell;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -12,9 +12,9 @@ const CACHE: &str = "exclusive-cache-record";
 struct Backend {
     engine: ControllerEvidence,
     binding: Binding,
-    present: bool,
+    native: Connection,
     retain_receipt: bool,
-    receipt: Option<Intent>,
+    acknowledge: bool,
     ledger: PathBuf,
     competing_project: i64,
     observations: usize,
@@ -22,27 +22,107 @@ struct Backend {
     reads: usize,
 }
 
+fn read_observation(
+    conn: &Connection,
+    owner: &str,
+    kind: DockerGcKind,
+    id: &str,
+) -> Option<Observation> {
+    let json: String = conn
+        .query_row("SELECT binding FROM target WHERE id = ?1", [id], |row| {
+            row.get(0)
+        })
+        .optional()
+        .unwrap()?;
+    let binding: Binding = serde_json::from_str(&json).unwrap();
+    (binding.owner == owner && binding.id == id && binding.kind == kind).then_some(Observation {
+        binding,
+        unreferenced: Some(true),
+        usage: Usage::BuildCache(CacheRecordState {
+            reclaimable: true,
+            shared: false,
+            mutable: false,
+        }),
+    })
+}
+
+impl Backend {
+    fn seed(&self, binding: &Binding) {
+        self.native
+            .execute(
+                "INSERT OR REPLACE INTO target(id, binding) VALUES (?1, ?2)",
+                params![binding.id, serde_json::to_string(binding).unwrap()],
+            )
+            .unwrap();
+    }
+
+    fn present(&self, id: &str) -> bool {
+        self.native
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM target WHERE id = ?1)",
+                [id],
+                |r| r.get(0),
+            )
+            .unwrap()
+    }
+
+    fn replace_receipt(&self, value: &Intent) {
+        self.native
+            .execute(
+                "INSERT OR REPLACE INTO receipt(operation, intent) VALUES (?1, ?2)",
+                params![value.operation, serde_json::to_string(value).unwrap()],
+            )
+            .unwrap();
+    }
+}
+
 impl ControlledDockerGc for Backend {
     fn observe(&mut self, owner: &str, kind: DockerGcKind, id: &str) -> Option<Observation> {
         self.observations += 1;
-        (self.present
-            && self.binding.owner == owner
-            && self.binding.id == id
-            && self.binding.kind == kind)
-            .then(|| Observation {
-                binding: self.binding.clone(),
-                unreferenced: Some(true),
-                usage: Usage::BuildCache(CacheRecordState {
-                    reclaimable: true,
-                    shared: false,
-                    mutable: false,
-                }),
-            })
+        read_observation(&self.native, owner, kind, id)
     }
 
-    fn apply_if_current(&mut self, intent: &Intent) -> Option<Receipt> {
-        self.attempts += 1;
-        let ledger = Connection::open(&self.ledger).unwrap();
+    fn apply_if_current(&mut self, _intent: &Intent) -> Option<Receipt> {
+        panic!("exclusive dispatch may only commit a prepared native transaction")
+    }
+
+    fn receipt(&mut self, intent: &Intent) -> Option<Receipt> {
+        self.reads += 1;
+        let json: String = self
+            .native
+            .query_row(
+                "SELECT intent FROM receipt WHERE operation = ?1",
+                [&intent.operation],
+                |row| row.get(0),
+            )
+            .optional()
+            .unwrap()?;
+        Some(Receipt {
+            intent: serde_json::from_str(&json).unwrap(),
+            effect: Effect::Applied(23),
+        })
+    }
+}
+
+struct Prepared<'a> {
+    tx: Transaction<'a>,
+    observation: Observation,
+    ledger: &'a std::path::Path,
+    competing_project: i64,
+    attempts: &'a mut usize,
+    retain_receipt: bool,
+    acknowledge: bool,
+}
+
+impl PreparedDockerGc for Prepared<'_> {
+    fn observed(&self) -> &Observation {
+        &self.observation
+    }
+
+    fn commit(self: Box<Self>, claim: ClaimedDockerGc<'_>) -> bool {
+        let intent = claim.intent();
+        *self.attempts += 1;
+        let ledger = Connection::open(self.ledger).unwrap();
         let claimed = ledger
             .query_row(
                 "SELECT EXISTS (SELECT 1 FROM gc_plan AS plan
@@ -67,24 +147,28 @@ impl ControlledDockerGc for Backend {
             ),
             Err(RegistryError::LeaseCapacity)
         ));
-        assert_eq!(self.binding, intent.binding);
-        assert!(self.present);
-        self.present = false;
-        self.retain_receipt.then(|| {
-            self.receipt = Some(intent.clone());
-            Receipt {
-                intent: intent.clone(),
-                effect: Effect::Applied(23),
-            }
-        })
-    }
-
-    fn receipt(&mut self, _intent: &Intent) -> Option<Receipt> {
-        self.reads += 1;
-        self.receipt.clone().map(|intent| Receipt {
-            intent,
-            effect: Effect::Applied(23),
-        })
+        assert_eq!(self.observation.binding, intent.binding);
+        let changed = self
+            .tx
+            .execute(
+                "DELETE FROM target WHERE id = ?1 AND binding = ?2",
+                params![
+                    intent.binding.id,
+                    serde_json::to_string(&intent.binding).unwrap()
+                ],
+            )
+            .unwrap();
+        assert_eq!(changed, 1);
+        if self.retain_receipt {
+            self.tx
+                .execute(
+                    "INSERT INTO receipt(operation,intent) VALUES (?1,?2)",
+                    params![intent.operation, serde_json::to_string(intent).unwrap()],
+                )
+                .unwrap();
+        }
+        self.tx.commit().unwrap();
+        self.acknowledge
     }
 }
 
@@ -94,6 +178,25 @@ impl ExclusiveDockerGc for Backend {
             admission: &self.engine,
             namespace: &self.binding.endpoint,
         })
+    }
+
+    fn prepare(&mut self, intent: &Intent) -> Option<Box<dyn PreparedDockerGc + '_>> {
+        self.observations += 1;
+        let tx = self
+            .native
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .unwrap();
+        let binding = &intent.binding;
+        let observation = read_observation(&tx, &binding.owner, binding.kind, &binding.id)?;
+        Some(Box::new(Prepared {
+            tx,
+            observation,
+            ledger: &self.ledger,
+            competing_project: self.competing_project,
+            attempts: &mut self.attempts,
+            retain_receipt: self.retain_receipt,
+            acknowledge: self.acknowledge,
+        }))
     }
 }
 
@@ -164,7 +267,15 @@ impl Fixture {
             generation: engine.generation.clone(),
             snapshot: hash(b"current snapshot"),
         };
-        Self {
+        let native = Connection::open(state.join("native-fixture.sqlite3")).unwrap();
+        native
+            .execute_batch(
+                "PRAGMA synchronous=FULL;
+            CREATE TABLE target(id TEXT PRIMARY KEY, binding TEXT NOT NULL);
+            CREATE TABLE receipt(operation TEXT PRIMARY KEY, intent TEXT NOT NULL);",
+            )
+            .unwrap();
+        let fixture = Self {
             _temp: temp,
             registry,
             project,
@@ -172,16 +283,18 @@ impl Fixture {
             backend: Backend {
                 engine,
                 binding,
-                present: true,
+                native,
                 retain_receipt: true,
-                receipt: None,
+                acknowledge: true,
                 ledger: state.join("registry.sqlite3"),
                 competing_project,
                 observations: 0,
                 attempts: 0,
                 reads: 0,
             },
-        }
+        };
+        fixture.backend.seed(&fixture.backend.binding);
+        fixture
     }
 
     fn plan(&mut self) -> i64 {
@@ -222,6 +335,7 @@ impl Fixture {
             &request,
             &epoch.view(),
             || true,
+            |_| true,
         )
     }
 
@@ -330,7 +444,7 @@ fn exclusive_dispatch_consumes_only_the_matching_approval_once() {
     );
     assert!(fixture.apply(&lease, plan, &epoch).is_err());
     assert_eq!(fixture.backend.attempts, 1);
-    assert!(!fixture.backend.present);
+    assert!(!fixture.backend.present(CACHE));
 }
 
 #[test]
@@ -359,7 +473,7 @@ fn exclusive_dispatch_recovers_only_an_exact_receipt_across_rotation() {
     rotated.approver = evidence(b"rotated approver");
     // A new observation can exist on an engine after an indeterminate result. It cannot
     // grant a competing approval while SQLite still has an unresolved intent for this target.
-    fixture.backend.present = true;
+    fixture.backend.seed(&fixture.backend.binding);
     assert!(matches!(
         fixture.dispatch(
             &lease,
@@ -392,19 +506,19 @@ fn exclusive_dispatch_recovers_only_an_exact_receipt_across_rotation() {
     assert!(fixture
         .recover(&lease, &hash(b"unrelated operation"), &rotated)
         .is_err());
-    assert_eq!(fixture.backend.reads, 0);
+    assert_eq!(fixture.backend.reads, 1);
     assert_eq!(
         fixture.recover(&lease, &intent_id, &rotated).unwrap(),
         DockerGcDispatchResult::Recovered(UNKNOWN)
     );
     let mut wrong = saved.clone();
     wrong.binding.snapshot = hash(b"unrelated snapshot");
-    fixture.backend.receipt = Some(wrong);
+    fixture.backend.replace_receipt(&wrong);
     assert_eq!(
         fixture.recover(&lease, &intent_id, &rotated).unwrap(),
         DockerGcDispatchResult::Recovered(UNKNOWN)
     );
-    fixture.backend.receipt = Some(saved);
+    fixture.backend.replace_receipt(&saved);
     assert_eq!(
         fixture.recover(&lease, &intent_id, &rotated).unwrap(),
         DockerGcDispatchResult::Recovered(APPLIED)
@@ -412,7 +526,7 @@ fn exclusive_dispatch_recovers_only_an_exact_receipt_across_rotation() {
     assert!(fixture.recover(&lease, &intent_id, &rotated).is_err());
     assert_eq!(fixture.backend.observations, observations);
     assert_eq!(fixture.backend.attempts, 1);
-    assert_eq!(fixture.backend.reads, 3);
+    assert_eq!(fixture.backend.reads, 4);
 }
 
 #[test]
@@ -438,6 +552,7 @@ fn exclusive_dispatch_revalidates_before_unchanged_authority_can_mutate() {
                 validations.set(count);
                 count < 3
             },
+            |_| true,
         )
         .unwrap();
     assert_eq!(validations.get(), 3);
@@ -450,5 +565,122 @@ fn exclusive_dispatch_revalidates_before_unchanged_authority_can_mutate() {
     );
     assert!(fixture.apply(&lease, plan, &epoch).is_err());
     assert_eq!(fixture.backend.attempts, 0);
-    assert!(fixture.backend.present);
+    assert!(fixture.backend.present(CACHE));
+}
+
+#[test]
+fn exclusive_dispatch_rejects_stale_assignment_and_locked_snapshot() {
+    let mut fixture = Fixture::new();
+    let plan = fixture.plan();
+    let lease = fixture.lease();
+    let epoch = Epoch::new();
+    fixture.approve(&lease, plan, &epoch);
+    let request = WriteRequest::Apply {
+        project_id: fixture.project,
+        plan_id: plan,
+    };
+    for (store, id) in [
+        (hash(b"other store"), CACHE),
+        (fixture.backend.binding.endpoint.clone(), "another-record"),
+    ] {
+        let result = DockerGcDispatch::new(&mut fixture.backend).dispatch_request(
+            &mut fixture.registry,
+            &lease,
+            &fixture.policy,
+            &request,
+            &epoch.view(),
+            || true,
+            |binding| binding.endpoint == store && binding.id == id,
+        );
+        assert!(matches!(result, Err(DockerGcError::UnverifiedControl)));
+    }
+    let mut stale = fixture.backend.binding.clone();
+    stale.snapshot = hash(b"snapshot changed after plan");
+    fixture.backend.seed(&stale);
+    assert!(matches!(
+        fixture.apply(&lease, plan, &epoch),
+        Err(DockerGcError::UnverifiedCandidate)
+    ));
+    let ledger = Connection::open(&fixture.backend.ledger).unwrap();
+    let claimed: bool = ledger
+        .query_row(
+            "SELECT claimed_at_ms IS NOT NULL FROM gc_application WHERE plan_id=?1",
+            [plan],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(!claimed);
+    assert!(fixture.backend.present(CACHE));
+    assert_eq!(fixture.backend.attempts, 0);
+}
+
+#[test]
+fn exclusive_dispatch_recovers_durable_receipt_after_lost_commit_response() {
+    let mut fixture = Fixture::new();
+    let plan = fixture.plan();
+    let lease = fixture.lease();
+    let epoch = Epoch::new();
+    let intent_id = fixture.approve(&lease, plan, &epoch);
+    let mut other = fixture.backend.binding.clone();
+    other.id = "unrelated-exact-record".into();
+    fixture.backend.seed(&other);
+    fixture.backend.acknowledge = false;
+
+    let path = fixture
+        .backend
+        .ledger
+        .with_file_name("native-fixture.sqlite3");
+    let contender = Connection::open(&path).unwrap();
+    contender.busy_timeout(Duration::ZERO).unwrap();
+    let ledger = Connection::open(&fixture.backend.ledger).unwrap();
+    let validations = Cell::new(0);
+    let request = WriteRequest::Apply {
+        project_id: fixture.project,
+        plan_id: plan,
+    };
+    let result = DockerGcDispatch::new(&mut fixture.backend)
+        .dispatch_request(
+            &mut fixture.registry,
+            &lease,
+            &fixture.policy,
+            &request,
+            &epoch.view(),
+            || {
+                let step = validations.get() + 1;
+                validations.set(step);
+                if step >= 2 {
+                    let error = contender.execute_batch("BEGIN IMMEDIATE").unwrap_err();
+                    assert_eq!(
+                        error.sqlite_error_code(),
+                        Some(rusqlite::ErrorCode::DatabaseBusy)
+                    );
+                    let claimed: bool = ledger
+                        .query_row(
+                            "SELECT claimed_at_ms IS NOT NULL FROM gc_application WHERE plan_id=?1",
+                            [plan],
+                            |r| r.get(0),
+                        )
+                        .unwrap();
+                    assert_eq!(claimed, step == 3);
+                }
+                true
+            },
+            |_| true,
+        )
+        .unwrap();
+    assert_eq!(validations.get(), 3);
+    assert_eq!(result, DockerGcDispatchResult::Applied(UNKNOWN));
+    fixture.backend.native = Connection::open(&path).unwrap();
+    assert!(!fixture.backend.present(CACHE));
+    let untouched =
+        read_observation(&fixture.backend.native, &other.owner, other.kind, &other.id).unwrap();
+    assert_eq!(untouched.binding, other);
+    assert!(fixture.apply(&lease, plan, &epoch).is_err());
+    assert_eq!(
+        fixture.recover(&lease, &intent_id, &epoch).unwrap(),
+        DockerGcDispatchResult::Recovered(APPLIED)
+    );
+    assert!(fixture.recover(&lease, &intent_id, &epoch).is_err());
+    assert_eq!(fixture.backend.attempts, 1);
+    assert_eq!(fixture.backend.reads, 1);
 }

@@ -1,0 +1,48 @@
+#!/usr/bin/env python3
+"""Prepare the DSG cache overlay in a new copy of the pinned official source."""
+import argparse
+import hashlib
+import io
+from pathlib import Path, PurePosixPath
+import shutil
+import tarfile
+
+COMMIT = "412cc86ad3c4252b82e929f9b1b1ad167376ded8"
+ARCHIVE_SHA256 = "dce31a3f405045af3406a626b6888dd347103222764c2bf11bbf4286aafed9b8"
+ARCHIVE_LIMIT = 16 << 20
+
+
+def prepare(archive, destination):
+    with archive.open("rb") as handle:
+        data = handle.read(ARCHIVE_LIMIT + 1)
+    if len(data) > ARCHIVE_LIMIT or hashlib.sha256(data).hexdigest() != ARCHIVE_SHA256:
+        raise SystemExit("official v0.35.1 source archive digest mismatch")
+    # The validated archive bytes are immutable throughout extraction. Create
+    # only ordinary source files, and never overlay an existing checkout.
+    destination.mkdir(mode=0o700)
+    with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
+        for item in tar:
+            path = PurePosixPath(item.name)
+            if path.is_absolute() or ".." in path.parts or path.parts[0] != f"buildkit-{COMMIT}":
+                raise SystemExit("invalid upstream source path")
+            if not item.isfile() or path.name == ".env" or ".env." in path.name:
+                continue
+            if path.suffix.lower() in {".env", ".crt", ".key", ".pem", ".pfx", ".p12", ".der"}:
+                continue
+            target = destination.joinpath(*path.parts[1:])
+            target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            with tar.extractfile(item) as source, target.open("xb") as output:
+                shutil.copyfileobj(source, output)
+    overlay = Path(__file__).resolve().parents[1] / "integrations/buildkit-exact/cache"
+    for source in sorted(overlay.glob("dsg_*.go")):
+        with source.open("rb") as handle, (destination / "cache" / source.name).open("xb") as output:
+            shutil.copyfileobj(handle, output)
+    print(f"prepared official BuildKit {COMMIT} with the DSG cache overlay")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("archive", type=Path, help="official GitHub codeload tar.gz for commit " + COMMIT)
+    parser.add_argument("destination", type=Path, help="new source directory in caller-owned scratch")
+    args = parser.parse_args()
+    prepare(args.archive, args.destination)
