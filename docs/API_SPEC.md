@@ -151,6 +151,16 @@ Linux ARM64에서 `/opt/dsg/bin/dsg buildkit-exact-service`는 `/run/dsg-buildki
 
 동일 체크포인트에서 로컬 승인을 소비하고 동기화한 뒤에만 마운트를 쓰기 가능으로 전환한다. 외부 상태·응답의 유실, 재요청, 타임아웃, 범위 불일치 또는 로컬 체크포인트 변경은 적용을 보존으로 처리한다. 새 적용은 기존 외부 표식을 보존한 상태에서 별도 등록과 승인을 거친다.
 
+### 스냅샷 밖 단일 실행
+
+스냅샷을 사용하는 호출 환경에서는 스냅샷 밖의 실행 호스트가 전용 워커의 쓰기 권한과 네이티브 실행을 보유한다. 승인·실행 요청은 기존의 역할·범위 검사를 거친다. 외부 실행기의 표준 입출력은 인증을 끝낸 실행 요청 하나를 전달하기 위한 관리 전송이다. 워커 VM 내부의 네이티브 `apply`를 그대로 사용하면 외부 최초 적용 확인 응답 이후의 RAM 복원에 영향을 받는다. [배치 조건](OPERATIONS.md#스냅샷-밖-전용-실행기)
+
+요청은 ASCII `DSG-EXECUTION-1 <registration> <job_sha256>` 한 줄과 LF, EOF로 끝난다. 등록 ID는 소문자 16진수 12–64자다. 작업 해시는 실행 호스트에 미리 보관한 `job.json`의 원본 바이트를 SHA-256으로 계산한 소문자 16진수 64자다. `job.json`은 `version: 1`, `registration`, 전체 `scope`, `operator_sha256`을 포함한다. 호출자가 실행 파일, 인자, 상태 경로 또는 적용 범위를 요청에 넣을 수 없다.
+
+실행기는 잠근 `execution-state.json`의 작업 해시와 `ready` 상태를 확인한다. 해당 파일의 장치와 inode에 연결한 `execution-claimed`를 배타 생성해 파일과 상위 디렉터리를 동기화하고, 같은 상태 파일을 `pending`으로 기록하고 동기화한 뒤에만 해시가 고정된 네이티브 `apply`를 시작한다. 네이티브 경로는 외부 최초 적용 확인과 로컬 승인 소비를 수행한다. 네이티브 성공 영수증의 범위, 논리 레코드 1건과 `PhysicalBytes: null`을 확인한 뒤 `settled` 상태와 영수증을 저장하고 동기화한다.
+
+성공은 `{"status":"settled","receipt":{…}}`와 종료 0이다. 동일 요청에서 이미 완료한 상태와 시작 표식이 일치하면 저장한 영수증을 반환한다. `pending`, 잠금 경합, 타임아웃, 상태 파일 유실, 완료 상태의 시작 표식 유실 또는 불일치는 `{"status":"preserve"}`와 종료 1로 처리한다. 전송이 끊긴 경우 보존 응답도 유실될 수 있다. 실행기는 확인이 끝나지 않은 변경을 자동으로 재시도하지 않는다. [외부 실행기](../scripts/buildkit-external-executor.py)
+
 ### 보관된 운영 영수증 검증
 
 `scripts/check-buildkit-settled-receipt.py`는 `--archive`, `--archive-sha256`, `--custody-sha256`, `--record-id`를 받는다. 운영 실측 아카이브는 `purpose: operating_controller`와 `attempt.postconditions.completion_store_hashes`의 `checkpoint`, `ledger_witness`를 포함한다. 두 필드는 같은 64자리 소문자 SHA-256이어야 한다. 기존 원장·저널·네이티브 저장소 해시, 적용과 읽기 전용 복구의 동일 영수증, 같은 읽기 전용 마운트 및 DB 사후조건도 함께 검사한다. 이 계약의 입력은 운영 응답을 포함해 별도로 보관한 아카이브다.

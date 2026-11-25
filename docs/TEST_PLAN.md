@@ -188,6 +188,12 @@ WBS 1.4·5.1은 전용 Ubuntu Parallels ARM64 Moby에서 합성 이미지 한 �
 - 공개 적용은 외부 소켓 부재 또는 거절 상태에서 쓰기 전환과 로컬 승인 소비를 차단해야 한다. 권한 요청에 실제 승인 체크포인트와 전체 범위를 보내는지도 회수 0건의 합성 승인으로 확인한다. [공개 네이티브 적용 실측](../dist/dsg-buildkit-freshness-native-bb291657c762/NATIVE-GATE-VERIFICATION.json)
 - 요청 전 QEMU 전체 복원 후에는 기존 외부 사용 기록과 동일 범위를 다시 소비할 수 없어야 한다. 승인 응답 수신 뒤의 복원이나 외부 권한 상태 자체의 롤백 차단은 별도 게이트다. [전체 복원 후 외부 승인 결과](../dist/dsg-buildkit-freshness-verification-e09e333/QEMU-EXTERNAL-FRESHNESS.json)
 
+### 승인 응답 이후 VM 복원과 외부 실행
+
+- 게스트 밖에서 온 승인 응답을 받은 시점과 완료 영수증을 받은 시점의 게스트 RAM·qcow2를 각각 저장한다. 외부 승인 저장소를 사용 전으로 되돌리되 독립 실행 기록과 최초 실행 표식은 유지한다. 두 전체 복원 뒤 재요청에 동일 영수증이 반환되고 합성 변경은 한 건이어야 한다. 게스트에는 네이티브 실행 파일과 대상 워커 저장소가 없어야 한다. [QEMU 실측](../dist/dsg-buildkit-external-execution-46d8826/qualification/POST-RESPONSE-VM-RESTORES.json)
+- Linux의 실제 외부 실행기 CLI에서 고정 실행 파일 경로와 SHA-256, 작업 범위, 정산 영수증을 확인한다. 원장만 과거 `ready`로 되돌린 경우에는 최초 실행 표식을 근거로 차단하고, 정상 상태 복원 뒤 정산 응답을 재조회해도 효과를 추가하지 않는다. [Linux CLI 실측](../dist/dsg-buildkit-external-execution-46d8826/LINUX-EXTERNAL-EXECUTION-CLI.json)
+- 실제 운영 계정·독점 변경 경계·영수증 보관과 격리 물리 환경의 전원 장애는 지정 운영 및 시험 호스트에서 확인한다. 외부 실행 기록과 최초 실행 표식의 동시 롤백을 재현하려면 더 바깥의 신뢰 경계가 필요하다. [사전 점검](../dist/dsg-buildkit-external-execution-46d8826/OPERATING-AND-POWER-PREFLIGHT.json)
+
 ## 에이전트 연동 검증
 
 `sh scripts/test-rust.sh`는 합성 프로젝트의 훅 설치·중복 방지·설정 보존·제거, 허용·거부·잘못된 JSON 응답과 MCP의 읽기 전용 목록·쓰기 거절을 확인한다. 정리 후보를 조회한 뒤 상태 폴더가 생기지 않아야 한다.
