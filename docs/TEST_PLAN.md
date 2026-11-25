@@ -192,7 +192,13 @@ WBS 1.4·5.1은 전용 Ubuntu Parallels ARM64 Moby에서 합성 이미지 한 �
 
 - 게스트 밖에서 온 승인 응답을 받은 시점과 완료 영수증을 받은 시점의 게스트 RAM·qcow2를 각각 저장한다. 외부 승인 저장소를 사용 전으로 되돌리되 독립 실행 기록과 최초 실행 표식은 유지한다. 두 전체 복원 뒤 재요청에 동일 영수증이 반환되고 합성 변경은 한 건이어야 한다. 게스트에는 네이티브 실행 파일과 대상 워커 저장소가 없어야 한다. [QEMU 실측](../dist/dsg-buildkit-external-execution-46d8826/qualification/POST-RESPONSE-VM-RESTORES.json)
 - Linux의 실제 외부 실행기 CLI에서 고정 실행 파일 경로와 SHA-256, 작업 범위, 정산 영수증을 확인한다. 원장만 과거 `ready`로 되돌린 경우에는 최초 실행 표식을 근거로 차단하고, 정상 상태 복원 뒤 정산 응답을 재조회해도 효과를 추가하지 않는다. [Linux CLI 실측](../dist/dsg-buildkit-external-execution-46d8826/LINUX-EXTERNAL-EXECUTION-CLI.json)
-- 실제 운영 계정·독점 변경 경계·영수증 보관과 격리 물리 환경의 전원 장애는 지정 운영 및 시험 호스트에서 확인한다. 외부 실행 기록과 최초 실행 표식의 동시 롤백을 재현하려면 더 바깥의 신뢰 경계가 필요하다. [사전 점검](../dist/dsg-buildkit-external-execution-46d8826/OPERATING-AND-POWER-PREFLIGHT.json)
+- 실제 운영 계정·독점 변경 경계·영수증 보관과 격리 물리 환경의 전원 장애는 지정 운영 및 시험 호스트에서 확인한다. 외부 실행 기록과 최초 실행 표식의 동시 롤백은 아래 독립 예약 시험에서 다룬다. [사전 점검](../dist/dsg-buildkit-external-execution-46d8826/OPERATING-AND-POWER-PREFLIGHT.json)
+
+### 실행 원장 동시 롤백과 독립 예약
+
+- 보호 소켓으로 등록·범위·작업 해시를 제출한다. 최초 실행 표식과 `pending`을 동기화한 뒤 일회성 확인을 받아야 합성 변경을 시작한다. 불일치, 소켓 부재, 거절 또는 불완전 응답은 변경 전 차단한다. [API 명세](API_SPEC.md#독립-실행-예약)
+- Linux 외부 실행기의 원장을 같은 inode에서 `ready`로 되감고 최초 실행 표식을 제거한다. VM 밖 독립 예약 기록이 보존된 상태에서 같은 요청을 보내면 합성 변경 총 1건, 재변경 0건이어야 한다. 원본 정산 상태와 표식을 복원하고 예약 소켓을 제거한 뒤 영수증의 바이트가 일치해야 한다. [Linux·macOS 실측](../dist/dsg-buildkit-independent-fence-b12b208/qualification/LINUX-JOINT-ROLLBACK.json)
+- 운영 승인자·실행자의 권한 연결, 실제 워커의 독점 변경권, 독립 영수증 보관은 지정 운영 환경에서 검증한다. 물리 전원 차단, 독립 예약 상태까지 되감기는 경우, 외부 실행기 자체의 예약 응답 후 RAM 복원은 별도 시험으로 다룬다. [사전 점검](../dist/dsg-buildkit-independent-fence-b12b208/qualification/OPERATING-AND-POWER-PREFLIGHT.json)
 
 ## 에이전트 연동 검증
 
