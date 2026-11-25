@@ -33,11 +33,35 @@ def prepare(archive, destination):
             target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             with tar.extractfile(item) as source, target.open("xb") as output:
                 shutil.copyfileobj(source, output)
-    overlay = Path(__file__).resolve().parents[1] / "integrations/buildkit-exact/cache"
-    for source in sorted(overlay.glob("dsg_*.go")):
-        with source.open("rb") as handle, (destination / "cache" / source.name).open("xb") as output:
-            shutil.copyfileobj(handle, output)
-    print(f"prepared official BuildKit {COMMIT} with the DSG cache overlay")
+    overlay = Path(__file__).resolve().parents[1] / "integrations/buildkit-exact"
+    for package in ("cache", "cmd/buildkitd"):
+        for source in sorted((overlay / package).glob("dsg_*.go")):
+            with source.open("rb") as handle, (destination / package / source.name).open("xb") as output:
+                shutil.copyfileobj(handle, output)
+    main = destination / "cmd/buildkitd/main.go"
+    source = main.read_text()
+    insertions = {
+        '\t\t&cli.StringFlag{\n\t\t\tName:  "root",': (
+            '\t\t&cli.BoolFlag{Name: "dsg-dedicated-worker", Usage: "own a private native OCI worker root for the daemon lifetime"},\n'
+            '\t\t&cli.BoolFlag{Name: "dsg-inspect-dedicated-worker", Usage: "inspect an offline dedicated native worker"},\n'
+            '\t\t&cli.StringFlag{Name: "dsg-record-id", Usage: "inspect one full native cache record ID offline"},\n'
+        ),
+        '\t\tlogFormat := cfg.Log.Format': (
+            '\t\tif c.Bool("dsg-inspect-dedicated-worker") {\n'
+            '\t\t\treturn dsgInspectWorker(c, cfg.Root)\n\t\t}\n'
+            '\t\tif c.IsSet("dsg-record-id") {\n\t\t\treturn errors.New("dsg-record-id requires offline inspection")\n\t\t}\n'
+            '\t\tif err := dsgStartWorker(c, cfg.Root, &cfg); err != nil {\n\t\t\treturn err\n\t\t}\n\n'
+        ),
+        '\t\t// listeners have to be initialized before the controller': (
+            '\t\tif err := dsgRecheckWorker(c, root); err != nil {\n\t\t\treturn err\n\t\t}\n\n'
+        ),
+    }
+    for anchor, insertion in insertions.items():
+        if source.count(anchor) != 1:
+            raise SystemExit("pinned buildkitd startup anchor mismatch")
+        source = source.replace(anchor, insertion + anchor)
+    main.write_text(source)
+    print(f"prepared official BuildKit {COMMIT} with the DSG worker and cache overlay")
 
 
 if __name__ == "__main__":

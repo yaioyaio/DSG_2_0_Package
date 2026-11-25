@@ -37,6 +37,8 @@ Linux ARM64의 `dsg --json buildkit-local-cache --socket <절대 Unix 소켓> --
 
 두 조회에서 회수 가능·공유·변경 가능 상태의 집계는 서로 겹칠 수 있다. `preserved_by_reason`은 각 레코드에 사유 하나를 부여한다. 회수 가능 표시가 없으면 `active`, 다음으로 공유면 `shared`, 변경 가능이면 `mutable`, 나머지는 `unknown_ownership`에 집계한다. 정상적인 빈 응답의 상태와 보존 사유는 모두 0으로 집계한다. 중복 ID, 마지막 줄이 잘린 출력과 한도 초과는 부분 수치를 폐기하고 조회 실패로 처리한다. 캐시 ID는 중복 확인에만 사용한다.
 
+공식 v0.35.1에서 준비한 DSG 전용 Linux 데몬은 미리 만든 빈 0700 root에서 `buildkitd --dsg-dedicated-worker --root <절대경로> --oci-worker=true --oci-worker-snapshotter=native --containerd-worker=false`로 최초 등록한다. 외부 snapshotter는 거절한다. `buildkitd --dsg-inspect-dedicated-worker --root <절대경로>`는 같은 디렉터리 inode를 잠근 상태에서 오프라인 DB만 읽는다. 결과는 `worker`, `solver_tx`, `cache_tx`, `containerd_tx`, `snapshot_tx`다. native 스냅샷 DB가 생성되기 전에는 `snapshot_tx=null`이다. 데몬이나 다른 도구가 잠금을 보유했거나 등록·소유권이 확인되지 않으면 거절한다. 오프라인 명령에 `--dsg-record-id <25자리 전체 ID>`를 함께 주면 정확한 레코드의 존재와 스냅샷·가변 별칭·blob 결합, 해당 결합의 SHA-256을 반환한다. 이 명령은 캐시 회수 승인을 발급하지 않는다. [전용 데몬과 조회 구현](../integrations/buildkit-exact/cache/dsg_dedicated_daemon_linux.go)
+
 ### 로컬 Docker 제어 서비스 읽기 확인
 
 Linux ARM64의 `dsg --json docker-controller-probe --socket <절대 Unix 소켓> --expected-pid <서비스 PID>`는 로컬 Unix 소켓과 상대 프로세스가 선언한 프로토콜을 확인한다. 경로 구성 요소는 심볼릭 링크 없이 열고, 상위 경로의 root 소유와 그룹·기타 쓰기 제한, 소켓 부모의 0700 권한, root 소유 단일 링크 소켓의 0600 권한을 확인한다. 예상 PID와 root 상대 자격을 대조하고, pidfd로 고정한 프로세스의 생존·시작 시각과 소켓 식별자를 요청 전후에 확인한다. 연결에는 2초 기한과 512바이트 응답 한도를 적용한다.

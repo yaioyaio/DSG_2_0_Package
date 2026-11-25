@@ -202,6 +202,12 @@ func dsgValidateStore(ctx context.Context, tx *bolt.Tx, i DSGExactIntent) error 
 }
 
 func (a *DSGExactAPI) Apply(ctx context.Context, i DSGExactIntent) (DSGExactReceipt, error) {
+	return a.dsgApply(ctx, i, nil, nil)
+}
+
+// These private barriers allow process-death qualification on either side of
+// bbolt's durable commit. Neither is supplied by the public operation.
+func (a *DSGExactAPI) dsgApply(ctx context.Context, i DSGExactIntent, beforeCommit, afterCommit func()) (DSGExactReceipt, error) {
 	var result DSGExactReceipt
 	if !i.valid() || a.fence == nil {
 		return result, ErrDSGExactPreserve
@@ -253,11 +259,20 @@ func (a *DSGExactAPI) Apply(ctx context.Context, i DSGExactIntent) (DSGExactRece
 			if err := consumed.Put([]byte(i.Approval), []byte(i.Intent)); err != nil {
 				return err
 			}
-			return receipts.Put([]byte(i.Intent), data)
+			if err := receipts.Put([]byte(i.Intent), data); err != nil {
+				return err
+			}
+			if beforeCommit != nil {
+				beforeCommit()
+			}
+			return nil
 		})
 		if err == nil {
 			delete(cm.records, i.RecordID)
 			committed = true
+			if afterCommit != nil {
+				afterCommit()
+			}
 		}
 		return err
 	})
