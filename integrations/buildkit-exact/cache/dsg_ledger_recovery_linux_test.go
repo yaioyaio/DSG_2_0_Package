@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
+	"golang.org/x/sys/unix"
 )
 
 // All perturbations affect temporary supervisor files containing synthetic grants.
@@ -95,29 +96,111 @@ func TestDSGLedgerLossRecovery(t *testing.T) {
 	}
 }
 
-// Local verification succeeds at both legitimate phases. An observer retaining
-// the settled checkpoint outside the rollback domain can distinguish them.
+// The stage is volatile and the witness sits on a separate filesystem. Use
+// only new synthetic files; neither the worker nor its cache is opened.
 func TestDSGLedgerIndependentSettledCheckpoint(t *testing.T) {
-	stage := t.TempDir()
-	require.NoError(t, os.Chmod(stage, 0700))
+	base := t.TempDir()
+	require.NoError(t, os.Chmod(base, 0700))
+	registration := filepath.Join(base, "registration")
+	require.NoError(t, os.Mkdir(registration, 0700))
+	stage, err := os.MkdirTemp("/dev/shm", "dsg-ledger-")
+	require.NoError(t, err)
 	path := filepath.Join(stage, "grants.db")
+	t.Cleanup(func() {
+		for _, name := range []string{path + ".checkpoint", path, stage} {
+			if err := os.Remove(name); err != nil && !errors.Is(err, os.ErrNotExist) {
+				t.Error(err)
+			}
+		}
+	})
 	authority, err := dsgCreateSameMountAuthority(path)
 	require.NoError(t, err)
-	defer authority.db.Close()
-
-	grant := dsgTestLedgerGrant(authority.device + 1)
-	require.NoError(t, authority.approve(t.Context(), grant))
-	require.True(t, authority.verified())
-	approvedCheckpoint, err := os.ReadFile(path + ".checkpoint")
+	ledgerDevice := authority.device
+	require.NoError(t, authority.db.Close())
+	read := func(path string) []byte {
+		t.Helper()
+		raw, err := os.ReadFile(path)
+		require.NoError(t, err)
+		return raw
+	}
+	w := &dsgLedgerWitness{path: filepath.Join(registration, "ledger.sha256")}
+	require.NoError(t, os.WriteFile(w.path, read(path+".checkpoint"), 0600))
+	var st unix.Stat_t
+	require.NoError(t, unix.Stat(w.path, &st))
+	w.identity = dsgWitnessIdentity{uint64(st.Dev), st.Ino}
+	w.workerDevice = max(ledgerDevice, w.identity.Device) + 1
+	open := func() (*dsgSameMountAuthority, error) { return dsgAccessSameMountAuthority(path, false, w) }
+	authority, err = open()
 	require.NoError(t, err)
-
+	t.Cleanup(func() {
+		if authority != nil {
+			authority.db.Close()
+		}
+	})
+	grant := dsgTestLedgerGrant(w.workerDevice)
+	require.NoError(t, authority.approve(t.Context(), grant))
+	approvedDB, approvedCheckpoint := read(path), read(path+".checkpoint")
+	require.Equal(t, approvedCheckpoint, read(w.path))
 	require.NoError(t, authority.advance(t.Context(), grant, nil))
+	consumed := read(w.path)
+	require.Equal(t, read(path+".checkpoint"), consumed)
+	require.NotEqual(t, approvedCheckpoint, consumed)
 	receipt := DSGExactReceipt{Request: grant.Request, LogicalRecords: 1}
 	require.NoError(t, authority.advance(t.Context(), grant, &receipt))
-	require.True(t, authority.verified())
-	settledCheckpoint, err := os.ReadFile(path + ".checkpoint")
+	settled := read(w.path)
+	require.Equal(t, read(path+".checkpoint"), settled)
+	require.NotEqual(t, consumed, settled)
+	require.NoError(t, authority.db.Close())
+	authority = nil
+	// A coherent historical pair on the original inodes must still be refused.
+	require.NoError(t, os.WriteFile(path, approvedDB, 0600))
+	require.NoError(t, os.WriteFile(path+".checkpoint", approvedCheckpoint, 0600))
+	rejected, err := open()
+	require.ErrorIs(t, err, ErrDSGExactPreserve)
+	require.Nil(t, rejected)
+	require.Equal(t, approvedDB, read(path))
+	require.Equal(t, approvedCheckpoint, read(path+".checkpoint"))
+	require.Equal(t, settled, read(w.path))
+
+	// Even a matching digest cannot authorize a replacement inode, a missing
+	// witness, or a registration on either of the two local devices.
+	require.NoError(t, os.Rename(w.path, w.path+".original"))
+	for _, present := range []bool{false, true} {
+		if present {
+			require.NoError(t, os.WriteFile(w.path, approvedCheckpoint, 0600))
+		}
+		rejected, err = open()
+		require.ErrorIs(t, err, ErrDSGExactPreserve)
+		require.Nil(t, rejected)
+	}
+	require.NoError(t, os.Rename(w.path+".original", w.path))
+	require.NoError(t, os.WriteFile(w.path, approvedCheckpoint, 0600))
+	require.False(t, w.matches(approvedCheckpoint, w.identity.Device))
+	originalWorker := w.workerDevice
+	w.workerDevice = w.identity.Device
+	require.False(t, w.matches(approvedCheckpoint, ledgerDevice))
+	w.workerDevice = originalWorker
+
+	// A witness fault between the database commit and the final sync must
+	// preserve the discrepancy across reopening, without repairing either file.
+	authority, err = open()
 	require.NoError(t, err)
-	require.NotEqual(t, settledCheckpoint, approvedCheckpoint)
+	err = authority.update(func(tx *bolt.Tx) error {
+		if err := os.Truncate(w.path, 8); err != nil {
+			return err
+		}
+		_, err := tx.CreateBucket([]byte("synthetic-transition"))
+		return err
+	})
+	require.ErrorIs(t, err, ErrDSGExactPreserve)
+	require.False(t, authority.verified())
+	require.Len(t, read(w.path), 8)
+	require.NotEqual(t, approvedCheckpoint, read(path+".checkpoint"))
+	require.NoError(t, authority.db.Close())
+	authority = nil
+	rejected, err = open()
+	require.ErrorIs(t, err, ErrDSGExactPreserve)
+	require.Nil(t, rejected)
 }
 
 func TestDSGLedgerGenerationReplay(t *testing.T) {

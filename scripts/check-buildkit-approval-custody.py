@@ -29,6 +29,7 @@ EVIDENCE_NAME = "custody.json"
 EXECUTABLE = "dsg-cache-tests"
 MAX_DOCUMENT = 32 * 1024
 MAX_LIFETIME_SECONDS = 3600
+WITNESS_ROOT = Path("/var/lib/dsg-buildkit-witness")
 
 
 def require(condition, category):
@@ -145,6 +146,38 @@ def read_private(path, maximum):
 def digest_private(path, mode, maximum, device=None):
     with open_private(path, mode, maximum, device) as source:
         return hashlib.file_digest(source, "sha256").hexdigest()
+
+
+def ledger_witness(stage, worker_device, create=False):
+    registration = stage.parent.name.removeprefix("dsg-approval-")
+    folder = WITNESS_ROOT / registration
+    path = folder / "ledger.sha256"
+    for directory in (WITNESS_ROOT, folder):
+        info = directory.lstat()
+        require(info.st_uid == 0 and info.st_mode == stat.S_IFDIR | 0o700
+                and directory.resolve(strict=True) == directory, "witness_directory")
+    flags = os.O_DIRECTORY | os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC
+    directory_fd = os.open(folder, flags)
+    try:
+        parent = os.fstat(directory_fd)
+        require(parent.st_dev == WITNESS_ROOT.stat().st_dev
+                and parent.st_dev not in (stage.stat().st_dev, worker_device), "witness_device")
+        if create:
+            data = read_private(stage / "grants.db.checkpoint", 64)
+            require(len(data) == 64 and DIGEST_PATTERN.fullmatch(data.decode("ascii")), "witness_checkpoint")
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
+            fd = os.open(path.name, flags, 0o600, dir_fd=directory_fd)
+            with os.fdopen(fd, "wb") as output:
+                output.write(data)
+                output.flush()
+                os.fsync(output.fileno())
+            os.fsync(directory_fd)
+        with open_private(path, 0o600, 64, parent.st_dev) as source:
+            info = os.fstat(source.fileno())
+            require(info.st_size == 64, "witness_size")
+            return {"device": info.st_dev, "inode": info.st_ino}
+    finally:
+        os.close(directory_fd)
 
 
 def publish(stage, name, value, maximum):
@@ -304,6 +337,8 @@ def hold(args):
                     "qualification_changed")
             evidence.update(authority=authority, mount=mounted, provenance=provenance, native_source_sha256=digest,
                             native_databases_sha256=databases, actual_cache_deletion_requests=0, prune_requests=0)
+            if args.operator_sha256 is not None:
+                evidence["ledger_witness"] = ledger_witness(stage, mounted["device"], create=True)
             require(live(evidence) and not stopped, "expired_during_qualification")
             evidence["evidence_sha256"] = sha256(canonical(evidence))
             publish(stage, EVIDENCE_NAME, evidence, MAX_DOCUMENT)
@@ -333,6 +368,8 @@ def status(args):
     if "operator_sha256" in evidence:
         require(digest_private(visible_stage / "dsg-buildkit-exact", 0o500, 100 * 1024**2)
                 == evidence["operator_sha256"], "custody_operator_changed")
+        require(ledger_witness(visible_stage, evidence["mount"]["device"]) == evidence["ledger_witness"],
+                "custody_witness_changed")
     require(keeper_identity(pid) == before and live(evidence), "custody_expired_or_replaced")
     require(canonical(dict(evidence, evidence_sha256=digest)) + b"\n" == raw, "custody_encoding")
     print(raw.decode("ascii"), end="", flush=True)
