@@ -87,6 +87,8 @@ Linux ARM64에서 `dsg --state-dir <보호 등록부> docker-image-serve --polic
 
 macOS에서 관리형 명령은 전용 프로세스 세션에서 시작한다. 같은 부팅에서 종료를 확인하려면 완료된 관측, 리더의 프로세스 그룹과 등록된 자손의 PID·시작 시각, 리더의 커널 프로세스 세대와 부팅 UUID에 연결된 종료 증거가 필요하다. 제한된 커널 프로세스 조회 전후 두 세대 표식이 연속일 때 조회 결과로 종료를 입증할 수 있다. 관리형 실행 이후 생성된 생존 프로세스가 실행 이전부터 있던 프로세스와 세션을 공유하면 관리형 세션 밖에 있는 것으로 확인할 수 있다. 독립적으로 만든 새 세션이더라도 관리형 실행의 자손일 가능성을 배제할 수 없으면 종료 확인을 보류한다.
 
+ARM64 Darwin 25의 XNU 12377 계열에서는 위 조회에 원래 부모의 PID 버전을 추가로 대조할 수 있다. 전체 부팅 구간의 버전 카운터가 순환하지 않았다는 상한과 조회한 버전의 선후 관계가 확인될 때만 적용한다. 새 세션의 프로세스가 관리 실행보다 앞선 프로세스에 이어지면 해당 세션을 외부 범위로 확인한다. 재부모화 후 현재 부모가 PID 1이라는 관측만으로는 외부 범위를 확인할 수 없다. 계보가 끊겼거나 커널·카운터 근거가 부족한 경우 앞서 정의한 종료 판정과 보존 절차를 적용한다. [fork 시 부모 버전 기록](https://github.com/apple-oss-distributions/xnu/blob/xnu-12377.121.6/bsd/kern/kern_fork.c#L923-L946) · [종료 판정](../rust-scaffold/crates/dsg-core/src/mac_exit_proof.rs)
+
 macOS 관리형 트리의 종료를 입증하지 못하면 `run.tree_confirmed_gone=false`와 `lease_released=false`를 반환하고 자동 정리 대상과 lease를 보존한다. 리더가 정상 종료한 경우에도 이 상태는 `RUN_CONTROL_UNVERIFIED`와 종료 코드 5로 반환한다. 같은 프로젝트의 후속 실행은 `RESOURCE_ACTIVE`로 차단된다. 만료된 lease는 등록된 프로세스와 세션의 종료가 입증되거나 기록된 부팅 UUID와 현재 부팅 UUID의 차이가 확인되면 기존 회수 절차에 따라 재획득할 수 있다. 등록부 v5 종료 증거가 없는 기존 활성 관리형 lease는 보존한다. Linux는 리더와 프로세스 그룹의 종료를 확인한다. [수용 시험](TEST_PLAN.md#rust-foundation-검증)
 
 `dsg exec --provider <cargo|node|pnpm|gradle|uv|go|playwright> -- <작업>`는 등록된 정형 작업을 실행한다. Cargo는 `build`, `check`, `test`, pnpm·Gradle·Go는 `build`, `test`, Node·uv·Playwright는 `test`를 받는다. 하나의 작업만 받으며 각 도구의 병렬 실행 옵션을 제한한다. pnpm이 호출한 프로젝트 스크립트 내부의 작업자는 프로젝트 설정을 따른다. Playwright는 프로젝트에 준비된 실행기를 사용하고 실행마다 독립된 상태 폴더에 성공·실패 추적 자료를 저장한다. 응답 `evidence_path`는 상태 디렉터리 기준 상대 경로다. 트리 종료가 확인되면 Provider·작업·결과 코드가 해당 lease 감사 이벤트에 기록된다.

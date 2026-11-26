@@ -87,8 +87,8 @@
     },
     {
       "path": "docs/API_SPEC.md",
-      "sha256": "b1e817c959e785ae944d91d5f7d76ef4730959a9031288bdaec61f1a8f989de2",
-      "bytes": 47504
+      "sha256": "cfba511f9d28e30167e3d9f4a453021b95417c36c52cbe37f0d111ad7120fb24",
+      "bytes": 48356
     },
     {
       "path": "docs/ARCHITECTURE.md",
@@ -147,13 +147,13 @@
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "0b6a219e8338cf6297e149795ef530aaf85b0f748999382e55afaae68fee4304",
-      "bytes": 39646
+      "sha256": "f36dfec0566ff3ccedd2ea5f73376435e859a5f5e8bb366cfa7dc89334d78c82",
+      "bytes": 39930
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "7ada5e503b823470fe140fcaeae2d475ceadf2022f2e1b9b8b7d666addf77593",
-      "bytes": 79863
+      "sha256": "a09f573585e5ed1a7285f2bae77d8ade05765329800ddd55b0e240795b01ffa9",
+      "bytes": 80133
     },
     {
       "path": "docs/WBS.md",
@@ -787,8 +787,8 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/mac_exit_proof.rs",
-      "sha256": "1739f4f38562d2b0d8717abfc1456a41f6b459d642f2587f443425ea01c1766c",
-      "bytes": 7945
+      "sha256": "21c2227dd72a89953480935232f3d1d174804edcb6f2e2d2af443dd8e0d2f552",
+      "bytes": 11811
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/mac_process.rs",
