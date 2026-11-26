@@ -207,6 +207,8 @@ WBS 1.4·5.1은 전용 Ubuntu Parallels ARM64 Moby에서 합성 이미지 한 �
 
 - Ubuntu Parallels의 디스크 기반 전용 ext4에서 승인된 한 건을 적용했다. 대상 스냅샷·blob은 예상과 같은 8,192 B가 제거됐다. 동일 ext4 전체의 할당은 389,120 B에서 417,792 B로 늘어 순회수는 -28,672 B였다. 대상 추정치와 파일시스템 순회수를 각각 검증하고 Mac 볼륨의 가용량은 별도 관측값으로 기록했다. 적용 1건, prune 0건, 비대상 데이터 보존, 동일 영수증 재조회와 읽기 전용 복귀를 확인했다. [Ubuntu 실측](../dist/dsg-local-reclaim-measurement-70cadd3/BUILDKIT-MEASURED.json)
 
+- 기존 BuildKit 계측의 대상 파일 제거량을 ext4 전체 할당 차이와 대조해 파일시스템 나머지의 순변화를 계산한다. 해당 값은 파일별 귀속 결과와 구분한다. 실제 로컬 Docker의 보존 후보와 합성 적격 후보를 각각 공개 CLI에서 재확인한다. 두 경로의 적용 게이트를 확인하고 참조가 바뀐 후보는 거절한다. [할당 분석](../dist/dsg-local-qualification-13fdb79/ALLOCATION-GAP-ANALYSIS.json) · [실제 Docker 대조](../dist/dsg-local-qualification-13fdb79/MACOS-AND-DOCKER-PUBLIC-QUALIFICATION.json) · [합성 CLI 검증](../dist/dsg-local-qualification-13fdb79/DOCKER-PUBLIC-ELIGIBLE-FIXTURE.json)
+
 ## 에이전트 연동 검증
 
 `sh scripts/test-rust.sh`는 합성 프로젝트의 훅 설치·중복 방지·설정 보존·제거, 허용·거부·잘못된 JSON 응답과 MCP의 읽기 전용 목록·쓰기 거절을 확인한다. 정리 후보를 조회한 뒤 상태 폴더가 생기지 않아야 한다.
@@ -248,6 +250,10 @@ Windows ARM64의 로컬 NTFS에서는 `python.exe -B scripts/check-windows-arm64
 - 정규식 명령 필터는 모든 셸 표현을 탐지하지 않음.
 - 파일/디렉터리 변경 간 TOCTOU 경합이 존재하므로 실제 프로젝트의 삭제 자동화 비권장.
 - Docker 실제 중복 생성 방지/다중 OS 통합 테스트 미수행.
+
+### 현재 ARM64 로컬 설치본
+
+같은 Rust 트리의 아카이브와 체크섬, Cargo.lock 및 두 실행 파일의 대상 아키텍처를 확인한다. macOS와 기존 Ubuntu·Windows ARM64 Parallels의 전용 임시 설치 경로에서 이전 후보로부터 같은 버전 교체, 진단, 두 프로그램, 읽기 전용 대시보드, 제거와 사용자 파일 보존을 검증한다. [현재 3종 검증](RELEASE.md#현재-소스의-로컬-후보-2026-11-26)
 
 ## 출시 게이트
 
