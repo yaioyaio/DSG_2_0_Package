@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare allocated bytes on one disposable Ubuntu BuildKit ext4 fixture."""
+"""Compare allocated bytes on one disposable Ubuntu ext4 fixture."""
 
 import argparse
 import ctypes
@@ -25,6 +25,12 @@ COMPONENT = re.compile(r"[A-Za-z0-9_.+-]{1,255}\Z")
 DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 IDENTITY_NUMBERS = ("mount_namespace", "mount_id", "unique_mount_id", "device",
                     "root_inode", "marker_inode", "fsid", "block_bytes", "total_blocks")
+ENTRY_KIND = {stat.S_IFDIR: "directory", stat.S_IFREG: "file", stat.S_IFLNK: "symlink",
+              stat.S_IFSOCK: "socket", stat.S_IFIFO: "fifo", stat.S_IFBLK: "block device",
+              stat.S_IFCHR: "character device"}
+DEFAULT_KINDS = {"directory", "file"}
+VFS_KINDS = DEFAULT_KINDS | {"symlink", "socket", "block device"}
+VFS_QUOTA_NODES = {"docker-data/vfs/backingFsBlockDev", "docker-data/volumes/backingFsBlockDev"}
 
 
 class MeasurementError(ValueError):
@@ -112,12 +118,13 @@ def mount_sample(fd, root):
 
 def entry_state(info):
     return (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_nlink,
-            info.st_size, info.st_blocks, info.st_mtime_ns, info.st_ctime_ns)
+            info.st_size, info.st_blocks, info.st_mtime_ns, info.st_ctime_ns, info.st_rdev)
 
 
-def inventory(root_fd, deadline):
+def inventory(root_fd, deadline, *, allow_vfs_entries=False):
     """Walk a quiescent fixture using directory FDs and metadata only."""
     anchor = os.fstat(root_fd)
+    allowed_kinds = VFS_KINDS if allow_vfs_entries else DEFAULT_KINDS
     seen = {}
     count = 0
 
@@ -129,13 +136,21 @@ def inventory(root_fd, deadline):
         require(info.st_dev == anchor.st_dev and info.st_ino > 0 and info.st_blocks >= 0,
                 "invalid fixture inode")
         state = entry_state(info)
-        directory = stat.S_ISDIR(info.st_mode)
+        kind = ENTRY_KIND.get(stat.S_IFMT(info.st_mode), "unknown")
+        require(kind in allowed_kinds, f"unsupported fixture entry: {kind}")
+        if kind == "block device":
+            # Moby leaves its quota probe on the private loop. Account for the
+            # directory entry without opening the device or following a link.
+            require(rel in VFS_QUOTA_NODES and info.st_rdev == anchor.st_dev and
+                    info.st_uid == 0 and info.st_nlink == 1 and info.st_blocks == 0 and
+                    info.st_size == 0 and stat.S_IMODE(info.st_mode) == 0o600,
+                    "unrecognized VFS quota device")
+        directory = kind == "directory"
         if info.st_ino in seen:
             previous, paths = seen[info.st_ino]
             require(not directory and state == entry_state(previous), "ambiguous fixture inode")
             paths.append(rel)
         else:
-            require(directory or stat.S_ISREG(info.st_mode), "unsupported fixture entry")
             seen[info.st_ino] = info, [rel]
 
         if directory:
@@ -162,14 +177,14 @@ def inventory(root_fd, deadline):
     visit(root_fd, ".", anchor, 0)
     result = []
     for inode, (info, paths) in sorted(seen.items()):
-        directory = stat.S_ISDIR(info.st_mode)
-        require(directory or info.st_nlink == len(paths), "incomplete fixture hard links")
-        result.append({"inode": inode, "kind": "directory" if directory else "file",
+        kind = ENTRY_KIND[stat.S_IFMT(info.st_mode)]
+        require(kind == "directory" or info.st_nlink == len(paths), "incomplete fixture hard links")
+        result.append({"inode": inode, "kind": kind,
                        "blocks_512": info.st_blocks, "paths": sorted(paths)})
     return result
 
 
-def capture(path):
+def capture(path, *, allow_vfs_entries=False):
     require(sys.platform == "linux" and os.geteuid() == 0, "snapshot requires Linux root")
     root = Path(os.path.abspath(path))
     require(root != Path("/") and root.resolve(strict=True) == root and
@@ -181,7 +196,7 @@ def capture(path):
         require(stat.S_ISREG(marker.st_mode) and stat.S_IMODE(marker.st_mode) == 0o600 and
                 marker.st_dev == os.fstat(fd).st_dev and marker.st_uid == 0 and
                 marker.st_nlink == 1 and marker.st_size == 0, "invalid fixture marker")
-        entries = inventory(fd, time.monotonic() + CAPTURE_SECONDS)
+        entries = inventory(fd, time.monotonic() + CAPTURE_SECONDS, allow_vfs_entries=allow_vfs_entries)
         require(entry_state(marker) == entry_state(os.stat(MARKER, dir_fd=fd, follow_symlinks=False)),
                 "fixture marker changed during snapshot")
         require(before == mount_sample(fd, root), "fixture changed during snapshot")
@@ -196,7 +211,7 @@ def integers(obj, keys):
     return all(type(obj.get(key)) is int and obj[key] >= 0 for key in keys)
 
 
-def snapshot_entries(snapshot):
+def snapshot_entries(snapshot, *, allow_vfs_entries=False):
     identity = snapshot["identity"]
     require(set(snapshot) == {"identity", "free_blocks", "read_only", "entries"} and
             set(identity) == {*IDENTITY_NUMBERS, "boot_sha256"} and integers(identity, IDENTITY_NUMBERS) and
@@ -209,15 +224,20 @@ def snapshot_entries(snapshot):
             type(snapshot["read_only"]) is bool, "invalid snapshot filesystem")
     require(isinstance(snapshot["entries"], list) and 0 < len(snapshot["entries"]) <= MAX_ENTRIES,
             "invalid snapshot entry count")
+    allowed_kinds = VFS_KINDS if allow_vfs_entries else DEFAULT_KINDS
     entries, paths = {}, {}
     for entry in snapshot["entries"]:
         kind, links = entry["kind"], entry["paths"]
         require(set(entry) == {"inode", "kind", "paths", "blocks_512"} and
-                kind in ("directory", "file") and integers(entry, ("inode", "blocks_512")) and
+                isinstance(kind, str) and kind in allowed_kinds and integers(entry, ("inode", "blocks_512")) and
                 entry["inode"] > 0 and entry["inode"] not in entries and
                 entry["blocks_512"] * 512 <= MAX_FILESYSTEM and
                 isinstance(links, list) and 0 < len(links) <= MAX_ENTRIES - len(paths) and
-                (kind == "file" or len(links) == 1), "invalid snapshot inode")
+                (kind != "directory" or len(links) == 1), "invalid snapshot inode")
+        if kind == "block device":
+            require(len(links) == 1 and isinstance(links[0], str) and links[0] in VFS_QUOTA_NODES and
+                    entry["blocks_512"] == 0,
+                    "invalid VFS quota device snapshot")
         for path in links:
             require(isinstance(path, str) and len(path) <= MAX_RELATIVE_PATH and path not in paths and
                     ((path == "." and kind == "directory" and entry["inode"] == identity["root_inode"]) or
@@ -233,8 +253,9 @@ def snapshot_entries(snapshot):
     return entries
 
 
-def compare(before, after):
-    preceding, following = snapshot_entries(before), snapshot_entries(after)
+def compare(before, after, *, allow_vfs_entries=False):
+    preceding = snapshot_entries(before, allow_vfs_entries=allow_vfs_entries)
+    following = snapshot_entries(after, allow_vfs_entries=allow_vfs_entries)
     require(before["identity"] == after["identity"], "snapshots are from different mounts")
     identity = before["identity"]
     block = identity["block_bytes"]
@@ -248,7 +269,8 @@ def compare(before, after):
         old_bytes = old["blocks_512"] * 512 if old else 0
         new_bytes = new["blocks_512"] * 512 if new else 0
         delta = new_bytes - old_bytes
-        subtotals[kind] += delta
+        # Preserve the file/directory subtotals while reporting the actual inode type.
+        subtotals["directory" if kind == "directory" else "file"] += delta
         changes.append({"inode": (new or old)["inode"], "kind": kind,
                         "before_paths": sorted(old["paths"]) if old else [],
                         "after_paths": sorted(new["paths"]) if new else [],

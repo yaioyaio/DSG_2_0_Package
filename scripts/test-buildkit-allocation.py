@@ -5,6 +5,7 @@ from copy import deepcopy
 import os
 from pathlib import Path
 import runpy
+import socket
 import tempfile
 import time
 import unittest
@@ -68,6 +69,34 @@ class AllocationDiffTest(unittest.TestCase):
         self.assertEqual([(row["before_paths"], row["after_paths"], row["delta_bytes"])
                           for row in result["changes"]], [(["old"], [], -4096), ([], ["new"], 4096)])
 
+    def test_vfs_entries_keep_inode_and_residual_accounting(self):
+        before = snapshot(100, [entry(5, 8, "pointer", "alias", kind="symlink"),
+                                entry(6, 0, "endpoint", kind="socket")])
+        after = snapshot(101, [entry(6, 8, "endpoint")])
+        with self.assertRaisesRegex(MeasurementError, "invalid snapshot inode"):
+            compare(before, after)
+        result = compare(before, after, allow_vfs_entries=True)
+        self.assertEqual([(row["kind"], row["delta_bytes"]) for row in result["changes"]],
+                         [("symlink", -4096), ("socket", 0), ("file", 4096)])
+        self.assertEqual(result["file_delta_bytes"], 0)
+        self.assertEqual(result["unattributed_delta_bytes"], -4096)
+
+    def test_only_known_unallocated_vfs_quota_device_is_accepted(self):
+        parents = [entry(4, 8, "docker-data", kind="directory"),
+                   entry(5, 8, "docker-data/volumes", kind="directory"),
+                   entry(6, 8, "docker-data/vfs", kind="directory")]
+        nodes = sorted(allocation["VFS_QUOTA_NODES"])
+        fixture = snapshot(100, [*parents, *(entry(n, 0, node, kind="block device")
+                                             for n, node in enumerate(nodes, 7))])
+        self.assertEqual(compare(fixture, fixture, allow_vfs_entries=True)["changes"], [])
+        with self.assertRaisesRegex(MeasurementError, "invalid snapshot inode"):
+            compare(fixture, fixture)
+        for name, blocks in ((nodes[0], 8), ("docker-data/volumes/other", 0)):
+            with self.subTest(path=name, blocks=blocks):
+                wrong = snapshot(100, [*parents, entry(7, blocks, name, kind="block device")])
+                with self.assertRaisesRegex(MeasurementError, "invalid VFS quota device"):
+                    compare(wrong, wrong, allow_vfs_entries=True)
+
     def test_remount_preserves_identity_but_new_mount_is_rejected(self):
         before = snapshot(100, [])
         after = deepcopy(before)
@@ -100,10 +129,10 @@ class AllocationDiffTest(unittest.TestCase):
 
 
 class AllocationInventoryTest(unittest.TestCase):
-    def read(self, path):
+    def read(self, path, *, allow_vfs_entries=False):
         fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
         try:
-            return inventory(fd, time.monotonic() + 5)
+            return inventory(fd, time.monotonic() + 5, allow_vfs_entries=allow_vfs_entries)
         finally:
             os.close(fd)
 
@@ -139,6 +168,23 @@ class AllocationInventoryTest(unittest.TestCase):
                     os.mkfifo(path)
                 with self.assertRaisesRegex(MeasurementError, "unsupported fixture entry"):
                     self.read(root)
+                if kind == "fifo":
+                    with self.assertRaisesRegex(MeasurementError, "unsupported fixture entry: fifo"):
+                        self.read(root, allow_vfs_entries=True)
+
+    def test_vfs_inventory_uses_lstat_for_symlinks_and_sockets(self):
+        with tempfile.TemporaryDirectory(dir="/tmp") as path, socket.socket(socket.AF_UNIX) as endpoint:
+            root = Path(path)
+            socket_path = root / "endpoint"
+            endpoint.bind(str(socket_path))
+            with self.assertRaisesRegex(MeasurementError, "unsupported fixture entry: socket"):
+                self.read(root)
+            symlink = root / "pointer"
+            symlink.symlink_to("absent", target_is_directory=True)
+            entries = {item["inode"]: item for item in self.read(root, allow_vfs_entries=True)}
+            for item, kind in ((symlink, "symlink"), (socket_path, "socket")):
+                info = item.lstat()
+                self.assertEqual(entries[info.st_ino], entry(info.st_ino, info.st_blocks, item.name, kind=kind))
 
     def test_private_ext4_mount_record_rejects_alias_and_submount(self):
         mount_record = allocation["mount_record"]
