@@ -391,7 +391,12 @@ fn process_moby_image(
                     && policy_current()
             },
         )?;
-        return Ok(json!({"status":"planned","plan_id":plan.plan_id,"expires_at":plan.expires_at}));
+        let mut reply =
+            json!({"status":"planned","plan_id":plan.plan_id,"expires_at":plan.expires_at});
+        if let Some(estimate) = engine.estimated_exclusive_layer_bytes() {
+            reply["estimated_exclusive_layer_bytes"] = json!(estimate);
+        }
+        return Ok(reply);
     }
     let lease = registry.acquire_docker_gc_lease(project, namespace, Duration::from_secs(20))?;
     // Connect from the same already pinned kernel peer while dispatch owns the lease.
@@ -414,14 +419,56 @@ fn process_moby_image(
             Ok(json!({"status":"approved","intent_id":intent_id}))
         }
         DockerGcDispatchResult::Applied(result) | DockerGcDispatchResult::Recovered(result) => {
-            let status = match result.status {
-                GcApplyStatus::Applied => "applied",
-                GcApplyStatus::Preserved => "preserved",
-                GcApplyStatus::RecoveryRequired => "recovery_required",
-            };
-            Ok(json!({"status":status,"reclaimed_bytes":result.reclaimed_bytes}))
+            Ok(moby_image_result_reply(result, engine.settled_allocation()))
         }
     }
+}
+
+fn moby_image_result_reply(
+    result: DockerGcResult,
+    allocation: Option<(&str, &super::moby::ImageAllocation)>,
+) -> Value {
+    let status = match result.status {
+        GcApplyStatus::Applied => "applied",
+        GcApplyStatus::Preserved => "preserved",
+        GcApplyStatus::RecoveryRequired => "recovery_required",
+    };
+    let mut reply = json!({"status":status,"reclaimed_bytes":result.reclaimed_bytes});
+    if let (GcApplyStatus::Applied, Some((intent_id, allocation))) = (result.status, allocation) {
+        reply["intent_id"] = json!(intent_id);
+        reply["allocation"] = json!(allocation);
+    }
+    reply
+}
+
+#[cfg(test)]
+#[test]
+fn image_result_reply_pairs_allocation_with_applied_intent() {
+    let intent = "a".repeat(64);
+    let value = json!({"scope":"dedicated_ext4","block_bytes":4096,
+        "estimated_exclusive_layer_bytes":u64::MAX,"ext4_before_bytes":0,
+        "ext4_after_bytes":1u64 << 63,"ext4_net_reclaimed_bytes":i64::MIN});
+    let allocation = serde_json::from_value(value.clone()).unwrap();
+    let applied = DockerGcResult {
+        status: GcApplyStatus::Applied,
+        reclaimed_bytes: 0,
+    };
+    let measured = moby_image_result_reply(applied, Some((&intent, &allocation)));
+    assert_eq!(measured["intent_id"], json!(intent));
+    assert_eq!(measured["allocation"], value);
+    assert!(serde_json::to_vec(&measured).unwrap().len() < 512);
+    assert_eq!(
+        moby_image_result_reply(applied, None),
+        json!({"status":"applied","reclaimed_bytes":0})
+    );
+    let pending = DockerGcResult {
+        status: GcApplyStatus::RecoveryRequired,
+        reclaimed_bytes: 0,
+    };
+    assert_eq!(
+        moby_image_result_reply(pending, Some((&intent, &allocation))),
+        json!({"status":"recovery_required","reclaimed_bytes":0})
+    );
 }
 
 #[cfg(test)]

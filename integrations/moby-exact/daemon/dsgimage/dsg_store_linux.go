@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -39,6 +40,7 @@ type imageBackend struct{ root string }
 
 type storeLayer struct {
 	chain, diff, parent, cache string
+	size                       int64
 }
 
 type storeIndex struct {
@@ -197,7 +199,7 @@ func (b *imageBackend) index() (*storeIndex, error) {
 		if err != nil {
 			return nil, err
 		}
-		record := storeLayer{chain: "sha256:" + e.Name()}
+		record := storeLayer{chain: "sha256:" + e.Name(), size: -1}
 		for _, f := range files {
 			path := filepath.Join(dir, f.Name())
 			switch f.Name() {
@@ -221,6 +223,7 @@ func (b *imageBackend) index() (*storeIndex, error) {
 					if err != nil || size < 0 {
 						return nil, errStore
 					}
+					record.size = size
 				case "cache-id":
 					record.cache = value
 				case "parent":
@@ -235,7 +238,7 @@ func (b *imageBackend) index() (*storeIndex, error) {
 				return nil, errStore
 			}
 		}
-		if !storeID(record.diff) || !storeHash(record.cache) || caches[record.cache] {
+		if record.size < 0 || !storeID(record.diff) || !storeHash(record.cache) || caches[record.cache] {
 			return nil, errStore
 		}
 		expected := digest.Digest(record.diff)
@@ -284,6 +287,7 @@ type imageObservation struct {
 	images   image.Store
 	index    *storeIndex
 	snapshot string
+	estimate uint64
 }
 
 func (b *imageBackend) inspect(id, owner string) (*imageObservation, error) {
@@ -346,8 +350,10 @@ func (b *imageBackend) inspect(id, owner string) (*imageObservation, error) {
 		return nil, errStore
 	}
 	digestState := sha256.New()
-	fmt.Fprintf(digestState, "dsg-moby-classic-vfs-v1\x00%s\x00%s\x00%x\x00", id, owner, sha256.Sum256(encoded))
-	reachable := make(map[layer.ChainID]bool)
+	fmt.Fprintf(digestState, "dsg-moby-classic-vfs-v2\x00%s\x00%s\x00%x\x00", id, owner, sha256.Sum256(encoded))
+	// A key exists for every observed chain. Its value records whether another
+	// image uses it, including through that image's base layers.
+	usedByPeer := make(map[layer.ChainID]bool)
 	for _, entry := range index.images {
 		i, err := images.Get(image.ID(entry))
 		if err != nil || i.OS != "linux" || i.Architecture != "arm64" || i.RootFS.Type != "layers" || len(i.RootFS.DiffIDs) > storeMaxLayers {
@@ -362,25 +368,33 @@ func (b *imageBackend) inspect(id, owner string) (*imageObservation, error) {
 			if restored[chain] == nil {
 				return nil, errStore
 			}
-			reachable[chain] = true
+			usedByPeer[chain] = usedByPeer[chain] || entry != id
 		}
 		fmt.Fprintf(digestState, "%s\x00%s\x00", entry, i.Parent)
 	}
-	if len(reachable) != len(index.layers) {
+	if len(usedByPeer) != len(index.layers) {
 		return nil, errStore
 	}
+	var estimate int64
 	for _, record := range index.layers {
-		fmt.Fprintf(digestState, "%s\x00%s\x00", record.chain, record.cache)
+		shared := usedByPeer[layer.ChainID(record.chain)]
+		fmt.Fprintf(digestState, "%s\x00%s\x00%d\x00%t\x00", record.chain, record.cache, record.size, shared)
+		if !shared {
+			if record.size > math.MaxInt64-estimate {
+				return nil, errStore
+			}
+			estimate += record.size
+		}
 	}
-	return &imageObservation{images: images, index: index, snapshot: hex.EncodeToString(digestState.Sum(nil))}, nil
+	return &imageObservation{images: images, index: index, snapshot: hex.EncodeToString(digestState.Sum(nil)), estimate: uint64(estimate)}, nil
 }
 
-func (b *imageBackend) observe(id, owner string) (string, error) {
+func (b *imageBackend) observe(id, owner string) (string, uint64, error) {
 	observed, err := b.inspect(id, owner)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
-	return observed.snapshot, nil
+	return observed.snapshot, observed.estimate, nil
 }
 
 // The caller has durably consumed approval before invoking this exactly once.

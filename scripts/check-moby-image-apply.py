@@ -268,6 +268,57 @@ def allocation_report(compare, before, after, estimate, cache, chain, target, pe
     }
 
 
+def receipt_ledger(mount, target, intent):
+    ledger = mount / "dsg-image-receipts"
+    receipt = intent + ".receipt"
+    check({p.name for p in ledger.iterdir()} == {target[7:] + ".attempt", receipt},
+          "single durable receipt missing")
+    return ledger / receipt, {p.name: (p.stat().st_ino, p.stat().st_mtime_ns, file_digest(p))
+                              for p in ledger.iterdir()}
+
+
+def read_receipt(path):
+    with path.open("rb") as source:
+        raw = source.read(4097)
+    check(len(raw) <= 4096, "receipt exceeds the fixture bound")
+    data = raw.rstrip(b" ")
+    record = json.loads(data)
+    check(isinstance(record, dict), "invalid native receipt")
+    if "receipt" not in record:
+        check(record.keys() == {"intent", "reclaimed_bytes"}, "invalid legacy native receipt")
+        return record
+    # Verify the exact compact bytes persisted by Go, including its struct field order.
+    envelope = re.fullmatch(rb'\{"receipt":(\{.*\}),"sha256":"([0-9a-f]{64})"\}', data)
+    check(len(raw) == 4096 and envelope is not None and fx.digest(envelope[1]).encode("ascii") == envelope[2],
+          "receipt envelope digest differed")
+    return record["receipt"]
+
+
+def registry_application(state, plan_id):
+    uri = (state / "registry.sqlite3").as_uri() + "?mode=ro"
+    with closing(sqlite3.connect(uri, uri=True)) as db:
+        return db.execute("SELECT p.status,a.claimed_at_ms IS NOT NULL,a.bytes_applied "
+                          "FROM gc_plan p JOIN gc_application a ON a.plan_id=p.id WHERE p.id=?",
+                          (plan_id,)).fetchone()
+
+
+def product_allocation_matches(actual, expected):
+    return (isinstance(actual, dict) and actual.keys() == expected.keys()
+            and all(type(actual[key]) is type(value) and actual[key] == value
+                    for key, value in expected.items()))
+
+
+def expected_product_allocation(source):
+    check(isinstance(source, dict), "missing native receipt allocation")
+    estimate = source.get("estimated_exclusive_layer_bytes")
+    before = source.get("ext4_before_bytes")
+    after = source.get("ext4_after_bytes")
+    check(all(type(value) is int and value >= 0 for value in (estimate, before, after))
+          and before % 4096 == after % 4096 == 0, "invalid native receipt allocation values")
+    return {"scope": "dedicated_ext4", "block_bytes": 4096, "estimated_exclusive_layer_bytes": estimate,
+            "ext4_before_bytes": before, "ext4_after_bytes": after, "ext4_net_reclaimed_bytes": before - after}
+
+
 def seed(scratch, mount, project, cgroup, patched, layered):
     store = mount / "docker-data"
     conf = scratch / "engine.json"
@@ -483,6 +534,9 @@ def sealed_trial(args, scratch, mount, project, cgroup, public, stack, allocatio
         capture_allocation, compare_allocation = allocation
         cache = target_layers[0]
         estimate, chain = selected_layer_estimate(store, target, cache)
+        if args.expect_product_accounting:
+            reported = plan.get("estimated_exclusive_layer_bytes")
+            check(type(reported) is int and reported == estimate, "product plan estimate differed")
         before_approval = capture_allocation()
     approved = request(approver, project_id, "approve", plan_id=pid)
     check(approved.get("status") == "approved", "native approval failed")
@@ -514,23 +568,49 @@ def sealed_trial(args, scratch, mount, project, cgroup, public, stack, allocatio
         after_recovery = None
     if args.expect_recovery:
         check(applied.get("status") == "recovery_required", "commit response loss not observed")
+        if args.expect_product_accounting:
+            check("allocation" not in applied and "intent_id" not in applied
+                  and type(applied.get("reclaimed_bytes", 0)) is int
+                  and applied.get("reclaimed_bytes", 0) == 0, "unsettled apply returned accounting")
+            check(registry_application(state, pid) == ("recovery_required", 1, 0),
+                  "unsettled apply recorded reclaimed bytes")
+            receipt_path, ledger_before_recovery = receipt_ledger(mount, target, intent)
+            original_receipt = read_receipt(receipt_path)
         applied = request(executor, project_id, "recover", intent_id=intent)
         if allocation:
             after_recovery = capture_allocation()
             check(after_apply == after_recovery, "receipt recovery altered the allocation fixture")
-    check(applied.get("status") == "applied" and applied.get("reclaimed_bytes") == 0,
-          "single native apply did not settle")
-    receipts = mount / "dsg-image-receipts"
-    expected = {target[7:] + ".attempt", intent + ".receipt"}
-    check({p.name for p in receipts.iterdir()} == expected, "single durable receipt missing")
-    record = json.loads((receipts / (intent + ".receipt")).read_bytes())
-    check(record["intent"]["binding"]["id"] == target and record["intent"]["operation"] == intent
-          and record["reclaimed_bytes"] == 0, "receipt binding differed")
-    before = {p.name: (p.stat().st_ino, p.stat().st_mtime_ns, file_digest(p)) for p in receipts.iterdir()}
+    check(applied.get("status") == "applied", "single native apply did not settle")
+    receipt_path, ledger_before_duplicate = receipt_ledger(mount, target, intent)
+    record = read_receipt(receipt_path)
+    check(record["intent"]["binding"]["id"] == target and record["intent"]["operation"] == intent,
+          "receipt binding differed")
+    if args.expect_recovery and args.expect_product_accounting:
+        check(ledger_before_recovery == ledger_before_duplicate and original_receipt == record,
+              "recovery changed the original native receipt")
+    reclaimed = 0
+    if allocation:
+        report = allocation_report(compare_allocation, before_apply, after_apply, estimate, cache, chain,
+                                   target, other, initial_layers.keys() - {cache})
+    if args.expect_product_accounting or "allocation" in applied or "allocation" in record:
+        source = report if args.expect_product_accounting else record.get("allocation")
+        expected_allocation = expected_product_allocation(source)
+        reclaimed = max(expected_allocation["ext4_net_reclaimed_bytes"], 0)
+        check(applied.get("intent_id") == intent, "product settlement intent differed")
+        check(product_allocation_matches(applied.get("allocation"), expected_allocation),
+              "product settlement allocation differed")
+        check(product_allocation_matches(record.get("allocation"), expected_allocation),
+              "persisted receipt allocation differed")
+    check(type(applied.get("reclaimed_bytes")) is int and applied["reclaimed_bytes"] == reclaimed
+          and type(record.get("reclaimed_bytes")) is int and record["reclaimed_bytes"] == reclaimed,
+          "settled or persisted reclaimed bytes differed")
+    expected_row = ("applied", 1, reclaimed)
+    if args.expect_product_accounting:
+        check(registry_application(state, pid) == expected_row, "approval consumption or settled bytes differed")
     check(request(executor, project_id, "apply", plan_id=pid)["status"] == "preserved",
           "duplicate approval allowed")
-    check({p.name: (p.stat().st_ino, p.stat().st_mtime_ns, file_digest(p))
-           for p in receipts.iterdir()} == before, "duplicate altered the native ledger")
+    check(receipt_ledger(mount, target, intent)[1] == ledger_before_duplicate,
+          "duplicate altered the native ledger")
     check([p.name for p in content.iterdir()] == [other[7:]] and file_digest(peer_file) == other[7:]
           and os.path.samestat(peer_stat, peer_file.stat())
           and peer_stat.st_mtime_ns == peer_file.stat().st_mtime_ns, "peer image changed")
@@ -541,24 +621,24 @@ def sealed_trial(args, scratch, mount, project, cgroup, public, stack, allocatio
         check(layer_projection(store / "vfs/dir") ==
               {layer: files for layer, files in initial_layers.items() if layer not in target_layers},
               "shared or non-target layer changed")
-    uri = (state / "registry.sqlite3").as_uri() + "?mode=ro"
-    with closing(sqlite3.connect(uri, uri=True)) as db:
-        row = db.execute("SELECT p.status,a.claimed_at_ms IS NOT NULL,a.bytes_applied "
-                         "FROM gc_plan p JOIN gc_application a ON a.plan_id=p.id WHERE p.id=?", (pid,)).fetchone()
-        check(row == ("applied", 1, 0), "approval consumption or settled bytes differed")
+    row = registry_application(state, pid)
+    check(row == expected_row, "approval consumption or settled bytes differed after duplicate apply")
     result = {"single_delete": 1, "native_attempts": 1, "native_receipts": 1, "images_before": 2,
-              "images_after": 1, "peer_preserved": True, "reclaimed_bytes": 0, "wrong_role_denied": 2,
+              "images_after": 1, "peer_preserved": True, "reclaimed_bytes": reclaimed, "wrong_role_denied": 2,
               "duplicate_mutations": 0, "tag_denied": True, "container_create_denied": True,
               "receipt_recovery": args.expect_recovery, "registered_project": project_id,
               "exclusive_layers_removed": len(target_layers), "shared_layers_preserved": args.layered}
     if allocation:
         check(after_apply == capture_allocation(), "duplicate request altered the allocation fixture")
-        report = allocation_report(compare_allocation, before_apply, after_apply, estimate, cache, chain,
-                                   target, other, initial_layers.keys() - {cache})
         report.update({"approval_ext4_delta_bytes": 0,
                        "recovery_ext4_delta_bytes": 0 if after_recovery is not None else None,
                        "duplicate_ext4_delta_bytes": 0})
         result["allocation"] = report
+    if args.expect_product_accounting:
+        result["product_accounting"] = {"plan_estimated_exclusive_layer_bytes": reported,
+                                        "intent_id": applied["intent_id"], "allocation": applied["allocation"],
+                                        "receipt_reclaimed_bytes": record["reclaimed_bytes"],
+                                        "sqlite_bytes_applied": row[2]}
     return result
 
 
@@ -570,9 +650,13 @@ def main():
     cli.add_argument("--expect-recovery", action="store_true")
     cli.add_argument("--layered", action="store_true")
     cli.add_argument("--measure-allocation", action="store_true", help="measure the isolated layered ext4 fixture")
+    cli.add_argument("--expect-product-accounting", action="store_true",
+                     help="compare the product responses and receipt with the independent ext4 measurement")
     args = cli.parse_args()
     if args.measure_allocation and not args.layered:
         cli.error("--measure-allocation requires --layered")
+    if args.expect_product_accounting and not (args.layered and args.measure_allocation):
+        cli.error("--expect-product-accounting requires --layered and --measure-allocation")
     os.umask(0o077)
     scratch = args.scratch
     cgroup = guard(scratch)

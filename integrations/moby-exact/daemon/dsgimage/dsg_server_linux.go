@@ -62,16 +62,18 @@ type request struct {
 }
 
 type receipt struct {
-	Intent intent `json:"intent"`
-	Bytes  uint64 `json:"reclaimed_bytes"`
+	Intent     intent      `json:"intent"`
+	Bytes      uint64      `json:"reclaimed_bytes"`
+	Allocation *allocation `json:"allocation,omitempty"`
 }
 
 type response struct {
-	Version  int      `json:"version"`
-	Status   string   `json:"status"`
-	StoreID  string   `json:"store_id"`
-	Snapshot string   `json:"snapshot,omitempty"`
-	Receipt  *receipt `json:"receipt,omitempty"`
+	Version   int      `json:"version"`
+	Status    string   `json:"status"`
+	StoreID   string   `json:"store_id"`
+	Snapshot  string   `json:"snapshot,omitempty"`
+	Estimated *uint64  `json:"estimated_exclusive_layer_bytes,omitempty"`
+	Receipt   *receipt `json:"receipt,omitempty"`
 }
 
 type pinnedController struct {
@@ -422,8 +424,8 @@ func decode(data []byte, out any) error {
 	return nil
 }
 
-func (s *service) send(c *net.UnixConn, status, snapshot string, r *receipt) {
-	_ = json.NewEncoder(c).Encode(response{Version: 1, Status: status, StoreID: s.storeID, Snapshot: snapshot, Receipt: r})
+func (s *service) send(c *net.UnixConn, status string, r *receipt) {
+	_ = json.NewEncoder(c).Encode(response{Version: 1, Status: status, StoreID: s.storeID, Receipt: r})
 }
 
 func (s *service) validIntent(id string, value *intent) bool {
@@ -452,11 +454,11 @@ func (s *service) exchange(conn *net.UnixConn) {
 		return
 	}
 	if msg.Operation == "probe" && msg.ID == "" && msg.Intent == nil && msg.Owner == "" {
-		s.send(conn, "ready", "", nil)
+		s.send(conn, "ready", nil)
 		return
 	}
 	if !imagePattern.MatchString(msg.ID) {
-		s.send(conn, "preserved", "", nil)
+		s.send(conn, "preserved", nil)
 		return
 	}
 	owner := msg.Owner
@@ -465,29 +467,31 @@ func (s *service) exchange(conn *net.UnixConn) {
 	case msg.Owner == "" && (msg.Operation == "prepare" || msg.Operation == "receipt") && s.validIntent(msg.ID, msg.Intent):
 		owner = msg.Intent.Binding.Owner
 	default:
-		s.send(conn, "preserved", "", nil)
+		s.send(conn, "preserved", nil)
 		return
 	}
 	if msg.Operation == "receipt" {
 		r := s.receipt(*msg.Intent)
 		if r == nil {
-			s.send(conn, "preserved", "", nil)
+			s.send(conn, "preserved", nil)
 		} else {
-			s.send(conn, "settled", "", r)
+			s.send(conn, "settled", r)
 		}
 		return
 	}
 	if s.hasAttempt(msg.ID) {
-		s.send(conn, "preserved", "", nil)
+		s.send(conn, "preserved", nil)
 		return
 	}
-	snapshot, err := s.backend.observe(msg.ID, owner)
+	snapshot, estimated, err := s.backend.observe(msg.ID, owner)
 	if err != nil || !hashPattern.MatchString(snapshot) ||
 		(msg.Intent != nil && snapshot != msg.Intent.Binding.Snapshot) {
-		s.send(conn, "preserved", "", nil)
+		s.send(conn, "preserved", nil)
 		return
 	}
-	s.send(conn, "ready", snapshot, nil)
+	if err = json.NewEncoder(conn).Encode(response{Version: 1, Status: "ready", StoreID: s.storeID, Snapshot: snapshot, Estimated: &estimated}); err != nil {
+		return
+	}
 	if msg.Operation == "observe" {
 		return
 	}
@@ -498,8 +502,18 @@ func (s *service) exchange(conn *net.UnixConn) {
 	}
 	// Once the marker reaches disk, any interruption conservatively blocks all further
 	// attempts for this exact image. A missing receipt never authorizes another delete.
+	baseline, measurable := sampleAllocation(s.dir)
 	if err = s.publish(attemptFile(msg.ID), *msg.Intent); err != nil {
 		return
+	}
+	receiptName := msg.Intent.Operation + ".receipt"
+	var slot *os.File
+	if measurable {
+		slot, err = s.reserveReceipt(receiptName)
+		if err != nil {
+			return
+		}
+		defer slot.Close()
 	}
 	if err = s.backend.remove(msg.ID, snapshot, owner, func() bool { return time.Now().Before(deadline) && s.control.accepts(conn) && s.current() }); err != nil {
 		return
@@ -507,10 +521,16 @@ func (s *service) exchange(conn *net.UnixConn) {
 	if unix.Syncfs(int(s.dir.Fd())) != nil || !s.current() {
 		return
 	}
-	if err = s.publishReceipt(msg.Intent.Operation+".receipt", receipt{Intent: *msg.Intent}); err != nil {
+	value := receipt{Intent: *msg.Intent}
+	if slot != nil {
+		err = s.settleReceipt(slot, value, baseline, estimated)
+	} else {
+		err = s.publishReceipt(receiptName, value)
+	}
+	if err != nil {
 		return
 	}
-	s.send(conn, "committed", "", nil)
+	s.send(conn, "committed", nil)
 }
 
 func attemptFile(id string) string { return strings.TrimPrefix(id, "sha256:") + ".attempt" }
@@ -547,28 +567,33 @@ func (s *service) publishReceipt(name string, value receipt) error {
 	return s.ledger.Sync()
 }
 
-func (s *service) readLedger(name string, value any) bool {
+func (s *service) ledgerContents(name string, durable bool) []byte {
 	fd, err := unix.Openat(int(s.ledger.Fd()), name, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
 	if err != nil {
-		return false
+		return nil
 	}
 	f := os.NewFile(uintptr(fd), name)
 	defer f.Close()
 	stat, err := f.Stat()
 	if err != nil || !stat.Mode().IsRegular() || !rootOwned(stat) || stat.Mode().Perm() != 0600 || stat.Sys().(*syscall.Stat_t).Nlink != 1 ||
-		stat.Size() <= 0 || stat.Size() > maxFrame {
-		return false
+		stat.Size() <= 0 || stat.Size() > maxFrame || (durable && f.Sync() != nil) {
+		return nil
 	}
 	content, err := io.ReadAll(io.LimitReader(f, maxFrame+1))
-	return err == nil && int64(len(content)) == stat.Size() && decode(content, value) == nil
+	if err != nil || int64(len(content)) != stat.Size() {
+		return nil
+	}
+	return content
 }
 
 func (s *service) receipt(want intent) *receipt {
 	var before intent
-	var got receipt
-	if s.ledger.Sync() != nil || !s.readLedger(attemptFile(want.Binding.ID), &before) || before != want ||
-		!s.readLedger(want.Operation+".receipt", &got) || got.Intent != want || got.Bytes != 0 {
+	if s.ledger.Sync() != nil || decode(s.ledgerContents(attemptFile(want.Binding.ID), false), &before) != nil || before != want {
 		return nil
 	}
-	return &got
+	got := decodeReceipt(s.ledgerContents(want.Operation+".receipt", true))
+	if got == nil || got.Intent != want {
+		return nil
+	}
+	return got
 }

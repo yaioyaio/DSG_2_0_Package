@@ -87,8 +87,8 @@
     },
     {
       "path": "docs/API_SPEC.md",
-      "sha256": "77f7c1ee41028c30cbf8943b2dbfb8aa0a0d0a170eb1fedc6cef414dc36bc259",
-      "bytes": 45459
+      "sha256": "bf2f467060a0e5829d2e0880dbf0b974b8e8249ad602b4e669d0d72f6fc52fda",
+      "bytes": 46688
     },
     {
       "path": "docs/ARCHITECTURE.md",
@@ -147,13 +147,13 @@
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "82fdee2b5e527270c80b0562dda60b0e11b393ce68621cd9f639fcd45f798738",
-      "bytes": 37340
+      "sha256": "3bf54310e8a7086aee2e6cc09321bd22a8d469a9e469fdb89e843fd078ee072b",
+      "bytes": 38030
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "7b50330d951dded57d113274dc36f5000b3c70a608ac1c4d565e2051a590e57b",
-      "bytes": 73249
+      "sha256": "2276923c582c8617f17e3e2862f56bd52e3aefcd546f20019e0e6bc6cfd32829",
+      "bytes": 74238
     },
     {
       "path": "docs/WBS.md",
@@ -471,14 +471,24 @@
       "bytes": 861
     },
     {
+      "path": "integrations/moby-exact/daemon/dsgimage/dsg_allocation_linux.go",
+      "sha256": "57f82493f0047243cac2cc3c6a1d5a5428c87d5aecdec35cab2cac8e52d1b24f",
+      "bytes": 5292
+    },
+    {
+      "path": "integrations/moby-exact/daemon/dsgimage/dsg_allocation_linux_test.go",
+      "sha256": "4ef7a37cb5876e69c243d4c5393652ff4c5d83bcb0b01448360314b6d846de24",
+      "bytes": 1599
+    },
+    {
       "path": "integrations/moby-exact/daemon/dsgimage/dsg_server_linux.go",
-      "sha256": "da90aa84386297ee1accc179574df73ecce68d03f66d744ae42ad56d9a822d48",
-      "bytes": 17069
+      "sha256": "3f1a8aab22299a66967bbe01004573528e013b08787c4cc5f6782b5ee3e8eb9d",
+      "bytes": 17693
     },
     {
       "path": "integrations/moby-exact/daemon/dsgimage/dsg_store_linux.go",
-      "sha256": "1c610ac7367928b53f18b14dcd02aa890e8ac5ce2389fc913f876b68bcc4848d",
-      "bytes": 12885
+      "sha256": "9571994e99d280c92f8ad5000c452828dac2e163fec1ab8264b537cce9af631d",
+      "bytes": 13452
     },
     {
       "path": "integrations/systemd/dsg-buildkit-exact.service",
@@ -727,8 +737,8 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/docker_gc_apply/dispatch.rs",
-      "sha256": "b98dcceb2d67cac162879dbbcc772e5385f85dc2e4d4bc6528e55cd3037a1961",
-      "bytes": 18791
+      "sha256": "b9fb5b281eb87516018f5abd593198368c93a3e8235b1a3ef0c4e53363663196",
+      "bytes": 20553
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/docker_gc_apply/dispatch/tests.rs",
@@ -742,8 +752,8 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/docker_gc_apply/moby.rs",
-      "sha256": "8dab6b5a7d68da078301a7f83dfd3188b3ec9554bb4f76377c7657ff47b227fa",
-      "bytes": 10538
+      "sha256": "1ac61802d283a40ae7e4c1dd4355998fa9b3f665667a7f26ed05205f7ae1c1fd",
+      "bytes": 18054
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/docker_gc_apply/tests.rs",
@@ -917,8 +927,8 @@
     },
     {
       "path": "scripts/check-moby-image-apply.py",
-      "sha256": "1c5327630ad3ca91ff085ddecd58292bc97e0f0e1bcebd302ec5f19a622abc75",
-      "bytes": 31353
+      "sha256": "a1268ed3d5a19b117fa4c670981d3b6512214f816b349fb0d560f835f35e42a9",
+      "bytes": 36207
     },
     {
       "path": "scripts/check-release-package.py",
