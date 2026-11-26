@@ -2,14 +2,26 @@
 
 로컬 제품의 사용 범위는 프로젝트 사용량·예산 확인, Docker 집계, 정리 미리보기다. 대시보드와 정리 승인 흐름은 분리돼 있다. 플랫폼별 패키지·서비스·서명 확인은 릴리스 근거에 각각 기록한다. [API 명세](API_SPEC.md#로컬-대시보드) · [검증 기록](HANDOFF.md)
 
+## 현재 소스의 로컬 후보 (2026-11-26)
+
+세 ARM64 패키지를 Rust 트리 13fdb79와 동일한 Cargo.lock에서 만들었다. 각 SHA-256과 아카이브 안의 두 실행 파일 아키텍처를 확인했다. [아카이브 대조](../dist/dsg-local-qualification-13fdb79/NATIVE-PACKAGE-INTEGRITY.json)
+
+| 대상 | 설치본 실측 |
+|---|---|
+| macOS ARM64 | 이전 후보 설치, 같은 버전의 현행 후보로 교체, 진단, 두 프로그램 실행, 읽기 전용 대시보드, 제거와 보호 파일 보존을 통과했다. [macOS 실측](../dist/dsg-local-qualification-13fdb79/MACOS-AND-DOCKER-PUBLIC-QUALIFICATION.json) |
+| Linux ARM64 musl | 기존 Ubuntu Parallels에서 이전 후보 설치, 같은 버전 교체, 진단, 두 프로그램 실행, 읽기 전용 대시보드, 제거와 사용자 파일 보존을 통과했다. [Ubuntu 실측](../dist/dsg-local-qualification-13fdb79/UBUNTU-ARM64-CURRENT-RUNTIME.json) |
+| Windows ARM64 | 기존 Windows ARM64 Parallels의 로컬 NTFS에서 이전 후보 설치, 같은 버전 교체, 진단, 두 프로그램 실행, 읽기 전용 대시보드, 제거와 사용자 파일 보존을 통과했다. [Windows 실측](../dist/dsg-local-qualification-13fdb79/WINDOWS-ARM64-CURRENT-RUNTIME.json) |
+
+## 이전 후보의 검증 기록
+
 | 대상 | 검증한 후보 | 검증 결과 |
 |---|---|---|
-| macOS ARM64 | 최신 `0.1.1-rc.1`, Rust 트리 `a44f0ca` | 독립 빌드 두 번의 아카이브 SHA-256 일치. 실제 `0.1.0`에서 업그레이드·롤백·재업그레이드·제거, 설치본 진단과 대시보드 API·WebKit 확인 |
-| Linux ARM64 musl | 최신 `0.1.1-rc.1`, Rust 트리 `ada5a09` | 기존 Ubuntu Parallels에서 이전 `0.1.0` 실물을 업그레이드했다. 두 실행 파일, 관리형 타임아웃 124와 lease 재획득, 대시보드 HTTP, 제거와 시험 파일 보존 및 별도 BuildKit 조회를 통과했다. `681be1e` 후보는 격리 Linux 엔진과 기존 Ubuntu VM에서도 검증했다. |
-| Windows ARM64 | 최신 `0.1.1-rc.1`, Rust 트리 `ada5a09` | 기존 Parallels의 로컬 NTFS에서 이전 `681be1e` 실물 설치와 교체, 설치 파일의 해시·실행, 대시보드 HTTP·제거와 사용자 파일 보존 확인 |
-| Windows x64 | 최신 `0.1.1-rc.1`, Rust 트리 `ada5a09` | 교차 링크·PE·아카이브 검증과 ARM64 게스트의 x64 에뮬레이션 실행·대시보드 HTTP 확인. ARM64 게스트의 네이티브 ARM64 Python과 에뮬레이션 x64 Python 각각에서 공식 설치기의 x64 설치·업그레이드가 종료 코드 1로 거절됐다. 설치 경로, 기존 ARM64 설치 포인터와 실행 파일 SHA-256, 사용자 시험 파일을 보존했다. 등록된 Windows VM이 ARM64이므로 Windows x64 운영체제 설치 수명 주기는 이번 범위에서 제외했다. [설치기 경계 재검증](HANDOFF.md#parallels-x64-설치기-경계-재검증) |
+| macOS ARM64 | 보존 `0.1.1-rc.1`, Rust 트리 `a44f0ca` | 독립 빌드 두 번의 아카이브 SHA-256 일치. 실제 `0.1.0`에서 업그레이드·롤백·재업그레이드·제거, 설치본 진단과 대시보드 API·WebKit 확인 |
+| Linux ARM64 musl | 보존 `0.1.1-rc.1`, Rust 트리 `ada5a09` | 기존 Ubuntu Parallels에서 이전 `0.1.0` 실물을 업그레이드했다. 두 실행 파일, 관리형 타임아웃 124와 lease 재획득, 대시보드 HTTP, 제거와 시험 파일 보존 및 별도 BuildKit 조회를 통과했다. `681be1e` 후보는 격리 Linux 엔진과 기존 Ubuntu VM에서도 검증했다. |
+| Windows ARM64 | 보존 `0.1.1-rc.1`, Rust 트리 `ada5a09` | 기존 Parallels의 로컬 NTFS에서 이전 `681be1e` 실물 설치와 교체, 설치 파일의 해시·실행, 대시보드 HTTP·제거와 사용자 파일 보존 확인 |
+| Windows x64 | 보존 `0.1.1-rc.1`, Rust 트리 `ada5a09` | 교차 링크·PE·아카이브 검증과 ARM64 게스트의 x64 에뮬레이션 실행·대시보드 HTTP 확인. ARM64 게스트의 네이티브 ARM64 Python과 에뮬레이션 x64 Python 각각에서 공식 설치기의 x64 설치·업그레이드가 종료 코드 1로 거절됐다. 설치 경로, 기존 ARM64 설치 포인터와 실행 파일 SHA-256, 사용자 시험 파일을 보존했다. 등록된 Windows VM이 ARM64이므로 Windows x64 운영체제 설치 수명 주기는 이번 범위에서 제외했다. [설치기 경계 재검증](HANDOFF.md#parallels-x64-설치기-경계-재검증) |
 
-현재 보완의 macOS ARM64 후보는 Rust 트리 `a44f0ca6f668bf6effb8d48815d20740c9418c34`에서 만들었다. Linux·Windows의 기존 검증은 Rust 트리 `ada5a09`에 해당한다. 후보별 디렉터리에 아카이브, SHA-256 파일과 `QUALIFICATION.json` 검증 요약을 보존한다.
+이전 보완의 macOS ARM64 후보는 Rust 트리 `a44f0ca6f668bf6effb8d48815d20740c9418c34`에서 만들었다. Linux·Windows의 기존 검증은 Rust 트리 `ada5a09`에 해당한다. 후보별 디렉터리에 아카이브, SHA-256 파일과 `QUALIFICATION.json` 검증 요약을 보존한다.
 
 새 macOS ARM64 후보는 `dist/dsg-macos-qualification-a44f0ca/`에 보존한다. 독립 빌드 두 번의 아카이브 SHA-256은 `67c1fb2045dba5709c4e1b4858c5cb9c922732fedc53b5f3f32cccd50f29c7f4`로 일치했다. `0.1.0` 실물에서 설치·업그레이드·롤백·재업그레이드·제거와 사용자 시험 파일 보존을 확인했다. 설치한 후보에서 Docker 조회와 WebKit 1060px·390px 집계를 확인했다. 롤백은 패키지 교체를 검증했으며 SQLite v4 상태의 이전 버전 이관은 별도다. [보완 검증](HANDOFF.md#compose-캐시-관리형-실행-및-승인-정리-보완)
 
@@ -17,11 +29,11 @@
 
 Windows ARM64 로컬 NTFS의 파일시스템 시험 9개는 WBS 1.3의 별도 실측 기록이다. 패키지 수명 주기와 비교할 때는 위 표의 후보·소스 범위를 적용한다. [Windows NTFS 검증](HANDOFF.md#dsg-02-windows-ntfs-파일-식별-보완)
 
-현재 Windows ARM64 후보는 `dist/dsg-windows-arm64-qualification-ada5a09/`에 보존하며, 아카이브 SHA-256은 `19ee6712ddbcfa0e7bc1f1da59ce39a4e5cad613f3a14fec4d6371d73dea6596`이다. 현재 Windows x64 후보는 `dist/dsg-windows-x64-qualification-ada5a09/`에 보존하며, 아카이브 SHA-256은 `667bd3ab4979f571c0b2e5293434026e0735786723f099e1f0a8333255b80470`이다. 두 대상 각각 동일한 교차 링크 입력으로 두 번 패키징한 아카이브의 해시가 일치했다. Windows ARM64의 이전 `681be1e` 후보와 현재 후보는 버전 문자열이 같으므로 아카이브·실행 파일의 해시, 설치 경로 교체와 이전 릴리스 회수로 업그레이드를 확인했다. 이전 ARM64 `681be1e` 후보와 x64 `0.1.0-rc.3` 실물도 보존한다. [현재 Windows 실측](HANDOFF.md#8단계-현재-후보-제품화-검증) · [이전 ARM64 실측](HANDOFF.md#macos-및-기존-parallels-잔여-수용-기준-재검증)
+보존된 ada5a09 Windows ARM64 후보는 `dist/dsg-windows-arm64-qualification-ada5a09/`에 보존하며, 아카이브 SHA-256은 `19ee6712ddbcfa0e7bc1f1da59ce39a4e5cad613f3a14fec4d6371d73dea6596`이다. 현재 Windows x64 후보는 `dist/dsg-windows-x64-qualification-ada5a09/`에 보존하며, 아카이브 SHA-256은 `667bd3ab4979f571c0b2e5293434026e0735786723f099e1f0a8333255b80470`이다. 두 대상 각각 동일한 교차 링크 입력으로 두 번 패키징한 아카이브의 해시가 일치했다. Windows ARM64의 이전 `681be1e` 후보와 현재 후보는 버전 문자열이 같으므로 아카이브·실행 파일의 해시, 설치 경로 교체와 이전 릴리스 회수로 업그레이드를 확인했다. 이전 ARM64 `681be1e` 후보와 x64 `0.1.0-rc.3` 실물도 보존한다. [현재 Windows 실측](HANDOFF.md#8단계-현재-후보-제품화-검증) · [이전 ARM64 실측](HANDOFF.md#macos-및-기존-parallels-잔여-수용-기준-재검증)
 
 기존 Linux ARM64 후보와 SHA-256 파일은 `dist/dsg-linux-arm64-qualification-681be1e/`에 보존한다. 두 정적 musl ELF 바이너리로 두 번 패키징해 SHA-256 `4847b388b8d2d97bb2e8f44dfe364d5f9c5cda0eb563f2fa862fb657fbf03e65`가 일치했다. 읽기 전용 Linux ARM64 시험 컨테이너와 기존 Ubuntu Parallels에서 같은 후보를 검증했다. Ubuntu 게스트는 표준 입력으로 전달한 시험 코드와 아카이브의 SHA-256을 각각 대조한 뒤 설치 수명 주기와 관리형 실행을 확인했다. 게스트 시험 전용 임시 자료를 회수하고 일시 중단 상태로 복귀했으며 VM 설정 변경은 없었다. [Ubuntu Parallels 실측](HANDOFF.md#명명-볼륨과-ubuntu-parallels-실측)
 
-최신 Linux ARM64 후보는 `dist/dsg-linux-arm64-qualification-ada5a09/`에 보존한다. 아카이브 SHA-256 `c8bea5e9d37927679a9a57812781a322a0d180abd937487fbadc09f9748202a8`가 동일 입력 두 번의 패키징에서 일치했다. Ubuntu Parallels에서 설치·업그레이드·제거와 제품 명령 `buildkit-local-cache`를 검증했다. [최신 Linux 실측](HANDOFF.md#별도-buildkit-읽기-전용-실측)
+보존된 ada5a09 Linux ARM64 후보는 `dist/dsg-linux-arm64-qualification-ada5a09/`에 보존한다. 아카이브 SHA-256 `c8bea5e9d37927679a9a57812781a322a0d180abd937487fbadc09f9748202a8`가 동일 입력 두 번의 패키징에서 일치했다. Ubuntu Parallels에서 설치·업그레이드·제거와 제품 명령 `buildkit-local-cache`를 검증했다. [최신 Linux 실측](HANDOFF.md#별도-buildkit-읽기-전용-실측)
 
 ## 패키지 만들기
 
