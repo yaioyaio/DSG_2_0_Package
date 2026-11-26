@@ -162,12 +162,13 @@ def verify_detached_lease(executable, base, global_policy, crash):
         supervisor.communicate(timeout=2)
 
 
-UNOBSERVED_DESCENDANT_FIXTURE = '''
+UNOBSERVED_DESCENDANT_FIXTURE = r'''
 import os
 from pathlib import Path
+import sys
 import time
 
-deadline = time.monotonic() + 12
+deadline = float(sys.argv[2]) if len(sys.argv) > 1 else time.monotonic() + 12
 
 def wait_for(name):
     while time.monotonic() < deadline:
@@ -176,18 +177,28 @@ def wait_for(name):
         time.sleep(0.02)
     return False
 
+if len(sys.argv) > 1:
+    with os.fdopen(int(sys.argv[1]), 'rb') as artifact:
+        Path('identity.tmp').write_text(str(os.getpid()))
+        Path('identity.tmp').replace('escaped.pid')
+        if wait_for('prove'):
+            Path('held').write_bytes(artifact.read())
+            wait_for('close')
+    os._exit(0)
+
+artifact_path = Path(os.environ['CARGO_TARGET_DIR']) / 'debug' / 'artifact.txt'
+artifact_path.parent.mkdir()
+artifact_path.write_bytes(b'lease-protected Cargo fixture\n')
 if not wait_for('spawn'):
     os._exit(1)
 launcher = os.fork()
 if launcher == 0:
     if os.fork() == 0:
         os.setsid()
-        with Path('artifact.txt').open('rb') as artifact:
-            Path('identity.tmp').write_text(str(os.getpid()))
-            Path('identity.tmp').replace('escaped.pid')
-            if wait_for('prove'):
-                Path('held').write_bytes(artifact.read())
-                wait_for('close')
+        with artifact_path.open('rb') as artifact:
+            fd = artifact.fileno()
+            os.set_inheritable(fd, True)
+            os.execv(sys.executable, [sys.executable, '-IB', __file__, str(fd), str(deadline)])
         os._exit(0)
     os._exit(0)
 os.waitpid(launcher, 0)
@@ -205,10 +216,24 @@ def verify_macos_observation_gap(executable, base, global_policy):
     result(cli + ['init', '--project-id', 'observation-gap'])
     helper = project / 'fixture.py'
     helper.write_text(UNOBSERVED_DESCENDANT_FIXTURE)
-    artifact = project / 'artifact.txt'
-    sentinel = b'read-only lease observation fixture\n'
-    artifact.write_bytes(sentinel)
+    cargo = project / 'cargo'
+    cargo.write_text('#!/bin/sh\nif [ "$#" -eq 1 ]; then exec /usr/bin/true; fi\nexec "$2" -IB "$3"\n')
+    cargo.chmod(0o700)
+    managed_cargo = ['--auto-clean-cargo', '--', str(cargo), 'check']
+    sentinel = b'lease-protected Cargo fixture\n'
     database = state / 'registry.sqlite3'
+    cleanup_root = state / 'managed-cleanup'
+    cleanup_journal = cleanup_root / 'jobs.sqlite'
+
+    def cargo_job():
+        with sqlite3.connect(cleanup_journal, timeout=0.3) as db:
+            (job,) = db.execute("SELECT id, state, reason FROM jobs WHERE kind = 'cargo'").fetchall()
+            return job
+
+    def assert_blocked():
+        contender = call(cli + ['exec', '--timeout', '2', *managed_cargo], timeout=3)
+        assert contender.returncode == 2
+        assert json.loads(contender.stderr)['error']['code'] == 'RESOURCE_ACTIVE'
 
     def await_value(observe, purpose, timeout=2):
         deadline = time.monotonic() + timeout
@@ -248,17 +273,20 @@ def verify_macos_observation_gap(executable, base, global_policy):
 
     escaped = None
     paused = False
-    supervisor = subprocess.Popen(cli + ['exec', '--timeout', '10', '--', sys.executable, '-IB', str(helper)],
+    supervisor = subprocess.Popen(cli + ['exec', '--timeout', '10', *managed_cargo, sys.executable, str(helper)],
                                   stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     try:
         lease_id, leader = await_value(observed_leader, 'the initial leader-only snapshot', timeout=3)
         assert leader != supervisor.pid and os.getpgid(leader) == leader
+        job_id, job_state, _ = cargo_job()
+        assert job_state == 'active'
+        artifact = cleanup_root / f'cargo-{job_id}' / 'debug' / 'artifact.txt'
         # Gate this owned fixture between two observations without depending on scheduler timing.
         supervisor.send_signal(signal.SIGSTOP)
         paused = True
         await_value(supervisor_stopped, 'the stopped fixture supervisor')
         (project / 'spawn').touch()
-        escaped = await_value(escaped_identity, 'the live descendant in a separate session')
+        escaped = await_value(escaped_identity, 'the live descendant after exec in a separate session')
         parent = call(['/bin/ps', '-p', str(escaped), '-o', 'ppid='], timeout=2)
         assert parent.returncode == 0 and parent.stdout.strip() == '1'
         assert observed_leader() == (lease_id, leader)
@@ -266,26 +294,39 @@ def verify_macos_observation_gap(executable, base, global_policy):
         supervisor.send_signal(signal.SIGCONT)
         paused = False
         stdout, _ = supervisor.communicate(timeout=4)
+        assert supervisor.returncode == 5
         report = json.loads(stdout)['result']
-        contender = call(cli + ['exec', '--timeout', '2', '--', '/usr/bin/true'], timeout=3)
+        assert report['reason_code'] == 'RUN_CONTROL_UNVERIFIED' and report['run']['outcome'] == 'control_failure'
+        assert report['run']['tree_confirmed_gone'] is False and report['lease_released'] is False
+        assert report['cleanup'] == {'removed': 0, 'preserved': 1, 'reclaimed_bytes': 0,
+                                     'reason': 'process_tree_unknown'}
+        assert artifact.read_bytes() == sentinel
+        assert_blocked()
+        assert cargo_job() == (job_id, 'preserved', 'supervisor_ended')
+        # Advance expiry in this isolated registry while the escaped process still holds the artifact.
+        with sqlite3.connect(database, timeout=0.3) as db:
+            updated = db.execute('UPDATE execution_lease SET acquired_at_ms = 0, expires_at_ms = 1 '
+                                 'WHERE id = ? AND released_at_ms IS NULL', (lease_id,))
+            assert updated.rowcount == 1
+        assert_blocked()
         (project / 'prove').touch()
         await_value(lambda: (project / 'held').is_file() and (project / 'held').read_bytes() == sentinel,
-                    'the descendant still holding the fixture file after the contender')
+                    'the descendant still holding the fixture file after both contenders')
         assert os.getpgid(escaped) == escaped and artifact.read_bytes() == sentinel
         with sqlite3.connect(database, timeout=0.3) as db:
             recorded = db.execute('SELECT count(*) FROM execution_lease_process WHERE lease_id = ? AND pid = ?',
                                   (lease_id, escaped)).fetchone()[0] == 1
-            released = db.execute('SELECT released_at_ms IS NOT NULL FROM execution_lease WHERE id = ?',
-                                  (lease_id,)).fetchone()[0] == 1
-        assert released == report['lease_released']
-        tree_gone = report['run']['tree_confirmed_gone']
-        if tree_gone and released and supervisor.returncode == contender.returncode == 0 and not recorded:
-            outcome = 'premature_release_reproduced'
-        elif not tree_gone and not released and supervisor.returncode == 5 and contender.returncode == 2:
-            assert json.loads(contender.stderr)['error']['code'] == 'RESOURCE_ACTIVE'
-            outcome = 'lease_preserved'
-        else:
-            raise RuntimeError('The macOS observation fixture produced inconsistent lease decisions.')
+            assert db.execute('SELECT released_at_ms FROM execution_lease WHERE id = ?',
+                              (lease_id,)).fetchone() == (None,)
+        (project / 'close').touch()
+        await_value(lambda: child_exited(escaped), 'the owned descendant exit')
+        following = result(cli + ['exec', '--timeout', '2', '--', '/usr/bin/true'], timeout=3)
+        assert following['run']['outcome'] == 'success' and following['run']['tree_confirmed_gone']
+        assert following['lease_released']
+        with sqlite3.connect(database, timeout=0.3) as db:
+            assert db.execute('SELECT COUNT(*) FROM audit_event WHERE lease_id = ? '
+                              "AND reason_code = 'LEASE_RECLAIMED'", (lease_id,)).fetchone() == (1,)
+        assert cargo_job() == (job_id, 'preserved', 'supervisor_ended') and artifact.read_bytes() == sentinel
     finally:
         for name in ('leader-release', 'prove', 'close'):
             (project / name).touch(exist_ok=True)
@@ -296,9 +337,10 @@ def verify_macos_observation_gap(executable, base, global_policy):
         supervisor.communicate(timeout=2)
         if escaped is not None:
             await_value(lambda: child_exited(escaped), 'the owned descendant exit')
-    return dict(outcome=outcome, descendant_recorded=recorded, descendant_held_file=True,
-                lease_released=released, tree_confirmed_gone=tree_gone, contender_exit=contender.returncode,
-                fixture_file_preserved=True, fixture_processes_remaining=0)
+    return dict(outcome='lease_preserved', descendant_recorded=recorded, descendant_held_file=True,
+                lease_released=report['lease_released'], tree_confirmed_gone=report['run']['tree_confirmed_gone'],
+                contender_exit=2, expired_contender_exit=2, lease_reacquired=True,
+                cleanup=report['cleanup'], fixture_file_preserved=True, fixture_processes_remaining=0)
 
 
 def docker_field(arguments, timeout):
@@ -750,6 +792,7 @@ if __name__ == '__main__':
             print('Managed execution (macOS): detached process blocked expired lease after normal and forced supervisor exit.')
             if lease_only:
                 sys.exit(0)
+            print(json.dumps(verify_macos_observation_gap(executable, base, global_policy), sort_keys=True))
         state = base / 'state'
         cli = [executable, '--root', str(project), '--state-dir', str(state), '--global-policy', str(global_policy), '--json']
         result(cli + ['init', '--project-id', 'managed-fixture'])

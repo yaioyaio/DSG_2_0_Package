@@ -28,7 +28,7 @@ pub enum RunOutcome {
 pub struct RunResult {
     pub outcome: RunOutcome,
     pub exit_code: Option<i32>,
-    /// The owned group and all observed descendants are absent.
+    /// Termination of the managed process tree has sufficient platform evidence.
     pub tree_confirmed_gone: bool,
 }
 
@@ -153,6 +153,8 @@ pub(crate) fn process_group_absent(pid: u32) -> bool {
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod posix {
     use super::*;
+    #[cfg(target_os = "macos")]
+    use crate::mac_exit_proof::MacExitProof;
     #[cfg(target_os = "macos")]
     use crate::mac_process::Descendants;
     use std::os::unix::process::CommandExt;
@@ -370,6 +372,8 @@ mod posix {
         let deadline = Instant::now() + timeout;
         let child = command.spawn()?;
         #[cfg(target_os = "macos")]
+        let exit_proof = MacExitProof::capture(child.id()).ok();
+        #[cfg(target_os = "macos")]
         let mut descendants = Descendants::default();
         let monitored = catch_unwind(AssertUnwindSafe(|| {
             supervise(
@@ -383,7 +387,9 @@ mod posix {
         }));
         let (status, tree_confirmed_gone) = cleanup(child, !matches!(monitored, Ok(Ok(None))));
         #[cfg(target_os = "macos")]
-        let tree_confirmed_gone = tree_confirmed_gone && descendants.gone();
+        let tree_confirmed_gone = tree_confirmed_gone
+            && descendants.gone()
+            && exit_proof.is_some_and(|p| p.proves_gone());
         let outcome = match monitored {
             Ok(Ok(Some(reason))) => reason,
             Ok(Ok(None)) => match status {
@@ -548,7 +554,11 @@ mod tests {
             )
             .unwrap();
             assert_eq!(result.outcome, expected);
-            assert!(result.tree_confirmed_gone && process_group_gone(leader.unwrap()));
+            assert!(process_group_gone(leader.unwrap()));
+            // On macOS group termination cannot establish the status of
+            // processes in other sessions. The managed fixture checks that case.
+            #[cfg(not(target_os = "macos"))]
+            assert!(result.tree_confirmed_gone);
         }
     }
 }
