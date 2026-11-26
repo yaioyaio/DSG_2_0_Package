@@ -35,7 +35,8 @@
     "buildkit_external_execution": "The external executor reserved one isolated append effect and returned the same settled receipt after bare QEMU full restores at approval and receipt boundaries. The isolated approval store was restored to its earlier state while the independent execution journal and claim remained intact. Ubuntu ARM64 verified the actual CLI with a pinned synthetic child, stale execution state and exact replay. Actual operating deployment, physical power cuts and joint rollback of execution state and claim remained separate in that run.",
     "buildkit_independent_execution_fence": "The Ubuntu ARM64 external executor CLI required an independent one-time reservation outside the guest before a digest-pinned synthetic effect. The saved execution ledger and local marker were jointly rolled back. macOS admitted one reservation, rejected the repeat, and one effect occurred. After restoring the settled files, the same receipt returned without the socket. Production worker mutation, physical power loss, and rollback of the independent reservation were outside this qualification.",
     "local_reclaim_measurement": "The installed macOS ARM64 CLI reclaimed one generated 16,777,216-byte Cargo artifact; expected size and independently observed pre-cleanup file allocation agreed. The protected witness was preserved. The host volume delta is observational. Ubuntu Parallels independently measured 8,192 expected payload allocation bytes for a new exact BuildKit fixture before separate approval, with zero mutations.",
-    "local_reclaim_witness": "The initial local BuildKit fixture was rejected before apply because its ledger witness was on tmpfs; the exact target stayed read-only and no apply was dispatched. A replacement local Ubuntu ext4 candidate uses a distinct disk-backed witness and has 8,192 expected payload allocation bytes. The replacement requires its own approval."
+    "local_reclaim_witness": "The initial local BuildKit fixture was rejected before apply because its ledger witness was on tmpfs; the exact target stayed read-only and no apply was dispatched. A replacement local Ubuntu ext4 candidate uses a distinct disk-backed witness and has 8,192 expected payload allocation bytes. The replacement requires its own approval.",
+    "buildkit_measured_reclaim": "A separately approved exact BuildKit cache was applied once on disk-file-backed ext4 in Ubuntu Parallels. Estimated and independently observed target allocations matched at 8,192 bytes. The guest filesystem allocation rose from 389,120 to 417,792 bytes, yielding -28,672 bytes net reclaimed. Non-target files and the reopened receipt matched, and the fixture was cleaned. The Mac volume delta is observational."
   },
   "files": [
     {
@@ -145,13 +146,13 @@
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "6307022d27b8b7913d955f2a086ffecc351e6b3128d6ffe4198ba33c15be7c2a",
-      "bytes": 32343
+      "sha256": "305feb3d43e5d607e0d8544944a9469f39a0fd393abadc11040b5585892e954e",
+      "bytes": 33356
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "a59f7f8218be8f25498556fdef68451f6184777d298c85fd2b7bf335d91a21ab",
-      "bytes": 67169
+      "sha256": "45d791b0c8700db58282e2e4be425d7e0cafc5c99c90b3a3b41a12aaa7fa86a2",
+      "bytes": 67768
     },
     {
       "path": "docs/WBS.md",
