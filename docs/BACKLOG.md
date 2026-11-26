@@ -63,6 +63,11 @@
 - DSG-04 · WBS 3.2 · REQ-006/009 · P0. WBS 2.2 판정을 갱신한 뒤 macOS lease를 검증했다. 관측된 그룹 이탈 자손의 정상·강제 감독자 종료 보호는 통과했다. 관측 사이 이탈한 자손이 파일을 계속 열고 있는데도 lease가 해제되고 같은 프로젝트의 후속 실행이 허용되는 결함을 재현했다. 이 기록은 수정 전 재현의 증거다. [lease 실측](../dist/dsg-macos-compose-lease/LEASE-OBSERVATION.json)
 - **WBS 3.2 승인 범위 완료.** 부팅·프로세스 세대·세션을 종료 증거에 결속했다. 실제 macOS 재현에서 누락 자손이 파일을 연 동안 만료 전후 새 실행이 차단됐고, 등록 정리는 파일 1개를 보존했다. 자손 종료 뒤 lease를 한 번 회수했고 정상 Cargo 자동 회수도 통과했다. 증거가 부족한 기존 활성 lease는 보호 대상으로 유지한다. [macOS 보호·회수 실측](../dist/dsg-macos-lease-exit-proof/QUALIFICATION.json)
 
+## 실제 브라우저 trace 보관
+
+- DSG-04·05 · WBS 3.3 · 선행 3.1. **Ubuntu Parallels 수용 시험 통과.** 단일 worker로 클릭 완료 trace 4개 및 고유 lease 해제 4건을 확인했다. TTL 등록 성공 trace 한 개를 회수했고 실제·기대 실패, 정책 미설정 성공, 프로젝트 기본 출력의 기존 파일을 보존했다. [Ubuntu 실측](../dist/dsg-playwright-browser-retention/UBUNTU-BROWSER-QUALIFICATION.json)
+- **macOS 종단 시험 부분.** 실제 Chromium 클릭 trace는 확인했고 자체 종료 코드는 0이었다. DSG는 세션 관계를 입증하지 못해 코드 5를 반환하고 lease와 증거를 보존했다. 재개 시 실패 회차에서 종료 증거가 분류하지 못한 세션의 계보를 좁히고, 3.2의 이탈 자손 보호와 함께 실제 클릭·TTL·lease 회귀를 검증한다. [macOS 실측](../dist/dsg-playwright-browser-retention/MACOS-BROWSER-DIAGNOSIS.json)
+
 ## 로컬 예상 실제 회수량 검증
 
 외부 호스트와 물리 시험, 별도 장애 영역 조건은 이번 로컬 판정 범위에서 제외했다. 기존 운영 배포 및 장애 복구 이력은 아래에서 추적한다.

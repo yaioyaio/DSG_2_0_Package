@@ -147,13 +147,13 @@
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "6df96d64f9b17b61e53d365b3f7407aad8500f95d0df95a3a8dbc70817d8224c",
-      "bytes": 38885
+      "sha256": "509f57cdc556334f0dfd1e5cf2f430902f01f46636ddc5895faa5305a73aa95e",
+      "bytes": 39364
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "c6dafaf23465d02def6b5a0f0f56052a5d968742cf7058c18376b0f93baf53ed",
-      "bytes": 77752
+      "sha256": "229240c1812f6e63c4547f8d1239d90f65743442703d0ec6870c5405f5dd81fa",
+      "bytes": 79313
     },
     {
       "path": "docs/WBS.md",
@@ -837,8 +837,8 @@
     },
     {
       "path": "scripts/check-build-providers.py",
-      "sha256": "04a3605255044f0483ec6b9e640dfdd5ec30e2804e7851fb37acc8dfa8ff4057",
-      "bytes": 15209
+      "sha256": "2d9d35fd53fd237d7df4bade993d4440014ad7f0a72ac31d97c9b0b119447c94",
+      "bytes": 21511
     },
     {
       "path": "scripts/check-buildkit-allocation.py",
