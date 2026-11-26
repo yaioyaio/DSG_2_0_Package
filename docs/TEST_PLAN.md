@@ -36,11 +36,15 @@ Docker 읽기 전용 단계에서는 Docker 명령 대역으로 컨텍스트 고
 
 3단계 대상 러너 4건, 레지스트리 17건, macOS 프로세스 식별 1건이 통과했다. 실제 macOS에서 `python3 -IB scripts/check-managed-execution.py <dsg> --macos-lease-only`로 소유한 이탈 자손을 등록한 뒤 두 경로를 확인했다. 첫 경로는 리더의 정상 종료 뒤 실행 감독자가 `RUN_CONTROL_UNVERIFIED`와 종료 코드 5를 반환하며 lease를 유지했다. 둘째 경로에서는 소유 실행 감독자만 SIGKILL로 종료했다. 두 경로 모두 리더 종료와 별도 그룹 자손의 생존을 확인한 뒤 같은 프로젝트 실행이 차단되는지 검사했다. 이어 임시 시험 SQLite의 해당 lease 행에서 획득 시각을 0, 만료 시각을 1로 조정해 만료를 재현했다. 제품 TTL과 heartbeat는 그대로 사용했다. 이후에도 자손이 살아 있으면 재실행이 차단됐고 자손의 자진 종료 뒤 lease를 재획득했다. 회수 감사 이벤트는 경로별 1건이다.
 
+`python3 -IB scripts/check-managed-execution.py <dsg> --macos-observation-gap-only`은 WBS 3.2의 관측 공백을 진단한다. 첫 관측에서 리더만 기록된 시험 감독자를 잠깐 멈춰 순서를 고정한다. 별도 그룹의 자손이 고아가 된 뒤에 마지막 관측을 진행한다. 자손이 같은 임시 파일을 계속 열고 있는 상태에서 등록부·종료 응답·후속 실행을 대조한다. 이 진단은 보존과 조기 해제를 구분한다. 현재 macOS 실측은 종료 확인·lease 해제·후속 실행 허용을 반환해 조기 해제를 재현했다. 해결 검증은 자손 생존 중 lease와 정리 대상 보존 및 종료가 확인되는 정상 흐름의 회귀를 요구한다. 진단 중 실제 정리와 Docker 변경은 0건이며 시험 프로세스 종료를 확인한다. [macOS 관측 공백 실측](../dist/dsg-macos-compose-lease/LEASE-OBSERVATION.json)
+
 사전에 digest가 있는 공개 fixture 이미지를 보유한 격리 엔진에서 `DSG_TEST_DOCKER_CONTEXT=dockerguard-test DSG_TEST_COMPOSE_FIXTURE=1 sh scripts/test-rust.sh`로 건강한 컨테이너 하나를 확인한다. 반복 `up`의 동일 ID와 추가 컨테이너 0개를 확인한다. 구성 변경 시험에서는 원래 인스턴스를 회수하고 새 인스턴스에서 과거 기대값을 거절한다. 회수 직전에 동일 엔진과 시험 프로젝트·서비스·라벨·전체 컨테이너 ID를 대조한다.
 
 같은 Compose 시험에서 엔진 ID와 단일 시험 컨테이너의 ID·라벨을 대조한 뒤 컨테이너의 `/dev/shm`에 상태 표식을 쓴다. 구성·이미지·마운트가 같은 컨테이너가 `unhealthy`가 된 경우 재사용은 `not_healthy`와 종료 코드 5를 반환해야 한다. 시험은 기존의 격리 컨테이너 회수 경로를 사용한다.
 
 `compose_projection` 대상 시험 4건이 통과했다. 코어 단위 시험 3건은 명명 볼륨 순서와 16진수 대소문자 정규화, 서비스 변경과 빌드 입력 변경의 구분, 지원 범위를 벗어나거나 불완전한 입력의 `unknown` 판정을 확인했다. 합성 Docker CLI 대역을 사용한 통합 시험 1건은 두 번의 조회, 옵션을 생략한 기존 JSON 계약, 동일 투영의 종료 코드 0, 재생성·재빌드 판정의 종료 코드 5를 확인했다. 컨테이너 교체·비정상 health·이미지 플랫폼 불일치에는 `baseline_unverified`와 종료 코드 5를 확인했다. 기준 해시 불일치와 알 수 없는 필드는 Docker 조회 0회로 종료하고, 오류 응답에 입력 원문이 포함되지 않는지 확인했다. 실제 격리 엔진 검증 기준은 아래에 별도로 명시한다.
+
+WBS 2.2 투영 종단 검증은 `python3 -IB scripts/check-managed-execution.py <dsg> dockerguard-test`의 격리 Compose 구간을 사용한다. 시험기의 지문과 Docker의 실제 구성 해시·플랫폼·digest를 대조하고, 제품 CLI 출력에서 동일 ID, `changed/recreate`, `changed/rebuild`, health가 관측 기준을 충족하지 않을 때 `unknown/baseline_unverified`를 확인한다. 재빌드 입력은 전용 시험 Dockerfile의 내용 해시다. Compose는 보유 이미지로만 기동하며 제품 판정은 엔진 상태를 변경하지 않는다. 회수 전후 기존 컨테이너·이미지·볼륨 ID 일치, 오재사용·추가 컨테이너 각 0건이 통과 기준이다. [macOS 실제 엔진 근거](../dist/dsg-macos-compose-lease/COMPOSE-QUALIFICATION.json)
 
 이미지·`tmpfs` 실측에는 같은 명령에 `DSG_TEST_COMPOSE_IMAGE`를 추가하고 값으로 격리 엔진에 준비된 공식 `docker.io/library/alpine@sha256:…` 참조를 지정한다. 두 번째 컨테이너는 원래 이미지와 ID·digest가 다른 이미지와 64 KiB `tmpfs`를 사용한다. 실제 이미지와 마운트를 조회한 뒤 구성·이미지·마운트 기대값을 개별 대조해 두 관측에서 각각 `configuration_changed`, `image_changed`, `mount_changed`와 종료 코드 5를 확인한다. 관측과 같은 `tmpfs`를 기대값에 넣어도 두 관측은 `unknown/unverified_mount`와 종료 코드 5를 반환해야 한다.
 
