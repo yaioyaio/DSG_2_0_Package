@@ -56,6 +56,10 @@ WBS 2.2 투영 종단 검증은 `python3 -IB scripts/check-managed-execution.py 
 
 `DSG_TEST_BUILD_PROVIDERS=1 sh scripts/test-rust.sh`는 로컬 도구와 의존성 없는 임시 프로젝트로 등록된 빌드·테스트 작업을 실행한다. `DSG_TEST_PLAYWRIGHT_MODULES`에 준비한 공식 Playwright의 `node_modules` 경로를 추가하면 실제 성공·실패 추적 파일의 존재와 길이, 서로 다른 출력 경로, 기본 프로젝트 출력 보존도 확인한다. 감사 검증에는 실행 결과 코드와 해당 lease 참조만 사용한다.
 
+실제 Chromium 검증은 `DSG_TEST_PLAYWRIGHT_MODULES`에 검증한 정확한 버전의 공식 Playwright와 필수 의존성만 준비한 전용 `node_modules` 절대 경로를, `DSG_TEST_PLAYWRIGHT_EXECUTABLE`에 준비한 로컬 Chromium의 실행 파일 절대 경로를 지정해 `python3 -IB scripts/check-build-providers.py <dsg> --playwright-only`로 실행한다. 임시 저장소의 가용 공간이 2 GiB 이상일 때 시작하고, 시험 정책의 여유 공간 하한과 프로젝트 예산은 각각 1 GiB다. 헤드리스 Chromium을 오프라인으로 구동하며 worker 1개로 정상 성공, 실제 단언 실패, 만료 등록 성공, 기대 실패를 각각 한 번 실행한다. 매 실행에서 시험 페이지의 네트워크 요청 0건, 버튼 클릭에 따른 DOM 값 변화, 서로 다른 실행별 출력 경로와 trace ZIP 내부의 클릭 시작·완료 이벤트를 확인한다.
+
+실제 단언 실패는 Provider 실패를 반환해야 한다. 기대 실패는 Playwright가 성공 종료하더라도 trace 만료 등록 자격이 없어야 한다. 만료 등록을 한 성공 trace 한 개만 회수하고, 앞선 성공·실패 trace와 기대 실패 trace, 프로젝트 기본 출력의 기존 파일을 보존한다. 관리형 실행 감사의 성공·실패·성공·성공 순서와 해제된 고유 lease 4개를 모두 확인해야 통과한다. 실패하면 시험기가 소유한 임시 프로젝트와 상태 저장소를 보존해 진단에 사용한다. [단독 실행기](../scripts/check-build-providers.py)
+
 실제 Next.js 앱의 통합 검증에는 `DSG_TEST_BUILD_PROVIDERS=1`과 `DSG_TEST_NEXT_MODULES`를 함께 지정한다. 두 번째 값은 Next.js 16.4.6, React·React DOM 19.3.1과 실행 환경의 SWC가 준비된 `node_modules`의 절대 경로다. 의존성은 크기와 파일 수를 제한한 임시 복사본을 사용한다. `PATH`에는 임시 홈에서 바로 실행할 수 있는 Node와 pnpm을 둔다. 단독 검증은 `DSG_TEST_NEXT_MODULES`를 지정해 `python3 -IB scripts/check-build-providers.py <dsg> --next-only`로 실행한다. pnpm Provider의 `next build --webpack`, `BUILD_ID`, 사전 렌더 HTML, 관리형 `exec`의 `127.0.0.1` 응답·종료 및 두 lease의 감사 기록을 확인한다.
 
 정리 회귀는 자체 생성한 임시 프로젝트만 대상으로 한다. 보호 디렉터리 보존, 기존 계획 이후 내부 파일 변경 감지, 틀린 승인 보존·일회용 승인 재실행 거절, 감사 기록과 회수량을 확인한다. 등록된 Cargo 대역의 성공·실패·중단 이벤트와 격리 Git 원격의 여섯 참조를 사용하는 워크트리 회수도 검사한다.
