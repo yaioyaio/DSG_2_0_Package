@@ -14,6 +14,8 @@ pub mod docker_image_gc;
 pub mod filesystem;
 pub mod gc;
 #[cfg(target_os = "macos")]
+mod mac_exit_proof;
+#[cfg(target_os = "macos")]
 mod mac_process;
 pub mod policy;
 pub mod registry;
