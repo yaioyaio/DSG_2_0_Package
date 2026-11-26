@@ -66,7 +66,7 @@
 ## 실제 브라우저 trace 보관
 
 - DSG-04·05 · WBS 3.3 · 선행 3.1. **Ubuntu Parallels 수용 시험 통과.** 단일 worker로 클릭 완료 trace 4개 및 고유 lease 해제 4건을 확인했다. TTL 등록 성공 trace 한 개를 회수했고 실제·기대 실패, 정책 미설정 성공, 프로젝트 기본 출력의 기존 파일을 보존했다. [Ubuntu 실측](../dist/dsg-playwright-browser-retention/UBUNTU-BROWSER-QUALIFICATION.json)
-- **macOS 종단 시험 부분.** 실제 Chromium 클릭 trace는 확인했고 자체 종료 코드는 0이었다. DSG는 세션 관계를 입증하지 못해 코드 5를 반환하고 lease와 증거를 보존했다. 별도로 띄운 독립 세션이 같은 종료 미확인을 재현했다. 진단 빌드는 호스트 활동이 적은 회차에서 실제 클릭·TTL·lease 시험을 통과했고, 기본 호스트 빌드의 결합 수용은 미통과다. macOS Parallels의 같은 비특권 후보 빌드에서 이탈 자손 보호·재획득은 통과했고 Chromium은 코드 5를 반환했다. 재개 시 게스트 종료 판정에서 미분류 세션의 출처와 생존 시간을 확인한 뒤 결합 시험을 재실행한다. [재현과 판정](HANDOFF.md#macos-chromium-종료-증거와-lease-재획득-진단) [macOS 실측](../dist/dsg-playwright-browser-retention/MACOS-BROWSER-DIAGNOSIS.json)
+- **macOS ARM64 호스트 수용 시험 통과.** 같은 DSG 바이너리에서 기본 Chromium과 Chromium 자체 샌드박스 활성화 구성을 각각 검증했다. 각 구성은 독립 세션이 살아 있는 동안 클릭 완료 trace 4개, 고유 lease 해제 4건, 만료 성공 trace 1개 회수를 확인했다. 관리형 고아 자손의 열린 파일을 확인한 별도 시험은 실행 코드 5, 후속 실행 코드 2, lease 보존, trace 등록·회수 0건을 확인했다. macOS Parallels ARM64의 같은 바이너리에서 이탈 자손 보호·종료 후 재획득과 실제 Chromium trace 4개, lease 해제 4건, 만료 trace 1개 회수까지 통과했다. [호스트 실측과 적용 범위](HANDOFF.md#macos-원래-부모-버전으로-종료-증거-확인)
 
 ## 로컬 예상 실제 회수량 검증
 

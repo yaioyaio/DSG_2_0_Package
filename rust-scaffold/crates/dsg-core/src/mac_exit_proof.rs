@@ -1,8 +1,10 @@
 //! Exit evidence for a managed child which called `setsid` before running user code.
 use std::collections::HashSet;
+use std::ffi::CStr;
 use std::io;
 use std::mem::size_of;
 use std::ptr;
+use std::sync::{mpsc, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -16,7 +18,8 @@ pub(crate) struct MacExitProof {
 }
 
 // XNU sys/proc_info_private.h: PROC_PIDUNIQIDENTIFIERINFO, with arg=1 to
-// include zombies. Only the fork generation and identity version are consumed.
+// include zombies. original_parent_version is recorded at fork and survives
+// both reparenting and exec. parent_generation need not survive their combination.
 #[repr(C)]
 #[derive(Default)]
 struct Identifier {
@@ -148,6 +151,56 @@ fn live_pids() -> io::Result<Vec<libc::pid_t>> {
     Ok(pids)
 }
 
+fn supports_original_parent_versions() -> bool {
+    static SUPPORTED: OnceLock<bool> = OnceLock::new();
+    *SUPPORTED.get_or_init(|| {
+        if !cfg!(target_arch = "aarch64") {
+            return false;
+        }
+        let mut system: libc::utsname = unsafe { std::mem::zeroed() };
+        if unsafe { libc::uname(&mut system) } != 0 {
+            return false;
+        }
+        let release = unsafe { CStr::from_ptr(system.release.as_ptr()) };
+        let build = unsafe { CStr::from_ptr(system.version.as_ptr()) };
+        release.to_bytes().starts_with(b"25.")
+            && build
+                .to_str()
+                .is_ok_and(|v| v.contains("xnu-12377.") && v.contains("/RELEASE_ARM64_"))
+    })
+}
+
+// XNU 12377 kern_fork.c allocates one global pidversion per fork generation,
+// including failed forks. In kern_exec.c both execve and spawn create a new
+// main thread before image activation. At most three activator iterations
+// (EAI_ITERLIMIT) can assign an exec version. Before the first 32-bit wrap,
+// the skip-previous-version loop cannot repeat an already allocated value.
+// thread.c assigns monotonically increasing 64-bit IDs starting above 100.
+// A thread born AFTER the closing marker bounds every exec in this scan.
+fn version_upper_bound(closing_generation: u64, deadline: Instant) -> Option<u64> {
+    if !supports_original_parent_versions() || Instant::now() >= deadline {
+        return None;
+    }
+    let (send, receive) = mpsc::sync_channel(1);
+    if thread::Builder::new()
+        .name("dsg-version-bound".into())
+        .spawn(move || {
+            let mut id = 0u64;
+            if unsafe { libc::pthread_threadid_np(libc::pthread_self(), &mut id) } == 0 {
+                let _ = send.send(id);
+            }
+        })
+        .is_err()
+    {
+        return None;
+    }
+    let id = receive
+        .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+        .ok()?;
+    let bound = id.checked_mul(4)?.checked_add(closing_generation)?;
+    (id > 100 && bound < (1u64 << 32)).then_some(bound)
+}
+
 impl MacExitProof {
     /// The caller owns the unreaped managed child, including when it has
     /// already exited. Its PID cannot be assigned to another process yet.
@@ -203,11 +256,14 @@ impl MacExitProof {
         }
         let mut older_sessions = HashSet::new();
         let mut newer_sessions = HashSet::new();
+        let mut outside_versions = HashSet::new();
+        let mut newer = Vec::new();
         for pid in live_pids()? {
             if Instant::now() >= deadline {
                 return Err(invalid());
             }
-            let gen = identifier(pid)?.generation;
+            let info = identifier(pid)?;
+            let gen = info.generation;
             if gen == root {
                 return Ok(false);
             }
@@ -216,11 +272,15 @@ impl MacExitProof {
             }
             let sid = unsafe { libc::getsid(pid) };
             if gen < root {
+                if info.version != 0 {
+                    outside_versions.insert(info.version);
+                }
                 if sid >= 0 {
                     older_sessions.insert(sid);
                 }
             } else if sid >= 0 {
                 newer_sessions.insert(sid);
+                newer.push((gen, sid, info.version, info.original_parent_version));
             } else {
                 return Err(invalid());
             }
@@ -228,11 +288,44 @@ impl MacExitProof {
         // Fork generations advance once per new PID and survive exec. With
         // adjacent markers, neither a PID nor a session ID could be recycled
         // during the scan; no descendant could relay work to a later fork.
-        if marker(deadline)? != first + 1 {
+        let closing = marker(deadline)?;
+        if closing != first + 1 {
             return Err(invalid());
         }
         // A descendant inherits our dedicated session or creates a fresh one.
         // It can never join a session containing a pre-existing process.
-        Ok(newer_sessions.is_subset(&older_sessions))
+        if newer_sessions.is_subset(&older_sessions) {
+            return Ok(true);
+        }
+        let Some(bound) = version_upper_bound(closing, deadline) else {
+            return Ok(false);
+        };
+        if outside_versions
+            .iter()
+            .any(|&version| u64::from(version) > bound)
+        {
+            return Ok(false);
+        }
+        let mut outside_sessions = older_sessions;
+        newer.sort_unstable();
+        for (_, sid, version, parent_version) in newer {
+            if Instant::now() >= deadline {
+                return Err(invalid());
+            }
+            if version == 0 || u64::from(version) > bound || parent_version >= version {
+                return Ok(false);
+            }
+            // Fork versions start at zero and increase at least once per
+            // generation. The managed root could already have exec'd again
+            // when captured, so its sampled version is not a lower bound.
+            let outside_parent = parent_version != 0
+                && (u64::from(parent_version) < root - 1
+                    || outside_versions.contains(&parent_version));
+            if outside_parent || outside_sessions.contains(&sid) {
+                outside_sessions.insert(sid);
+                outside_versions.insert(version);
+            }
+        }
+        Ok(newer_sessions.is_subset(&outside_sessions))
     }
 }

@@ -60,7 +60,7 @@ WBS 2.2 투영 종단 검증은 `python3 -IB scripts/check-managed-execution.py 
 
 실제 단언 실패는 Provider 실패를 반환해야 한다. 기대 실패는 Playwright가 성공 종료하더라도 trace 만료 등록 자격이 없어야 한다. 만료 등록을 한 성공 trace 한 개만 회수하고, 앞선 성공·실패 trace와 기대 실패 trace, 프로젝트 기본 출력의 기존 파일을 보존한다. 관리형 실행 감사의 성공·실패·성공·성공 순서와 해제된 고유 lease 4개를 모두 확인해야 통과한다. 실패하면 시험기가 소유한 임시 프로젝트와 상태 저장소를 보존해 진단에 사용한다. [단독 실행기](../scripts/check-build-providers.py)
 
-macOS의 결합 수용 시험은 같은 `dsg` 바이너리로 `--macos-lease-only`, `--macos-observation-gap-only`, 실제 Chromium `--playwright-only`를 순서대로 실행한다. 마지막 시험을 통과하려면 페이지 성공과 함께 관리형 종료 판정과 lease 해제도 확인해야 한다. 별도로 시작한 지속 세션이 판정을 막는 대조 시험에서는 해당 시험 세션의 생존과 기존 lease의 보존을 확인한다. [macOS 진단 기록](HANDOFF.md#macos-chromium-종료-증거와-lease-재획득-진단)
+macOS의 결합 수용 시험은 같은 `dsg` 바이너리로 `--macos-lease-only`, `--macos-observation-gap-only`, 실제 Chromium `--playwright-only`를 순서대로 실행한다. 외부 세션 대조는 관리 실행이 시작된 뒤 별도 세션을 만들고, 그 프로세스의 원래 부모가 관리 실행보다 먼저 생성됐으며 종료 판정 때 외부 세션이 살아 있는지 확인한다. 기본 Chromium과 자체 샌드박스를 켠 Chromium에서 각각 클릭 완료, 고유 lease 해제 4건과 만료 성공 trace 1개 회수가 필요하다. 관측에서 빠진 실제 자손이 파일을 계속 열고 있으면 코드 5, 기존 lease 보존, 후속 실행 차단, trace 등록·회수 0건을 확인한다. [macOS 실측](HANDOFF.md#macos-원래-부모-버전으로-종료-증거-확인)
 
 실제 Next.js 앱의 통합 검증에는 `DSG_TEST_BUILD_PROVIDERS=1`과 `DSG_TEST_NEXT_MODULES`를 함께 지정한다. 두 번째 값은 Next.js 16.4.6, React·React DOM 19.3.1과 실행 환경의 SWC가 준비된 `node_modules`의 절대 경로다. 의존성은 크기와 파일 수를 제한한 임시 복사본을 사용한다. `PATH`에는 임시 홈에서 바로 실행할 수 있는 Node와 pnpm을 둔다. 단독 검증은 `DSG_TEST_NEXT_MODULES`를 지정해 `python3 -IB scripts/check-build-providers.py <dsg> --next-only`로 실행한다. pnpm Provider의 `next build --webpack`, `BUILD_ID`, 사전 렌더 HTML, 관리형 `exec`의 `127.0.0.1` 응답·종료 및 두 lease의 감사 기록을 확인한다.
 
