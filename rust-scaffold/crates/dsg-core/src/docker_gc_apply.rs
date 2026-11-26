@@ -16,7 +16,9 @@ use thiserror::Error;
 #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
 pub(crate) mod dispatch;
 #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
-pub use dispatch::{DockerGcDispatch, DockerGcDispatchResult};
+mod moby;
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+pub use dispatch::{serve_moby_image_request, DockerGcDispatch, DockerGcDispatchResult};
 
 const PLAN_TTL: Duration = Duration::from_secs(3600);
 const APPROVAL_TTL: Duration = Duration::from_secs(600);

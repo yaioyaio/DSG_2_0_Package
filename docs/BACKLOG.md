@@ -72,7 +72,7 @@
 | 작업 | 상태와 수용 기준 |
 |---|---|
 | DSG-05 · WBS 1.4·2.3 · 순할당 귀속 | **완료.** Ubuntu Parallels에서 이전 승인과 같은 실행 경로와 4 KiB ext4의 시작 할당량 389,120 B를 사용했다. 종료 할당량 417,792 B와 예상–실제 차이 36,864 B가 재현됐다. 대상 외 변화는 삭제 저널 +24,576 B, solver DB +8,192 B, 캐시 메타데이터 DB +8,192 B, 스냅샷 디렉터리 −4,096 B다. 대상 두 파일 −8,192 B를 합치면 전체 순증은 28,672 B이고 잔차는 0 B다. 시작값이 한 블록 큰 별도 예행과 비교해 `metadata_v2.db`의 시작 할당 차이도 확인했다. [동일 기준 재현](../dist/dsg-local-same-mount-allocation/MATCHED-QUALIFICATION.json) · [별도 예행](../dist/dsg-local-same-mount-allocation/QUALIFICATION.json) |
-| DSG-05·07 · WBS 1.4·5.1 · 로컬 공개 이미지 적용 | **미완료.** Ubuntu Parallels 전용 Moby 29.1.3(vfs)와 보호 제어기를 연결하려면 모든 참조 작성자를 배제하는 엔진 측 경계가 필요하다. 표준 DELETE는 전체 ID와 `force=false`에서도 단일 태그를 제거할 수 있다. Moby 소스 변경과 전용 빌드 경로의 범위 승인을 받은 뒤 태그·컨테이너 참조 경합, 승인 일회성, 응답 유실 시 영수증 복구 및 변경 재호출 0건을 검증한다. [공개 적용 계약](API_SPEC.md#보호된-docker-제어기-배포-확인) · [Moby 29.1.3 삭제 구현](https://github.com/moby/moby/blob/docker-v29.1.3/daemon/images/image_delete.go#L162-L185) |
+| DSG-05·07 · WBS 1.4·5.1 · 로컬 공개 이미지 적용 | **승인된 로컬 연결 범위 완료.** Linux ARM64 전용 classic VFS Moby 29.1.3과 보호 제어기의 계획·승인·적용·복구를 연결했다. 각 시험에서 단일 이미지 변경과 동일 영수증, 경쟁 태그·컨테이너 생성 및 승인 재사용 차단을 검증했다. 영속 영수증 작성 후 응답 유실은 기존 의도로 정산했고 재호출은 0건이었다. 지원 대상은 독립된 전용 저장소이며 Mac과 Ubuntu의 다른 Docker 자료는 보존했다. 공유 레이어와 비대상 전용 레이어를 보존하는 시험도 통과했다. [공개 계약](API_SPEC.md#로컬-전용-moby-이미지-적용) · [실측](../dist/dsg-local-moby/QUALIFICATION.json) · [공유 레이어 실측](../dist/dsg-local-moby/LAYERED-QUALIFICATION.json) |
 
 ## BuildKit 운영 배포와 복구 검증 잔여
 

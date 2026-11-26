@@ -20,6 +20,8 @@ mod hook_install;
 mod hooks;
 mod mcp;
 mod mcp_state;
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+mod moby_image;
 
 #[derive(Parser)]
 #[command(
@@ -106,6 +108,32 @@ enum Command {
         /// 해당 자원의 전체 ID
         #[arg(long)]
         resource: String,
+    },
+    /// 보호된 로컬 Moby 이미지 계획·승인·적용 요청을 처리합니다.
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    DockerImageServe {
+        /// 제어기 실행 후 배치할 보호된 배포 정책의 절대 경로
+        #[arg(long)]
+        policy: PathBuf,
+        /// 역할 세션이 연결하는 제어 소켓의 절대 경로
+        #[arg(long)]
+        control: PathBuf,
+        /// root 전용 제어기 확인 소켓의 절대 경로
+        #[arg(long)]
+        probe: PathBuf,
+        /// 제어기가 열린 상태로 유지할 보호 저장소 디렉터리의 절대 경로
+        #[arg(long)]
+        store_directory: PathBuf,
+    },
+    /// 승인 또는 실행 계정에서 이미지 요청과 응답을 한 줄씩 중계합니다.
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    DockerImageSession {
+        /// 보호된 제어 소켓의 절대 경로
+        #[arg(long)]
+        control: PathBuf,
+        /// 설치자가 바인드하고 이 프로세스에 상속한 probe 소켓의 FD
+        #[arg(long, value_parser = clap::value_parser!(i32).range(3..))]
+        probe_fd: i32,
     },
     /// 소유권을 확인한 생성 폴더를 정리 대상으로 등록합니다.
     GcOwn {
@@ -308,6 +336,23 @@ fn main() -> ExitCode {
         #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
         Command::BuildkitExactService => {
             return ExitCode::from(dsg_core::buildkit_exact_controller::serve_operating());
+        }
+        #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+        Command::DockerImageServe {
+            policy,
+            control,
+            probe,
+            store_directory,
+        } => {
+            let Some(state_dir) = cli.state_dir.as_deref() else {
+                eprintln!("보호 등록부의 --state-dir 절대 경로를 지정하세요");
+                return ExitCode::from(2);
+            };
+            return moby_image::serve(policy, state_dir, control, probe, store_directory);
+        }
+        #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+        Command::DockerImageSession { control, probe_fd } => {
+            return moby_image::session(control, *probe_fd);
         }
         Command::Hook { agent } => return hooks::run(*agent),
         Command::Mcp => return mcp::run(&cli),
@@ -563,6 +608,8 @@ fn run(cli: &Cli) -> Result<Output, CliError> {
         | Command::BuildkitLocalCache { .. }
         | Command::DockerControllerProbe { .. }
         | Command::DockerControllerAdmission { .. }
+        | Command::DockerImageServe { .. }
+        | Command::DockerImageSession { .. }
         | Command::DockerBackendPreflight { .. } => unreachable!(),
         Command::Hook { .. }
         | Command::Agents { .. }

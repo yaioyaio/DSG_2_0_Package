@@ -1,4 +1,5 @@
 use super::*;
+use crate::docker_image_gc::valid_full_image_id;
 use std::mem::size_of;
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::ptr;
@@ -21,6 +22,7 @@ struct ControlBuffer {
 #[derive(Debug, Deserialize, Eq, PartialEq)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WriteRequest {
+    Plan { project_id: i64, image_id: String },
     Approve { project_id: i64, plan_id: i64 },
     Apply { project_id: i64, plan_id: i64 },
     Recover { project_id: i64, intent_id: String },
@@ -49,6 +51,15 @@ impl Role {
 }
 
 impl WriteRequest {
+    pub fn project_id(&self) -> i64 {
+        match self {
+            Self::Plan { project_id, .. }
+            | Self::Approve { project_id, .. }
+            | Self::Apply { project_id, .. }
+            | Self::Recover { project_id, .. } => *project_id,
+        }
+    }
+
     fn parse(bytes: &[u8]) -> Result<Self> {
         let envelope: RequestEnvelope =
             serde_json::from_slice(bytes).map_err(|_| QueryFailure::Malformed)?;
@@ -56,20 +67,11 @@ impl WriteRequest {
             return Err(QueryFailure::Malformed);
         }
         let valid_selector = match &envelope.request {
-            Self::Approve {
-                project_id,
-                plan_id,
-            }
-            | Self::Apply {
-                project_id,
-                plan_id,
-            } => *project_id > 0 && *plan_id > 0,
-            Self::Recover {
-                project_id,
-                intent_id,
-            } => *project_id > 0 && valid_hash(intent_id),
+            Self::Plan { image_id, .. } => valid_full_image_id(image_id),
+            Self::Approve { plan_id, .. } | Self::Apply { plan_id, .. } => *plan_id > 0,
+            Self::Recover { intent_id, .. } => valid_hash(intent_id),
         };
-        if !valid_selector {
+        if envelope.request.project_id() <= 0 || !valid_selector {
             return Err(QueryFailure::InvalidSelector);
         }
         Ok(envelope.request)
@@ -77,7 +79,7 @@ impl WriteRequest {
 
     fn role(&self) -> Role {
         match self {
-            Self::Approve { .. } => Role::Approver,
+            Self::Plan { .. } | Self::Approve { .. } => Role::Approver,
             Self::Apply { .. } | Self::Recover { .. } => Role::Executor,
         }
     }
@@ -110,6 +112,12 @@ impl AuthorizedWriteRequest<'_> {
 
     pub fn engine(&self) -> &ControllerEvidence {
         self.engine
+    }
+
+    pub(crate) fn connect_engine(&self) -> Result<UnixStream> {
+        let stream = self.peers.engine.connect()?;
+        self.check_current()?;
+        Ok(stream)
     }
 
     pub fn role(&self) -> &ControllerEvidence {
@@ -160,9 +168,10 @@ pub fn configure_write_request_listener(listener: BorrowedFd<'_>) -> Result<()> 
 /// The connection is consumed. Dispatch can reply on the borrowed socket before it is closed.
 /// A rejected packet never calls dispatch.
 ///
-/// The adapter must compare the bound scope to its exact project and plan or pending intent. It
-/// must keep pending intents associated with the underlying engine across policy/role generation
-/// changes and hold exclusion while revalidating and applying a separately recorded approval.
+/// The adapter must compare the bound scope to its exact project and image, plan, or pending
+/// intent. It must keep pending intents associated with the underlying engine across policy/role
+/// generation changes and hold exclusion while revalidating and applying a separately recorded
+/// approval.
 pub fn with_authorized_write_request<T>(
     policy_path: &Path,
     socket: OwnedFd,
@@ -534,6 +543,38 @@ mod tests {
             r#"{"protocol_version":1,"request":{"operation":"apply","project_id":0,"plan_id":3}}"#,
             r#"{"protocol_version":1,"request":{"operation":"approve","project_id":9,"plan_id":-1}}"#,
             r#"{"protocol_version":1,"request":{"operation":"recover","project_id":9,"intent_id":"prefix"}}"#,
+        ] {
+            assert_eq!(
+                WriteRequest::parse(request.as_bytes()),
+                Err(QueryFailure::InvalidSelector)
+            );
+        }
+    }
+
+    #[test]
+    fn planning_requires_the_approver_and_an_exact_image_id() {
+        let image_id = format!("sha256:{}", "1f".repeat(32));
+        let plan = |project, image: &str| {
+            format!(
+                r#"{{"protocol_version":1,"request":{{"operation":"plan","project_id":{project},"image_id":"{image}"}}}}"#
+            )
+        };
+        let parsed = WriteRequest::parse(plan(9, &image_id).as_bytes()).unwrap();
+        assert_eq!(parsed.role(), Role::Approver);
+        assert_eq!(parsed.project_id(), 9);
+        assert_eq!(
+            parsed,
+            WriteRequest::Plan {
+                project_id: 9,
+                image_id: image_id.clone(),
+            }
+        );
+        for request in [
+            plan(0, &image_id),
+            plan(9, &image_id[..19]),
+            plan(9, &image_id[7..]),
+            plan(9, &format!("sha256:{}", "1F".repeat(32))),
+            plan(9, "repository:tag"),
         ] {
             assert_eq!(
                 WriteRequest::parse(request.as_bytes()),
