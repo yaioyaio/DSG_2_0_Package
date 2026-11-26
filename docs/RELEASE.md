@@ -4,6 +4,16 @@
 
 ## 현재 소스의 로컬 후보 (2026-11-26)
 
+Rust 트리 `2bccd4b`와 동일한 `Cargo.lock`에서 macOS·Ubuntu·Windows ARM64 `0.1.1-rc.1` 후보를 새로 만들었다. 세 아카이브 및 두 실행 파일의 체크섬과 아키텍처를 대조했다. [아카이브 대조](../dist/dsg-local-image-packages-2bccd4b/NATIVE-PACKAGE-INTEGRITY.json)
+
+| 대상 | 설치본 실측 |
+|---|---|
+| macOS ARM64 | 이전 후보 설치, 같은 버전 교체, 진단, 두 프로그램, 읽기 전용 대시보드, 제거와 사용자 파일 보존을 통과했다. 실제 로컬 Docker 이미지의 계획·재확인은 보존으로 판정했고, 전용 쓰기 명령 및 파일 정리 경로의 이미지 승인·적용을 거절했다. [macOS 실측](../dist/dsg-local-image-packages-2bccd4b/MACOS-ARM64-RUNTIME.json) · [아카이브](../dist/dsg-local-image-packages-2bccd4b/dsg-0.1.1-rc.1-aarch64-apple-darwin.tar.gz) |
+| Ubuntu ARM64 | 이전 후보 설치, 같은 버전 교체, 진단, 두 프로그램과 읽기 전용 대시보드를 통과했다. 설치 바이트와 해시가 같은 보호 역할용 사본으로 전용 Moby의 계획·승인·적용을 검증했다. 단일 적용·영수증과 공유 레이어 보존, 같은 ext4의 40,960 B 순회수, 제거와 사용자 파일 보존을 확인했다. [Ubuntu 실측](../dist/dsg-local-image-packages-2bccd4b/UBUNTU-ARM64-RUNTIME.json) · [아카이브](../dist/dsg-local-image-packages-2bccd4b/dsg-0.1.1-rc.1-aarch64-unknown-linux-musl.tar.gz) |
+| Windows ARM64 | 기존 Windows Parallels의 로컬 NTFS에서 이전 후보 설치, 같은 버전 교체, 진단, 두 프로그램, 읽기 전용 대시보드, 제거와 사용자 파일 보존을 통과했다. 미확인 Docker의 계획은 보존했고 재확인·승인·적용과 Linux 전용 명령을 거절했다. [Windows 실측](../dist/dsg-local-image-packages-2bccd4b/WINDOWS-ARM64-RUNTIME.json) · [아카이브](../dist/dsg-local-image-packages-2bccd4b/dsg-0.1.1-rc.1-aarch64-pc-windows-msvc.tar.gz) |
+
+## 이전 로컬 후보 (`13fdb79`)
+
 세 ARM64 패키지를 Rust 트리 13fdb79와 동일한 Cargo.lock에서 만들었다. 각 SHA-256과 아카이브 안의 두 실행 파일 아키텍처를 확인했다. [아카이브 대조](../dist/dsg-local-qualification-13fdb79/NATIVE-PACKAGE-INTEGRITY.json)
 
 | 대상 | 설치본 실측 |
