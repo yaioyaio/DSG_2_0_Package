@@ -160,6 +160,12 @@ Linux ARM64의 전용 변경 어댑터는 동일 배타 슬롯 아래 승인 전
 
 WBS 1.4·5.1은 전용 Ubuntu Parallels ARM64 Moby에서 합성 이미지 한 건의 배포 정책, 프로젝트 등록부, 소유 등록의 전체 ID, 커널이 확인한 현재 피어와 제어기가 보유한 저장소 디렉터리를 대조한다. 독립 Docker 정보의 저장소 경로와 이미지 개수도 확인한다. 미등록 프로젝트와 미등록 전체 ID, 쓰기 가능한 등록, 다른 디렉터리 FD·실행 파일 해시·저장소 표지·프로젝트 지문·배포 정책 원본 해시, 존재하는 SQLite WAL은 모두 보존과 종료 코드 5를 반환해야 한다. 비특권 승인자·실행자의 엔진 직접 연결을 거절하고 TCP 리스너 0개, 등록부 불변, 이미지 1→1, 변경 요청 0건을 확인한다. 별도 관측으로 데몬 리스너의 소유와 격리 경로를 확인한다. 시험에서 대상 API 소켓 한 곳과 경로상 metrics·libnetwork 내부 소켓 두 곳을 root 전용 저장소에서 확인했다. [리스너 실측](../dist/dsg-backend-sockets-b151d4d4d829/QUALIFICATION.json) 두 결과 모두 `mutation_authorized=false`와 `exclusive_mutation=unverified`를 유지해야 한다. [명령 계약](API_SPEC.md#전용-docker-백엔드-읽기-전용-점검) · [Moby 실측](../dist/dsg-backend-ownership-5fbb83f5a031/QUALIFICATION.json) · [Linux 단위 시험 3건](../dist/dsg-backend-unit-2b0490cc66b4/QUALIFICATION.json)
 
+### 로컬 전용 Moby 공개 이미지 적용
+
+`scripts/prepare-moby-exact.py`로 고정 Moby 29.1.3을 준비한 뒤 Linux ARM64용 전용 엔진을 빌드한다. 기존 Ubuntu Parallels에서 사설 마운트·네트워크와 디스크 기반 ext4 loop를 만든다. 독립 저장소에 네이티브 고전 VFS 로더로 합성 이미지 두 건을 적재하고 기존 시험용 엔진과 런타임을 종료한다. 전용 표식과 보호된 저장소 FD, 현재 부팅·PID·실행 파일, 서로 다른 승인자·실행자 프로브를 결합한다.
+
+`scripts/check-moby-image-apply.py`는 정확한 전체 ID의 계획·승인·적용, 잘못된 역할과 미할당 이미지 거절, 같은 저장소의 표준 데몬 기동 거절을 확인한다. 적용과 함께 실제 Docker CLI 및 HTTP의 태그·컨테이너 생성 시도를 실행한다. 대상 한 건만 없어지고, 비대상 이미지의 내용·inode와 참조 목록이 유지되며, 일회 승인·시도·영수증은 각각 하나여야 한다. 영수증 동기화 뒤 커밋 응답을 끊는 시험용 엔진으로 `recovery_required`와 정확한 의도의 재정산을 확인한다. 적용 재시도에서 시도 표식과 영수증이 동일해야 한다. 정상·장애 대역은 각각 새 합성 저장소를 사용한다. `--layered` 시험은 대상·피어 고유 레이어와 공통 레이어를 준비한다. 대상 고유 레이어 한 개만 제거되고, 공유 및 피어 쪽의 파일 inode·내용 해시·수정 시각이 동일해야 한다. [검증 실행기](../scripts/check-moby-image-apply.py)
+
 ### BuildKit 공개 API와 승인 원장 VM 유실 시험
 
 - 권한 분리. Linux ARM64 제어기는 수락된 로컬 `SOCK_SEQPACKET`에서 커널 UID·PID와 실행 파일 해시를 확인한다. 잘못된 역할, 루트, 요청 본문에 넣은 UID, 적용 의도 불일치, 승인 이전 적용이 모두 거절되어야 한다. 승인 후 폐기 가능한 전용 합성 레코드 한 건은 한 번만 적용되고 재적용은 거절되어야 한다. 새 연결의 영수증은 원본과 같고 재조회 중 네이티브 변경이 0건이어야 한다. [제어기 시험 도구](../scripts/check-buildkit-controller.py)

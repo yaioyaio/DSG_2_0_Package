@@ -344,15 +344,19 @@ pub struct Registry {
     state_dir: PathBuf,
 }
 
-fn docker_gc_project_owner(connection: &Connection, project: i64) -> Result<String, RegistryError> {
-    let root: String = connection
+fn docker_gc_project_root(connection: &Connection, project: i64) -> Result<String, RegistryError> {
+    connection
         .query_row(
             "SELECT root_path FROM project WHERE id = ?1",
             [project],
             |row| row.get(0),
         )
         .optional()?
-        .ok_or(RegistryError::ProjectNotFound)?;
+        .ok_or(RegistryError::ProjectNotFound)
+}
+
+fn docker_gc_project_owner(connection: &Connection, project: i64) -> Result<String, RegistryError> {
+    let root = docker_gc_project_root(connection, project)?;
     Ok(format!("{:x}", Sha256::digest(root.as_bytes())))
 }
 
@@ -933,6 +937,11 @@ impl Registry {
         docker_gc_project_owner(&self.connection, project)
     }
 
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    pub(crate) fn docker_gc_project_root(&self, project: i64) -> Result<PathBuf, RegistryError> {
+        docker_gc_project_root(&self.connection, project).map(PathBuf::from)
+    }
+
     pub(crate) fn lock_docker_gc_slots(&self, lease: &Lease) -> Result<Vec<File>, RegistryError> {
         self.validate_lease_owner(lease)?;
         require_active_lease(&self.connection, lease)?;
@@ -953,9 +962,25 @@ impl Registry {
 
     #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
     pub(crate) fn check_protected_docker_gc_state(&self) -> Result<(), RegistryError> {
+        Self::check_docker_gc_paths(&self.state_dir)
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    pub(crate) fn open_protected_docker_gc(state_dir: &Path) -> Result<Self, RegistryError> {
+        Self::check_docker_gc_paths(state_dir)?;
+        let registry = Self::open(state_dir)?;
+        registry.check_protected_docker_gc_state()?;
+        registry
+            .connection
+            .pragma_update(None, "synchronous", "FULL")?;
+        Ok(registry)
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    fn check_docker_gc_paths(state_dir: &Path) -> Result<(), RegistryError> {
         use std::os::unix::fs::MetadataExt;
 
-        let state = crate::docker_control_local::open_protected(&self.state_dir, false)
+        let state = crate::docker_control_local::open_protected(state_dir, false)
             .map_err(|_| RegistryError::UnsafeStatePath)?;
         let metadata = state.metadata().map_err(RegistryError::StateIo)?;
         if metadata.uid() != 0 || !metadata.is_dir() || metadata.mode() & 0o7777 != 0o700 {
@@ -969,7 +994,7 @@ impl Registry {
             ("execution-slot-0.lock", false),
             ("execution-slot-1.lock", false),
         ] {
-            match fs::symlink_metadata(self.state_dir.join(name)) {
+            match fs::symlink_metadata(state_dir.join(name)) {
                 Ok(info)
                     if info.uid() == 0
                         && info.is_file()
@@ -1326,6 +1351,33 @@ impl Registry {
         ttl: Duration,
         can_reclaim: impl Fn(u32) -> bool,
     ) -> Result<Lease, RegistryError> {
+        self.acquire_lease_with_process(project_id, scope_key, ttl, None, can_reclaim)
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    pub(crate) fn acquire_docker_gc_lease(
+        &mut self,
+        project_id: i64,
+        scope_key: &str,
+        ttl: Duration,
+    ) -> Result<Lease, RegistryError> {
+        self.acquire_lease_with_process(
+            project_id,
+            scope_key,
+            ttl,
+            Some(std::process::id()),
+            crate::runner::process_group_gone,
+        )
+    }
+
+    fn acquire_lease_with_process(
+        &mut self,
+        project_id: i64,
+        scope_key: &str,
+        ttl: Duration,
+        process: Option<u32>,
+        can_reclaim: impl Fn(u32) -> bool,
+    ) -> Result<Lease, RegistryError> {
         if scope_key.len() != 64 || !scope_key.bytes().all(|byte| byte.is_ascii_hexdigit()) {
             return Err(RegistryError::InvalidLeaseScope);
         }
@@ -1409,9 +1461,9 @@ impl Registry {
         let expires_at_ms = lease_expiry(acquired_at_ms, ttl_ms)?;
         tx.execute(
             "INSERT INTO execution_lease
-             (project_id, scope_key, slot, acquired_at_ms, heartbeat_at_ms, expires_at_ms)
-             VALUES (?1, ?2, ?3, ?4, ?4, ?5)",
-            params![project_id, scope_key, slot, acquired_at_ms, expires_at_ms],
+             (project_id, scope_key, slot, acquired_at_ms, heartbeat_at_ms, expires_at_ms, process_id)
+             VALUES (?1, ?2, ?3, ?4, ?4, ?5, ?6)",
+            params![project_id, scope_key, slot, acquired_at_ms, expires_at_ms, process],
         )?;
         let id = tx.last_insert_rowid();
         tx.commit()?;

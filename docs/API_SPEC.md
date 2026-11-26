@@ -55,9 +55,9 @@ Linux ARM64의 `dsg --json docker-controller-probe --socket <절대 Unix 소켓>
 
 Linux ARM64의 `dsg --json docker-controller-admission --policy <절대 경로>/docker-controller-admission.json`은 배포 정책과 현재 로컬 피어를 읽기 전용으로 대조한다. 정책은 root 소유의 심볼릭 링크 없는 보호 경로에 둔 단일 링크 일반 파일이어야 하며 권한은 0444, 크기 상한은 8 KiB다. 버전 1 정책에 현재 `boot_id`와 `controller`, `engine`, `approver`, `executor`를 지정한다. 각 역할은 `socket`, `pid`, `uid`, `start_ticks`, `executable`, 소문자 16진수 `executable_sha256`을 받는다. 제어기와 엔진은 root 피어이고 승인자와 실행자는 서로 다른 비root UID다. 네 PID와 소켓은 각각 구분된다.
 
-운영 쓰기 어댑터가 사용할 Linux ARM64 코어의 `with_authorized_write_request`는 보호된 제어기 프로세스에서 `SOCK_SEQPACKET` 연결 한 건을 받는다. 리스너 준비 시 `SO_PASSCRED`와 `SO_PASSPIDFD`를 설정하며 Linux 6.5 이상을 요구한다. 버전 1 메시지의 최대 크기는 512바이트다. 승인자는 프로젝트·계획 번호가 매인 `approve`만, 실행자는 같은 범위의 `apply`와 프로젝트·의도 ID가 매인 `recover`를 요청할 수 있다. 요청 JSON의 역할·UID 선언, 연결 피어와 메시지 송신자의 불일치, 종료된 피어, 전달 FD와 잘린 메시지는 거절한다.
+운영 쓰기 어댑터가 사용할 Linux ARM64 코어의 `with_authorized_write_request`는 보호된 제어기 프로세스에서 `SOCK_SEQPACKET` 연결 한 건을 받는다. 리스너 준비 시 `SO_PASSCRED`와 `SO_PASSPIDFD`를 설정하며 Linux 6.5 이상을 요구한다. 버전 1 메시지의 최대 크기는 512바이트다. 승인자는 정확한 이미지 ID의 `plan`과 프로젝트·계획 번호가 매인 `approve`를, 실행자는 같은 범위의 `apply`와 프로젝트·의도 ID가 매인 `recover`를 요청할 수 있다. 요청 JSON의 역할·UID 선언, 연결 피어와 메시지 송신자의 불일치, 종료된 피어, 전달 FD와 잘린 메시지는 거절한다.
 
-디스패치에 전달하는 값은 보호 정책 지문, 제어기·엔진·요청 역할의 세대, 정확한 요청에 묶인다. 후속 어댑터는 같은 배타 변경 경계에서 승인과 의도를 재검증하고, 정책·역할 교체 뒤에도 미확정 의도의 잠금을 같은 엔진에 유지해야 한다. 공개 CLI와 `dsgd`는 이 진입점에 운영 쓰기 요청을 전달하지 않는다. [코어 구현](../rust-scaffold/crates/dsg-core/src/docker_control_local/admission/write_request.rs)
+디스패치에 전달하는 값은 보호 정책 지문, 제어기·엔진·요청 역할의 세대, 정확한 요청에 묶인다. 후속 어댑터는 같은 배타 변경 경계에서 승인과 의도를 재검증하고, 정책·역할 교체 뒤에도 미확정 의도를 같은 저장소에 유지해야 한다. 일반 Docker 조회 CLI와 `dsgd`는 읽기 경로를 제공한다. 공개 이미지 변경은 아래 전용 제어 세션을 사용한다. [코어 구현](../rust-scaffold/crates/dsg-core/src/docker_control_local/admission/write_request.rs)
 
 `DockerGcDispatch`는 배타 변경 경계를 소유한 제어기에 연결하는 코어 어댑터다. 커널 검증을 통과한 요청, root의 보호된 등록부, 같은 프로젝트의 활성 lease를 요구한다. 배타 슬롯 아래 대상 상태, 현재 프로젝트 정책, 네 배포 피어의 세대를 확인한다. 보호된 승인 행을 한 번 소비하면서 적용 의도와 감사를 커밋한 뒤에만 백엔드에 대상 변경을 요청한다. 복구는 같은 프로젝트의 전체 의도 ID와 안정적인 엔진 자원 범위를 대조하고 영수증만 조회한다. 활성 정책·프로세스 세대가 바뀌어도 이전 의도는 같은 자원 범위에 남는다. 실제 삭제는 소유권과 영속 영수증을 갖춘 전용 백엔드를 조립한 운영 제어기만 연결할 수 있다. [어댑터 구현](../rust-scaffold/crates/dsg-core/src/docker_gc_apply/dispatch.rs)
 
@@ -70,6 +70,14 @@ Unix 피어 자격증명, pidfd, 프로세스 시작 시각, 실행 파일 식�
 Linux ARM64에서 `dsg --state-dir <절대경로> --json docker-backend-preflight --policy <배포정책> --ownership <소유등록> --project <등록번호> --kind <image|build_cache> --resource <전체ID>`로 점검한다. `docker-backend-ownership.json`은 root 소유의 보호 경로에 권한 0444로 둔다. 버전 1에는 배포 정책 원본의 SHA-256인 `admission_policy_sha256`과 `controller_executable_sha256`, `engine_executable_sha256`, `store_directory`, `store_id`, `controller_store_fd`, `resources`를 기록한다. 자원 항목마다 `project_id`, `project_owner_sha256`, `kind`, `id`를 대조한다. root가 보유한 저장소 디렉터리의 고정 표지는 `docker-backend-store-id`에 64자리 소문자 16진수와 끝 개행으로 기록한다. SQLite의 보호 상태는 쓰기 보조 파일이 없는 시점에 읽기 전용으로 확인한다.
 
 성공은 보호된 자원 배정, 제어기가 열고 있는 저장소 디렉터리, 현재 엔진의 보호된 Unix 소켓과 안정 저장소 범위를 보고한다. 불일치는 종료 코드 5로 보존한다. 결과에서 `exclusive_mutation=unverified`, `mutation_authorized=false`를 유지한다. 실제 엔진에 적용하려면 해당 엔진 내부의 독점 변경 경로와 영속 영수증을 별도로 검증한다. [점검 구현](../rust-scaffold/crates/dsg-core/src/docker_control_local/admission/backend_ownership.rs)
+
+### 로컬 전용 Moby 이미지 적용
+
+Linux ARM64에서 `dsg --state-dir <보호 등록부> docker-image-serve --policy <정책> --control <제어 소켓> --probe <프로브 소켓> --store-directory <저장소>`를 root 제어기로 기동한다. 기존 등록부와 전용 이미지 소유 등록을 사용한다. 시작 출력은 소유 등록에 결합할 `store_fd`다. 승인자와 실행자는 서로 다른 비root UID의 `dsg docker-image-session --control <제어 소켓> --probe-fd <등록된 FD>` 세션을 각각 유지한다. root가 미리 bind한 프로브 FD는 해당 역할 프로세스에서 listen하며, 역할이 표준 입력으로 받은 JSON 한 줄을 제어기로 전달한다.
+
+요청은 `protocol_version: 1`과 `request`를 포함한다. 승인자는 `plan`에 양수 `project_id`와 전체 `image_id`를, `approve`에 같은 프로젝트와 `plan_id`를 지정한다. 실행자는 `apply`에 프로젝트와 `plan_id`를, `recover`에 프로젝트와 정확한 `intent_id`를 지정한다. `plan` 성공은 `planned`와 `plan_id`, `approve`는 `approved`와 `intent_id`를 반환한다. 적용과 복구는 `applied`, `preserved`, `recovery_required`를 보고한다. 네이티브 영수증은 논리 삭제를 정산하고 이 경로의 `reclaimed_bytes`는 0이다. [명령 구현](../rust-scaffold/crates/dsg-cli/src/moby_image.rs)
+
+전용 모드는 고정 Moby 29.1.3의 Linux ARM64 classic VFS 이미지 저장소 전용이다. 등록된 이미지의 소유 라벨과 전체 ID, 이미지 참조와 자식·마운트·컨테이너를 재검증한다. 별도 엔진 프로세스는 준비와 커밋을 한 Unix 연결에서 처리한다. 활성 상태·경합·일치하지 않는 정책과 소유 등록에서는 보존한다. 보호 등록부에서 승인을 소비하고 같은 의도를 커밋한 뒤에만, 엔진이 변경 시도 표식을 동기화하고 한 건을 적용한다. 성공은 별도 영수증 조회와 정확한 의도가 일치해야 정산한다. 영수증을 찾지 못하면 완료 미확정으로 보존하고 같은 이미지의 재호출을 차단한다. [네이티브 엔진](../integrations/moby-exact/daemon/dsgimage/dsg_server_linux.go) · [공개 디스패치](../rust-scaffold/crates/dsg-core/src/docker_gc_apply/dispatch.rs)
 
 ### 관리형 실행과 Compose 재사용
 
