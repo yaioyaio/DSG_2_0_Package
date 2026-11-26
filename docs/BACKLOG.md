@@ -67,6 +67,13 @@
 | DSG-03·05 · 1.4·2.3 | **Ubuntu BuildKit 로컬 예상·실제 회수량 측정 완료**. 기존 BuildKit은 승인된 6단계 논리 회수 근거를 재사용했다. 기존 영수증의 `PhysicalBytes=null`이므로 당시 물리 회수량은 복원할 수 없다. 이전 승인 대상은 tmpfs 원장 증거로 인해 승인 검사에서 거절됐고 적용은 0건이었다. 승인된 Ubuntu Parallels 전용 BuildKit 캐시 1건의 예상 파일 회수량과 파일 할당 해제량은 각각 8,192 B였다. 같은 ext4 전체의 할당량은 389,120 B에서 417,792 B로 늘어 순회수량은 −28,672 B였고, 예상과 순회수량의 차이는 36,864 B였다. VM 디스크 할당 변화 0 B와 Mac 가용 공간 증가 450,560 B는 별도 관측값으로 기록했다. 적용 1회, prune 0건, 보호 피어 보존, 동일 영수증 재조회 및 측정 후 VM 일시정지를 확인했다. [Ubuntu BuildKit 로컬 실측](../dist/dsg-local-reclaim-measurement-70cadd3/BUILDKIT-MEASURED.json) · [이전 승인 차단 이력](HANDOFF.md#buildkit-계측-승인-전-비휘발-원장-증거-확인) · [WBS 대조](TASK.md) **로컬 회수량 차이 분석 완료.** 기존 전후 측정값에서 대상 두 파일을 제외한 순할당 증가는 4 KiB 블록 9개(36,864 B)로 계산했다. 파일별 할당 변화는 미계측이어서 각 파일의 기여량은 확정할 수 없다. [할당 차이 분석](../dist/dsg-local-qualification-13fdb79/ALLOCATION-GAP-ANALYSIS.json) |
 | DSG-05 · 1.4 | macOS 최신 설치본으로 로컬 Docker 컨텍스트 `dockerguard-test`의 이미지 계획을 조회했다. 이름 참조가 있는 이미지는 보존으로 판정했고 재확인은 종료 코드 5를 반환했다. 실제 변경 요청은 0건이었고 전후 인벤토리가 일치했다. [macOS Docker 공개 CLI 실측](../dist/dsg-local-qualification-13fdb79/MACOS-AND-DOCKER-PUBLIC-QUALIFICATION.json) Linux ARM64에서 합성 백엔드의 배타 디스패치 회귀 5건이 통과했다. Docker 이미지 변경을 실제 엔진에 전달하는 공개 커넥터는 미구현이다. [Linux ARM64 회귀](../dist/dsg-local-qualification-13fdb79/LINUX-CURRENT-BUILD.json) |
 
+## 로컬 순할당 계측과 이미지 적용
+
+| 작업 | 상태와 수용 기준 |
+|---|---|
+| DSG-05 · WBS 1.4·2.3 · 순할당 귀속 | **계측 구현·로컬 합성 검증 통과.** Ubuntu 전용 ext4의 순증 20,480 B를 저널·DB +32,768 B, 대상 파일 −8,192 B, 스냅샷 디렉터리 −4,096 B로 대조했다. 미귀속 잔차는 0 B다. 과거 승인 적용의 대상 외 순증 36,864 B는 전체 ext4 기록만 남아 파일별로 확정할 수 없다. 새 승인 대상의 전체 경로를 검증할 때 이 계측 방식을 재사용한다. [검증 항목](TEST_PLAN.md#로컬-예상-회수량과-실제-할당량) · [경로별 실측](../dist/dsg-local-file-allocation/QUALIFICATION.json) |
+| DSG-05·07 · WBS 1.4·5.1 · 로컬 공개 이미지 적용 | **미완료.** Ubuntu Parallels 전용 Moby 29.1.3(vfs)와 보호 제어기를 연결하려면 모든 참조 작성자를 배제하는 엔진 측 경계가 필요하다. 표준 DELETE는 전체 ID와 `force=false`에서도 단일 태그를 제거할 수 있다. Moby 소스 변경과 전용 빌드 경로의 범위 승인을 받은 뒤 태그·컨테이너 참조 경합, 승인 일회성, 응답 유실 시 영수증 복구 및 변경 재호출 0건을 검증한다. [공개 적용 계약](API_SPEC.md#보호된-docker-제어기-배포-확인) · [Moby 29.1.3 삭제 구현](https://github.com/moby/moby/blob/docker-v29.1.3/daemon/images/image_delete.go#L162-L185) |
+
 ## BuildKit 운영 배포와 복구 검증 잔여
 
 | 작업 | 판정과 남은 기준 |

@@ -209,6 +209,8 @@ WBS 1.4·5.1은 전용 Ubuntu Parallels ARM64 Moby에서 합성 이미지 한 �
 
 - 기존 BuildKit 계측의 대상 파일 제거량을 ext4 전체 할당 차이와 대조해 파일시스템 나머지의 순변화를 계산한다. 해당 값은 파일별 귀속 결과와 구분한다. 실제 로컬 Docker의 보존 후보와 합성 적격 후보를 각각 공개 CLI에서 재확인한다. 두 경로의 적용 게이트를 확인하고 참조가 바뀐 후보는 거절한다. [할당 분석](../dist/dsg-local-qualification-13fdb79/ALLOCATION-GAP-ANALYSIS.json) · [실제 Docker 대조](../dist/dsg-local-qualification-13fdb79/MACOS-AND-DOCKER-PUBLIC-QUALIFICATION.json) · [합성 CLI 검증](../dist/dsg-local-qualification-13fdb79/DOCKER-PUBLIC-ELIGIBLE-FIXTURE.json)
 
+- Ubuntu Parallels의 사설 마운트 네임스페이스에 전용 ext4 loop를 만들고 마운트 루트에 root 소유 0600 빈 파일 `.dsg-allocation-fixture`를 둔다. 합성 데이터만 생성하는 `TestDSGNativeRecordReclamation`을 `TMPDIR`와 `DSG_TEST_ALLOCATION_MOUNT`가 같은 루트, `DSG_TEST_ALLOCATION_TOOL`과 `DSG_TEST_ALLOCATION_OUTPUT`이 다른 파일시스템에 있는 절대 경로인 조건에서 실행한다. 계측 스크립트는 `scripts/check-buildkit-allocation.py`다. 준비 직후, 저널 초기화 직후, 각 단계 정산 후와 최종 재조회 후의 스냅샷을 보존한다. `compare`로 첫 스냅샷과 마지막 스냅샷 및 인접 단계의 `st_blocks` 합계를 파일·디렉터리별로 대조하고 ext4 전체 순증과의 잔차를 별도 기록한다. 같은 inode의 하드링크는 한 번 합산한다. 마운트가 다르거나 경계가 모호하면 계측을 거절해야 한다. 보호 피어 불변과 회수 재호출 0건을 확인한다. [계측 구현](../scripts/check-buildkit-allocation.py) · [계측 회귀](../scripts/test-buildkit-allocation.py)
+
 ## 에이전트 연동 검증
 
 `sh scripts/test-rust.sh`는 합성 프로젝트의 훅 설치·중복 방지·설정 보존·제거, 허용·거부·잘못된 JSON 응답과 MCP의 읽기 전용 목록·쓰기 거절을 확인한다. 정리 후보를 조회한 뒤 상태 폴더가 생기지 않아야 한다.
