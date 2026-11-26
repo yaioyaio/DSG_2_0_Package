@@ -127,8 +127,8 @@
     },
     {
       "path": "docs/RELEASE.md",
-      "sha256": "c6bf7abab0d2509e69cdb008a9e87eaecbc720c63224706753c30c9760d8d632",
-      "bytes": 15447
+      "sha256": "b911984f2f2b059726213473243d77915f3f8e22e203a283803d8fb880e5677f",
+      "bytes": 17462
     },
     {
       "path": "docs/REQUIREMENTS.md",
@@ -147,13 +147,13 @@
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "9526a330c712ac2537984ac2707877183559d57a720d5311683f55e8bf7e3a4f",
-      "bytes": 36511
+      "sha256": "82fdee2b5e527270c80b0562dda60b0e11b393ce68621cd9f639fcd45f798738",
+      "bytes": 37340
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "69abe61fd8f1d36c0be625000b59f13f440789672c0a33f844abd6d01401ad23",
-      "bytes": 72565
+      "sha256": "7b50330d951dded57d113274dc36f5000b3c70a608ac1c4d565e2051a590e57b",
+      "bytes": 73249
     },
     {
       "path": "docs/WBS.md",
@@ -827,8 +827,8 @@
     },
     {
       "path": "scripts/check-buildkit-allocation.py",
-      "sha256": "ed3cff2f64542780d0b77ec7ee69313665a75b11f0f17f03fbf8ae36883b3b35",
-      "bytes": 15015
+      "sha256": "4afd7d30176d828dabcaaf3c9459299bbd115c863eb2a03347ebefdc48b8a148",
+      "bytes": 16732
     },
     {
       "path": "scripts/check-buildkit-approval-custody.py",
@@ -917,8 +917,8 @@
     },
     {
       "path": "scripts/check-moby-image-apply.py",
-      "sha256": "91b637170b74484ab9bcf6db400b029591b00bd4f281ffd6142e3ad429f89cb0",
-      "bytes": 23804
+      "sha256": "1c5327630ad3ca91ff085ddecd58292bc97e0f0e1bcebd302ec5f19a622abc75",
+      "bytes": 31353
     },
     {
       "path": "scripts/check-release-package.py",
@@ -972,8 +972,8 @@
     },
     {
       "path": "scripts/test-buildkit-allocation.py",
-      "sha256": "f864b0f1ceb034bc81612f3ffdeaeff75149a9846bde361229103279bfd5599e",
-      "bytes": 7670
+      "sha256": "1717a81dbba4c925c418ddb3e0066ce463d9c36a6b9f1cbc8242f8f9410aa6a7",
+      "bytes": 10653
     },
     {
       "path": "scripts/test-buildkit-external-executor.py",

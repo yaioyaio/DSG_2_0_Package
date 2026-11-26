@@ -3,6 +3,7 @@
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack, closing, contextmanager
+import ctypes
 import hashlib
 import importlib.util
 import io
@@ -10,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import re
+import runpy
 import secrets
 import select
 import shutil
@@ -150,6 +152,120 @@ def layer_projection(root):
             content[path.name] = (info.st_ino, info.st_mtime_ns, file_digest(path))
         result[layer.name] = content
     return result
+
+
+@contextmanager
+def allocation_sampler(mount):
+    helper = runpy.run_path(str(Path(__file__).with_name("check-buildkit-allocation.py")))
+    fd = os.open(mount, helper["DIR_FLAGS"] | os.O_NOATIME)
+    try:
+        identity, _, read_only = helper["mount_sample"](fd, mount)
+        check(not read_only and identity["block_bytes"] == 4096 and
+              identity["device"] != mount.parent.stat().st_dev and
+              identity["device"] != os.fstat(sys.stdout.fileno()).st_dev,
+              "the allocation fixture, runtime, and result must be separated")
+        with (mount / helper["MARKER"]).open("xb") as marker_file:
+            os.fchmod(marker_file.fileno(), 0o600)
+
+        sync = ctypes.CDLL(None, use_errno=True).syncfs
+        sync.argtypes = (ctypes.c_int,)
+        sync.restype = ctypes.c_int
+
+        def capture():
+            check(sync(fd) == 0, "could not sync the allocation fixture")
+            snapshot = helper["capture"](mount, allow_vfs_entries=True)
+            # Keep the original mount open across every phase, including recovery.
+            check(snapshot["identity"] == {**identity, "marker_inode": marker_inode}
+                  and not snapshot["read_only"], "allocation fixture mount changed")
+            return snapshot
+
+        marker_inode = (mount / helper["MARKER"]).lstat().st_ino
+        yield capture, lambda before, after: helper["compare"](before, after, allow_vfs_entries=True)
+    except helper["MeasurementError"] as error:
+        raise fx.CheckFailed(str(error)) from None
+    finally:
+        os.close(fd)
+
+
+def selected_layer_estimate(store, target, cache):
+    image = store / "image/vfs/imagedb/content/sha256" / target[7:]
+    with image.open("rb") as source:
+        data = source.read(4097)
+    check(len(data) <= 4096 and "sha256:" + fx.digest(data) == target, "selected image config differed")
+    diffs = json.loads(data)["rootfs"]["diff_ids"]
+    check(len(diffs) == 2 and all(re.fullmatch(r"sha256:[0-9a-f]{64}", item) for item in diffs),
+          "selected image chain differed")
+    chain = fx.digest(" ".join(diffs).encode("ascii"))
+    layer = store / "image/vfs/layerdb/sha256" / chain
+    with (layer / "cache-id").open("rb") as source:
+        check(source.read(65) == cache.encode("ascii"), "Moby layer and VFS directory differed")
+    with (layer / "size").open("rb") as source:
+        size = source.read(21)
+    check(re.fullmatch(rb"[1-9][0-9]{0,8}", size), "invalid native layer estimate")
+    return int(size), chain
+
+
+def scoped_entries(snapshot, *paths):
+    entries = []
+    for entry in snapshot["entries"]:
+        inside = [any(link == path or link.startswith(path + "/") for path in paths)
+                  for link in entry["paths"]]
+        if any(inside):
+            check(all(inside), "allocation scope crosses a hard link")
+            entries.append(entry)
+    return entries
+
+
+def entry_bytes(entries):
+    return sum(entry["blocks_512"] * 512 for entry in entries)
+
+
+def allocation_report(compare, before, after, estimate, cache, chain, target, peer, protected_caches):
+    vfs = "docker-data/vfs/dir/"
+    image_db = "docker-data/image/vfs/imagedb/"
+    layer_db = "docker-data/image/vfs/layerdb/sha256/"
+    tree = vfs + cache
+    metadata = (image_db + "content/sha256/" + target[7:], image_db + "metadata/sha256/" + target[7:])
+    layer = layer_db + chain
+    vfs_entries = scoped_entries(before, tree)
+    payload = scoped_entries(before, tree + "/dsg-selected")
+    parent_copy = scoped_entries(before, tree + "/dsg-shared")
+    metadata_entries = scoped_entries(before, *metadata)
+    layer_entries = scoped_entries(before, layer)
+    check(len(vfs_entries) == 3 and len(payload) == len(parent_copy) == 1 and metadata_entries
+          and layer_entries and entry_bytes(payload) > 0 and entry_bytes(parent_copy) > 0
+          and not scoped_entries(after, tree, *metadata, layer), "selected allocation removal differed")
+    protected = [image_db + "content/sha256/" + peer[7:], image_db + "metadata/sha256/" + peer[7:],
+                 *(vfs + name for name in protected_caches)]
+    protected.extend(path for entry in before["entries"] if entry["kind"] == "directory"
+                     for path in entry["paths"] if path.startswith(layer_db) and path != layer)
+    check(scoped_entries(before, *protected) == scoped_entries(after, *protected),
+          "shared or peer allocation changed")
+
+    diff = compare(before, after)
+    net_reclaimed = -diff["filesystem_delta_bytes"]
+    vfs_reclaimed = entry_bytes(vfs_entries)
+    selected_reclaimed = vfs_reclaimed + entry_bytes(metadata_entries) + entry_bytes(layer_entries)
+    ledger = "dsg-image-receipts"
+    receipt_delta = entry_bytes(scoped_entries(after, ledger)) - entry_bytes(scoped_entries(before, ledger))
+    return {
+        "identity": diff["identity"],
+        "estimated_exclusive_layer_bytes": estimate,
+        "selected_payload_allocated_bytes": entry_bytes(payload),
+        "selected_vfs_parent_copy_allocated_bytes": entry_bytes(parent_copy),
+        "selected_vfs_directory_allocated_bytes": entry_bytes(e for e in vfs_entries if e["kind"] == "directory"),
+        "selected_vfs_tree_reclaimed_bytes": vfs_reclaimed,
+        "selected_image_metadata_reclaimed_bytes": entry_bytes(metadata_entries),
+        "selected_layer_metadata_reclaimed_bytes": entry_bytes(layer_entries),
+        "selected_total_allocated_reclaimed_bytes": selected_reclaimed,
+        "ext4_before_bytes": diff["filesystem_before_bytes"],
+        "ext4_after_bytes": diff["filesystem_after_bytes"],
+        "ext4_net_reclaimed_bytes": net_reclaimed,
+        "receipt_ledger_allocated_bytes": receipt_delta,
+        "other_observed_net_allocated_bytes": diff["observed_delta_bytes"] + selected_reclaimed - receipt_delta,
+        "unattributed_ext4_delta_bytes": diff["unattributed_delta_bytes"],
+        "shared_and_peer_allocation_unchanged": True,
+    }
 
 
 def seed(scratch, mount, project, cgroup, patched, layered):
@@ -303,7 +419,7 @@ def assert_sealed_start(command):
           and int(counted.stdout) >= 1, "standard daemon seal was not verified")
 
 
-def sealed_trial(args, scratch, mount, project, cgroup, public, stack):
+def sealed_trial(args, scratch, mount, project, cgroup, public, stack, allocation=None):
     state = scratch / "state"
     state.mkdir(0o700)
     dsg = public / "dsg"
@@ -363,6 +479,11 @@ def sealed_trial(args, scratch, mount, project, cgroup, public, stack):
     plan = request(approver, project_id, "plan", image_id=target)
     check(plan.get("status") == "planned", "owned native plan failed")
     pid = plan["plan_id"]
+    if allocation:
+        capture_allocation, compare_allocation = allocation
+        cache = target_layers[0]
+        estimate, chain = selected_layer_estimate(store, target, cache)
+        before_approval = capture_allocation()
     approved = request(approver, project_id, "approve", plan_id=pid)
     check(approved.get("status") == "approved", "native approval failed")
     intent = approved["intent_id"]
@@ -379,15 +500,24 @@ def sealed_trial(args, scratch, mount, project, cgroup, public, stack):
         gate.wait()
         return reject_engine(native, packet) and rejection([*cli, *argv])
 
+    if allocation:
+        before_apply = capture_allocation()
+        check(before_approval == before_apply, "approval altered the allocation fixture")
     with ThreadPoolExecutor(max_workers=2) as all_clients:
         tag = all_clients.submit(competitor, ["tag", target, "dsg-race:local"], packets[0])
         create = all_clients.submit(competitor, ["create", "--pull", "never", target, "true"], packets[1])
         gate.wait()
         applied = request(executor, project_id, "apply", plan_id=pid)
         check(tag.result(20) and create.result(20), "competing writer accepted")
+    if allocation:
+        after_apply = capture_allocation()
+        after_recovery = None
     if args.expect_recovery:
         check(applied.get("status") == "recovery_required", "commit response loss not observed")
         applied = request(executor, project_id, "recover", intent_id=intent)
+        if allocation:
+            after_recovery = capture_allocation()
+            check(after_apply == after_recovery, "receipt recovery altered the allocation fixture")
     check(applied.get("status") == "applied" and applied.get("reclaimed_bytes") == 0,
           "single native apply did not settle")
     receipts = mount / "dsg-image-receipts"
@@ -416,11 +546,20 @@ def sealed_trial(args, scratch, mount, project, cgroup, public, stack):
         row = db.execute("SELECT p.status,a.claimed_at_ms IS NOT NULL,a.bytes_applied "
                          "FROM gc_plan p JOIN gc_application a ON a.plan_id=p.id WHERE p.id=?", (pid,)).fetchone()
         check(row == ("applied", 1, 0), "approval consumption or settled bytes differed")
-    return {"single_delete": 1, "native_attempts": 1, "native_receipts": 1, "images_before": 2,
-            "images_after": 1, "peer_preserved": True, "reclaimed_bytes": 0, "wrong_role_denied": 2,
-            "duplicate_mutations": 0, "tag_denied": True, "container_create_denied": True,
-            "receipt_recovery": args.expect_recovery, "registered_project": project_id,
-            "exclusive_layers_removed": len(target_layers), "shared_layers_preserved": args.layered}
+    result = {"single_delete": 1, "native_attempts": 1, "native_receipts": 1, "images_before": 2,
+              "images_after": 1, "peer_preserved": True, "reclaimed_bytes": 0, "wrong_role_denied": 2,
+              "duplicate_mutations": 0, "tag_denied": True, "container_create_denied": True,
+              "receipt_recovery": args.expect_recovery, "registered_project": project_id,
+              "exclusive_layers_removed": len(target_layers), "shared_layers_preserved": args.layered}
+    if allocation:
+        check(after_apply == capture_allocation(), "duplicate request altered the allocation fixture")
+        report = allocation_report(compare_allocation, before_apply, after_apply, estimate, cache, chain,
+                                   target, other, initial_layers.keys() - {cache})
+        report.update({"approval_ext4_delta_bytes": 0,
+                       "recovery_ext4_delta_bytes": 0 if after_recovery is not None else None,
+                       "duplicate_ext4_delta_bytes": 0})
+        result["allocation"] = report
+    return result
 
 
 def main():
@@ -430,7 +569,10 @@ def main():
     cli.add_argument("--dsg", required=True, type=Path)
     cli.add_argument("--expect-recovery", action="store_true")
     cli.add_argument("--layered", action="store_true")
+    cli.add_argument("--measure-allocation", action="store_true", help="measure the isolated layered ext4 fixture")
     args = cli.parse_args()
+    if args.measure_allocation and not args.layered:
+        cli.error("--measure-allocation requires --layered")
     os.umask(0o077)
     scratch = args.scratch
     cgroup = guard(scratch)
@@ -451,7 +593,8 @@ def main():
         project = scratch / "project"
         project.mkdir(0o700)
         with fixture_mount(scratch) as mount, ExitStack() as children:
-            result = sealed_trial(args, scratch, mount, project, cgroup, public, children)
+            allocation = children.enter_context(allocation_sampler(mount)) if args.measure_allocation else None
+            result = sealed_trial(args, scratch, mount, project, cgroup, public, children, allocation)
         check(set((cgroup / "cgroup.procs").read_text().split()) == initial_members,
               "fixture child remains after cleanup")
         (scratch / "store.ext4").unlink()
