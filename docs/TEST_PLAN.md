@@ -211,6 +211,8 @@ WBS 1.4·5.1은 전용 Ubuntu Parallels ARM64 Moby에서 합성 이미지 한 �
 
 - Ubuntu Parallels의 사설 마운트 네임스페이스에 전용 ext4 loop를 만들고 마운트 루트에 root 소유 0600 빈 파일 `.dsg-allocation-fixture`를 둔다. 합성 데이터만 생성하는 `TestDSGNativeRecordReclamation`을 `TMPDIR`와 `DSG_TEST_ALLOCATION_MOUNT`가 같은 루트, `DSG_TEST_ALLOCATION_TOOL`과 `DSG_TEST_ALLOCATION_OUTPUT`이 다른 파일시스템에 있는 절대 경로인 조건에서 실행한다. 계측 스크립트는 `scripts/check-buildkit-allocation.py`다. 준비 직후, 저널 초기화 직후, 각 단계 정산 후와 최종 재조회 후의 스냅샷을 보존한다. `compare`로 첫 스냅샷과 마지막 스냅샷 및 인접 단계의 `st_blocks` 합계를 파일·디렉터리별로 대조하고 ext4 전체 순증과의 잔차를 별도 기록한다. 같은 inode의 하드링크는 한 번 합산한다. 마운트가 다르거나 경계가 모호하면 계측을 거절해야 한다. 보호 피어 불변과 회수 재호출 0건을 확인한다. [계측 구현](../scripts/check-buildkit-allocation.py) · [계측 회귀](../scripts/test-buildkit-allocation.py)
 
+- 이전 승인 적용의 순할당 차이는 기존 승인·적용·영수증 실행기로 재현한다. 격리된 Ubuntu에서 `hold --purpose rehearsal`로 합성 캐시 한 건을 생성하고, 디스크 기반 4 KiB ext4 대상 마운트와 별도 영속 증거 마운트를 사용한다. Mac 시험 프로세스는 정확 범위와 원장 체크포인트가 일치하는 요청을 한 번 소비한다. 승인 전, 적용 직전, 적용 직후, 영수증 재조회 직후의 읽기 전용 상태를 수집한다. 승인과 재조회에서 대상 마운트 변화 0 B, 실제 적용 1회, prune 0건, 비대상 파일과 영수증 재조회 결과 불변을 확인한다. 적용 구간의 경로별 값과 잔차를 합산해 과거 전체 증감과 대조한다. [실행기](../integrations/buildkit-exact/cache/dsg_operator_linux.go) · [예행 준비](../scripts/check-buildkit-approval-custody.py)
+
 ## 에이전트 연동 검증
 
 `sh scripts/test-rust.sh`는 합성 프로젝트의 훅 설치·중복 방지·설정 보존·제거, 허용·거부·잘못된 JSON 응답과 MCP의 읽기 전용 목록·쓰기 거절을 확인한다. 정리 후보를 조회한 뒤 상태 폴더가 생기지 않아야 한다.
