@@ -245,9 +245,11 @@ macOS·Linux에서 Docker CLI를 사용할 수 있으면 `sh scripts/test-rust.s
 
 Linux 검증용 소켓은 기본적으로 사용자 홈의 임시 디렉터리에 생성한다. `DSG_TEST_RUNTIME_DIR`로 상위 경로를 지정할 수 있다. Unix 소켓 경로 길이 제한을 고려해 그룹·기타 쓰기 권한이 없고 충분히 짧은 절대 경로를 사용한다.
 
-macOS는 샌드박스에서 시험용 Unix 릴레이와 지정 엔진의 루프백 TCP에 직접 접근하면 거부되고, 브로커 경유 조회는 성공해야 한다. `DSG_TEST_LAUNCHD=1`은 현재 GUI 사용자 도메인의 임시 테스트 서비스에서 등록·종료·재시작·해제를 확인한다. 기존 격리 엔진에서 동일 UID의 샌드박스 경계를 실측하는 절차는 아래에 있다. 운영 계정 분리와 공식 LaunchDaemon의 검증에는 승인된 제한 계정과 관리자 접근이 필요하다. Linux systemd와 Windows SCM은 각각 해당 호스트에서 확인한다.
+합성 엔진 시험에서 `DSG_TEST_LAUNCHD=1`을 사용하면 현재 GUI 사용자 도메인의 임시 서비스 등록·종료·재시작·해제를 확인한다. 실엔진을 연결하는 macOS 시험은 아래 명령으로 실행한다. Linux systemd와 Windows SCM은 각각 해당 호스트에서 확인한다.
 
-- macOS `DSG_TEST_LIVE_ENFORCEMENT=1 sh scripts/test-rust.sh`는 기존 `dockerguard-test` 루프백 엔진을 조회한다. 시험용 Unix 릴레이는 `/_ping`·`/info`·`/version` 계열의 GET·HEAD만 허용한다. 동일 UID 샌드박스에서 릴레이 소켓과 실제 엔진의 루프백 TCP 직접 접속 차단, 브로커 경유 `/info` 응답 및 변경 요청의 상류 전달 0건을 확인한다.
+- macOS에서 `DSG_TEST_LIVE_ENFORCEMENT=1 sh scripts/test-rust.sh`는 기존 `dockerguard-test` 루프백 엔진을 조회한다. 시험용 Unix 릴레이는 `/_ping`·`/info`·`/version` 계열의 GET·HEAD만 허용한다. 서비스 수명 주기까지 함께 확인하려면 `DSG_TEST_LAUNCHD=1 python3 -IB scripts/check-live-enforcement.py <dsgd>`를 실행한다.
+- macOS ARM64의 실엔진 시험에서 GUI `launchd` 서비스 시작·강제 종료 1회·무응답 구간·다른 PID의 수동 재시작·해제를 통과했다. 온라인 단계마다 동일 UID Seatbelt의 시험용 Unix 릴레이·실엔진 루프백 TCP 직접 연결은 차단됐고 브로커 경유 `/info`의 엔진 ID와 `/_ping` 응답을 확인했다. 금지 요청 8건은 릴레이 수신·전달 각각 0건이었다. 기존 실엔진의 컨테이너 7개·이미지 9개·볼륨 2개의 식별자는 전후 일치했다. 시험 plist·job·소켓 회수도 확인했다. WBS 5.1의 승인된 로컬 범위는 완료했다. [macOS 실측](../dist/dsg-macos-socket-qualification/LIVE-QUALIFICATION.json)
+- macOS 운영 검증용 plist는 문법 검사를 통과했다. 사전 점검에서 시스템 도메인 plist와 `dsg` 계정이 없었으며 비대화형 관리자 실행 경로가 확인되지 않았다. 운영 LaunchDaemon의 수명 주기와 별도 승인 계정에서의 직접 접근 차단은 미검증이며 WBS 5.1 전체 상태는 부분이다. [macOS 사전 점검](../dist/dsg-macos-socket-qualification/PREFLIGHT.json)
 - Linux `python3 -IB scripts/check-linux-service.py --disposable-guest --dockerd <경로> --docker <경로> <dsgd>`를 폐기 가능한 systemd 게스트에서 실행한다. 검증용 Docker 엔진과 런타임은 읽기 전용 미디어로 공급한다. 별도 제한 UID, 엔진·릴레이 직접 접근 거부, 변경 요청 전달 0건, broker 충돌 이후 단일 재시작과 정상 중지 및 등록 자원 회수를 확인한다.
 - Windows 교차 빌드는 컴파일·링크를 검증한다. 실제 Windows 시험은 폐기 가능한 관리자 게스트의 `scripts/check-windows-service.ps1`에서 `-DisposableGuest`, `-DsgdExe`, `-UpstreamPipe`, `-UpstreamSid`, `-EngineId`, `-EngineKind Real|Fixture`를 명시한다. 임시 SCM 서비스와 작업으로 정상·강제 종료 후 재시작, 허용·거부 SID, 직접 엔진 접근 거부, 인벤토리와 임시 자원 회수를 검증한다. `EngineKind`는 운영자가 확인한 시험 환경을 구분한다.
 - 실제 Windows의 LocalSystem에서 `scripts/check-windows-fixture.ps1 -DisposableGuest -DsgdExe <경로>`를 실행하면 한정된 합성 파이프를 같은 SCM 검증기에 연결한다. 실제 Docker 연동 수용 기준은 별도의 `Real` 실행에서 확인한다.

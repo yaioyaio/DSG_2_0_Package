@@ -138,7 +138,7 @@ with socket.socket(socket.AF_UNIX) as conn:
         assert probe.returncode == code, f'OS socket boundary exit {probe.returncode}, expected {code}'
 
 
-def launchd_fixture(root, args, listen):
+def launchd_fixture(root, args, listen, online=None):
     label = 'local.dsg.test.' + uuid.uuid4().hex
     domain = f'gui/{os.getuid()}'
     service = f'{domain}/{label}'
@@ -150,39 +150,64 @@ def launchd_fixture(root, args, listen):
     def call(*argv, check=True):
         try:
             result = subprocess.run(['/bin/launchctl', *argv], timeout=15, check=False,
-                                    capture_output=True)
+                                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         except subprocess.TimeoutExpired:
             raise AssertionError(f'Fixture launchd {argv[0]} timed out') from None
         if check and result.returncode:
             raise AssertionError(f'Fixture launchd {argv[0]} exited with {result.returncode}')
         return result
 
-    started = call('bootstrap', domain, str(plist), check=False)
-    if started.returncode:
-        raise AssertionError(f'Isolated launchd bootstrap returned {started.returncode}')
+    def job_pid():
+        # `list` supplies PID, status and label without the job environment.
+        for line in call('list').stdout.splitlines():
+            fields = line.split()
+            if len(fields) == 3 and fields[2] == label.encode('ascii'):
+                return 0 if fields[0] == b'-' else int(fields[0])
+        return None
+
+    def check_online():
+        wait_socket(listen)
+        pid = job_pid()
+        assert pid is not None and pid > 0, 'Fixture launchd job has no running PID'
+        assert request(listen, 'GET', '/_ping') == (200, b'OK'), 'Fixture launchd broker ping failed'
+        if online is not None:
+            online()
+        return pid
+
+    started = False
     try:
-        wait_socket(listen)
-        assert request(listen, 'GET', '/_ping')[0] == 200
+        call('bootstrap', domain, str(plist))
+        started = True
+        first_pid = check_online()
         call('kill', 'SIGKILL', service)
-        deadline = time.monotonic() + 7
-        while time.monotonic() < deadline:
+        deadline = time.monotonic() + 6
+        while job_pid() != 0:
+            assert time.monotonic() < deadline, 'Fixture launchd job did not stay registered and stopped'
+            time.sleep(0.2)
+        for _ in range(2):
             try:
-                with socket.socket(socket.AF_UNIX) as client:
-                    client.connect(str(listen))
-            except ConnectionRefusedError:
-                break
-            time.sleep(0.05)
-        else:
-            raise AssertionError('Fixture launchd job unexpectedly respawned')
+                request(listen, 'GET', '/_ping')
+            except (ConnectionRefusedError, FileNotFoundError):
+                pass
+            else:
+                raise AssertionError('Stopped fixture launchd broker still accepted a connection')
+            time.sleep(0.2)
+        assert job_pid() == 0, 'Fixture launchd job unexpectedly restarted'
         call('kickstart', service)
-        wait_socket(listen)
-        assert request(listen, 'GET', '/_ping')[0] == 200
+        assert check_online() != first_pid, 'Fixture launchd restart reused the original PID'
     finally:
-        call('bootout', service)
-    deadline = time.monotonic() + 6
-    while listen.exists() and time.monotonic() < deadline:
-        time.sleep(0.05)
-    assert not listen.exists(), 'Fixture launchd stop left its listen socket'
+        try:
+            if started:
+                call('bootout', service)
+            else:
+                call('bootout', service, check=False)
+        finally:
+            plist.unlink()
+        deadline = time.monotonic() + 6
+        while listen.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert not listen.exists(), 'Fixture launchd stop left its listen socket'
+        assert job_pid() is None and not plist.exists(), 'Fixture launchd job or plist remains'
 
 
 def verify(binary, docker, root):
