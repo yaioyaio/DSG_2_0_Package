@@ -87,8 +87,8 @@
     },
     {
       "path": "docs/API_SPEC.md",
-      "sha256": "90488e50ff9717bf53fb6438bf78e4f5fc450d4d8415d2d71b973758c42000e0",
-      "bytes": 46875
+      "sha256": "b1e817c959e785ae944d91d5f7d76ef4730959a9031288bdaec61f1a8f989de2",
+      "bytes": 47504
     },
     {
       "path": "docs/ARCHITECTURE.md",
@@ -97,13 +97,13 @@
     },
     {
       "path": "docs/ERD.md",
-      "sha256": "43b6202bb04fc5b98a72338135d20b7b86380cff576bf91575076cb6eedf68cd",
-      "bytes": 2268
+      "sha256": "1457aec3db4d37f9e696cc385f3e7dd6653dfc96ad48859947f84677cfb6d9e5",
+      "bytes": 2508
     },
     {
       "path": "docs/OPERATIONS.md",
-      "sha256": "57a7cf15121b4d8207ed90c8cbb2c1edda892de75368cdc54151d5422a7186de",
-      "bytes": 20468
+      "sha256": "34f2cfc29b37b0d75b2819d5a090effbc8526bef630ede3bf475fb33a71fe94f",
+      "bytes": 20676
     },
     {
       "path": "docs/PLAN.md",
@@ -147,13 +147,13 @@
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "2b9ba525a172f49280e53e9ff4256ff950441f763dd4e3cd2a4cbfb9d9a98f05",
-      "bytes": 38584
+      "sha256": "a2ec4ac2eab050d2c079f2515b6b3bb19bf64dfb5e17393a7550a9da9c224f39",
+      "bytes": 38601
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "c524d372137619a8f4c62e6c3033b98ad25393ea350f942223f1bcfa9f5d2256",
-      "bytes": 75960
+      "sha256": "6cb778ca151235b60db459160a019c4d3709da6561d72581eec15e3890fb330b",
+      "bytes": 76939
     },
     {
       "path": "docs/WBS.md",
@@ -782,8 +782,13 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/lib.rs",
-      "sha256": "d93e964d48071656adfbf3058b523038b12450cf0f46c42536dc4ec157eb3b47",
-      "bytes": 5892
+      "sha256": "9966eba9cde85b5aa9a628349d7533115ea354821b45b294184845aa32caed65",
+      "bytes": 5940
+    },
+    {
+      "path": "rust-scaffold/crates/dsg-core/src/mac_exit_proof.rs",
+      "sha256": "1739f4f38562d2b0d8717abfc1456a41f6b459d642f2587f443425ea01c1766c",
+      "bytes": 7945
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/mac_process.rs",
@@ -797,8 +802,8 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/registry.rs",
-      "sha256": "5d41549c51dcc23d4208829fb39038b01d7eea413d598148b763564bf0efe121",
-      "bytes": 111596
+      "sha256": "0349fb7c1c6951a08ab9a5c456482e131882eb97aa9714c73be6b420005e7553",
+      "bytes": 117151
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/reuse.rs",
@@ -807,8 +812,8 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/runner.rs",
-      "sha256": "739ac0a8652b980d757e15dbafddbf4f3f32d60ba4ea15ccc328eb36988b6616",
-      "bytes": 19342
+      "sha256": "ee0c64912e7c99e76e4c611a287dea43634955c45dc9c193deb7266d2b074721",
+      "bytes": 19827
     },
     {
       "path": "scripts/build-macos-release.py",
@@ -922,8 +927,8 @@
     },
     {
       "path": "scripts/check-managed-execution.py",
-      "sha256": "2b8709d2f7f6dccfdd399f310b4ad7a05e7cc9a75f5dd4437e9f7dd23148d22f",
-      "bytes": 38911
+      "sha256": "803ed275f96b0427bd6ab6c890ad5d908515119d28085c2efd813045d946c5b6",
+      "bytes": 41441
     },
     {
       "path": "scripts/check-moby-image-apply.py",

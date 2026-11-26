@@ -11,11 +11,13 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+#[cfg(target_os = "macos")]
+use crate::mac_exit_proof::MacExitProof;
 use crate::policy::is_direct_child;
 
 const DATABASE_NAME: &str = "registry.sqlite3";
 const APPLICATION_ID: i64 = 0x4453_4732;
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
 const BUSY_TIMEOUT: Duration = Duration::from_millis(500);
 const OPEN_RETRY_WINDOW: Duration = Duration::from_secs(3);
 const MAX_REASON_CODE_BYTES: usize = 64;
@@ -129,6 +131,18 @@ const PROCESS_OBSERVATION_SCHEMA: &str = "
         started_seconds INTEGER NOT NULL CHECK (started_seconds > 0),
         started_microseconds INTEGER NOT NULL CHECK (started_microseconds BETWEEN 0 AND 999999),
         PRIMARY KEY (lease_id, pid, started_seconds, started_microseconds)
+    ) STRICT;
+";
+
+const MAC_EXIT_PROOF_SCHEMA: &str = "
+    ALTER TABLE execution_lease ADD COLUMN mac_owner_process_only INTEGER NOT NULL DEFAULT 0
+        CHECK (mac_owner_process_only = 0 OR
+               (mac_owner_process_only = 1 AND mac_observation_complete IS NOT NULL));
+    CREATE TABLE execution_lease_mac_exit_proof (
+        lease_id INTEGER PRIMARY KEY REFERENCES execution_lease(id),
+        boot TEXT NOT NULL CHECK (length(boot) = 36),
+        generation INTEGER NOT NULL CHECK (generation > 0),
+        version INTEGER NOT NULL CHECK (version BETWEEN 1 AND 4294967295)
     ) STRICT;
 ";
 
@@ -442,7 +456,7 @@ pub(crate) fn protected_docker_gc_project_owner(
         return Err(RegistryError::UnrecognizedDatabase);
     }
     let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    if version != SCHEMA_VERSION {
+    if !(4..=SCHEMA_VERSION).contains(&version) {
         return Err(RegistryError::UnsupportedSchema(version));
     }
     let owner = docker_gc_project_owner(&connection, project)?;
@@ -1402,7 +1416,8 @@ impl Registry {
             };
             let current = tx
                 .query_row(
-                    "SELECT id, project_id, process_id, expires_at_ms, mac_observation_complete
+                    "SELECT id, project_id, process_id, expires_at_ms, mac_observation_complete,
+                            mac_owner_process_only
                      FROM execution_lease
                      WHERE slot = ?1 AND released_at_ms IS NULL",
                     [slot],
@@ -1413,19 +1428,21 @@ impl Registry {
                             row.get::<_, Option<u32>>(2)?,
                             row.get::<_, i64>(3)?,
                             row.get::<_, Option<bool>>(4)?,
+                            row.get::<_, bool>(5)?,
                         ))
                     },
                 )
                 .optional()?;
-            if let Some((id, owner, process_id, expires_at_ms, observation_complete)) = current {
+            if let Some((id, owner, process_id, expires_at_ms, observation_complete, owner_only)) =
+                current
+            {
                 // Without a registered PID, the start/attach gap is ambiguous.
                 let Some(pid) = process_id else { continue };
                 if expires_at_ms > now_ms {
                     continue;
                 }
                 let ended = match observation_complete {
-                    Some(false) => false,
-                    Some(true) => mac_processes_gone(&tx, id, pid)?,
+                    Some(complete) => mac_processes_gone(&tx, id, pid, complete, owner_only)?,
                     None => can_reclaim(pid),
                 };
                 if !ended {
@@ -1477,30 +1494,34 @@ impl Registry {
     }
 
     pub fn attach_lease_process(&mut self, lease: &Lease, pid: u32) -> Result<(), RegistryError> {
-        self.attach_lease_pid(lease, pid, None)
+        self.validate_lease_owner(lease)?;
+        Self::attach_lease_pid(&self.connection, lease, pid, None, false)
     }
 
     fn attach_lease_pid(
-        &mut self,
+        connection: &Connection,
         lease: &Lease,
         pid: u32,
         observation_complete: Option<bool>,
+        owner_only: bool,
     ) -> Result<(), RegistryError> {
-        self.validate_lease_owner(lease)?;
-        if pid == 0 {
+        if pid == 0 || observation_complete.is_some() && !matches!(pid, 2..=2_147_483_647) {
             return Err(RegistryError::InvalidLeaseProcess);
         }
-        let updated = self.connection.execute(
-            "UPDATE execution_lease SET process_id = ?1, mac_observation_complete = ?5
+        let updated = connection.execute(
+            "UPDATE execution_lease
+             SET process_id = ?1, mac_observation_complete = ?5, mac_owner_process_only = ?6
              WHERE id = ?2 AND project_id = ?3 AND slot = ?4
-             AND released_at_ms IS NULL AND (process_id IS NULL OR process_id = ?1)
+             AND released_at_ms IS NULL
+             AND (process_id IS NULL OR (process_id = ?1 AND ?5 IS NULL))
              AND mac_observation_complete IS NULL",
             params![
                 pid,
                 lease.id,
                 lease.project_id,
                 lease.slot,
-                observation_complete
+                observation_complete,
+                owner_only
             ],
         )?;
         if updated != 1 {
@@ -1512,23 +1533,45 @@ impl Registry {
     pub fn attach_lease_owner(&mut self, lease: &Lease) -> Result<(), RegistryError> {
         #[cfg(target_os = "macos")]
         {
+            self.validate_lease_owner(lease)?;
             let owner = crate::mac_process::current_process()
                 .map_err(|_| RegistryError::InvalidLeaseProcess)?;
-            self.attach_watched_lease_process(lease, owner.pid)?;
-            self.commit_lease_observation(lease, &[owner])
+            let tx = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            // This path is for synchronous work performed by the lease owner's own process.
+            Self::attach_lease_pid(&tx, lease, owner.pid, Some(false), true)?;
+            Self::store_lease_observation(&tx, lease, &[owner])?;
+            tx.commit()?;
+            Ok(())
         }
         #[cfg(not(target_os = "macos"))]
         self.attach_lease_process(lease, std::process::id())
     }
 
+    /// Register the runner's unreaped child after it has created its own session.
     #[cfg(target_os = "macos")]
     pub fn attach_watched_lease_process(
         &mut self,
         lease: &Lease,
         pid: u32,
     ) -> Result<(), RegistryError> {
+        self.validate_lease_owner(lease)?;
+        let proof = MacExitProof::capture(pid).ok();
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         // A crash between spawning and the first complete sample preserves the lease.
-        self.attach_lease_pid(lease, pid, Some(false))
+        Self::attach_lease_pid(&tx, lease, pid, Some(false), false)?;
+        if let Some(proof) = proof {
+            tx.execute(
+                "INSERT INTO execution_lease_mac_exit_proof (lease_id, boot, generation, version)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![lease.id, proof.boot, proof.generation, proof.version],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     #[cfg(target_os = "macos")]
@@ -1556,6 +1599,17 @@ impl Registry {
         let tx = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        Self::store_lease_observation(&tx, lease, observed)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    fn store_lease_observation(
+        tx: &rusqlite::Transaction<'_>,
+        lease: &Lease,
+        observed: &[crate::mac_process::ProcessIdentity],
+    ) -> Result<(), RegistryError> {
         {
             let mut insert = tx.prepare_cached(
                 "INSERT INTO execution_lease_process
@@ -1580,7 +1634,6 @@ impl Registry {
         if changed != 1 {
             return Err(RegistryError::InvalidLeaseProcess);
         }
-        tx.commit()?;
         Ok(())
     }
 
@@ -1638,12 +1691,44 @@ impl Registry {
     }
 }
 
-fn mac_processes_gone(tx: &Connection, lease_id: i64, leader: u32) -> Result<bool, RegistryError> {
+fn mac_processes_gone(
+    tx: &Connection,
+    lease_id: i64,
+    leader: u32,
+    observation_complete: bool,
+    owner_only: bool,
+) -> Result<bool, RegistryError> {
     #[cfg(target_os = "macos")]
     {
         use crate::mac_process::{gone, ProcessIdentity, MAX_IDENTITIES};
 
-        if !crate::runner::process_group_absent(leader) {
+        let proof = if owner_only {
+            None
+        } else {
+            // Older observations cannot supply the launch-time process identity.
+            let Some(proof) = tx
+                .query_row(
+                    "SELECT boot, generation, version FROM execution_lease_mac_exit_proof
+                     WHERE lease_id = ?1",
+                    [lease_id],
+                    |row| {
+                        Ok(MacExitProof {
+                            boot: row.get(0)?,
+                            generation: row.get(1)?,
+                            version: row.get(2)?,
+                        })
+                    },
+                )
+                .optional()?
+            else {
+                return Ok(false);
+            };
+            if proof.boot_changed() {
+                return Ok(true);
+            }
+            Some(proof)
+        };
+        if !observation_complete || !crate::runner::process_group_absent(leader) {
             return Ok(false);
         }
         let mut statement = tx.prepare_cached(
@@ -1665,11 +1750,11 @@ fn mac_processes_gone(tx: &Connection, lease_id: i64, leader: u32) -> Result<boo
                 return Ok(false);
             }
         }
-        Ok(has_leader)
+        Ok(has_leader && proof.is_none_or(|proof| proof.proves_gone()))
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (tx, lease_id, leader);
+        let _ = (tx, lease_id, leader, observation_complete, owner_only);
         Ok(false)
     }
 }
@@ -1813,7 +1898,7 @@ fn migrate(connection: &mut Connection) -> Result<(), RegistryError> {
             tx.commit()?;
             return Ok(());
         }
-        (APPLICATION_ID, 1..=3) => {}
+        (APPLICATION_ID, 1..=4) => {}
         (APPLICATION_ID, version) => return Err(RegistryError::UnsupportedSchema(version)),
         (0, 0) => {
             let has_objects: bool =
@@ -1834,13 +1919,16 @@ fn migrate(connection: &mut Connection) -> Result<(), RegistryError> {
     if version < 3 {
         tx.execute_batch(GC_APPROVAL_SCHEMA)?;
     }
-    tx.execute_batch(PROCESS_OBSERVATION_SCHEMA)?;
-    #[cfg(target_os = "macos")]
-    tx.execute(
-        "UPDATE execution_lease SET mac_observation_complete = 0
-         WHERE released_at_ms IS NULL AND process_id IS NOT NULL",
-        [],
-    )?;
+    if version < 4 {
+        tx.execute_batch(PROCESS_OBSERVATION_SCHEMA)?;
+        #[cfg(target_os = "macos")]
+        tx.execute(
+            "UPDATE execution_lease SET mac_observation_complete = 0
+             WHERE released_at_ms IS NULL AND process_id IS NOT NULL",
+            [],
+        )?;
+    }
+    tx.execute_batch(MAC_EXIT_PROOF_SCHEMA)?;
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()?;
     Ok(())
@@ -2922,7 +3010,7 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn watched_lease_preserves_live_identity_and_interrupted_observation() {
+    fn lease_owner_preserves_live_identity_and_interrupted_observation() {
         let ttl = Duration::from_secs(30);
         let scope = "a".repeat(64);
         for interrupted in [false, true] {
@@ -2938,13 +3026,63 @@ mod tests {
             }
             force_lease_expiry(&registry, lease.id);
             drop(lease);
-            // A watched lease needs more than an absent numeric group.
-            let probe = |_| panic!("watched lease must not fall back to a numeric probe");
+            let probe = |_| panic!("registered owner must not fall back to a numeric probe");
             assert!(matches!(
                 registry.acquire_lease(project, &scope, ttl, probe),
                 Err(RegistryError::LeaseConflict)
             ));
         }
+    }
+
+    #[test]
+    fn v4_migration_preserves_watched_leases_without_inventing_exit_proof() {
+        let temp = tempdir().unwrap();
+        let connection = Connection::open(temp.path().join(DATABASE_NAME)).unwrap();
+        for schema in [
+            INITIAL_SCHEMA,
+            LEASE_SCHEMA,
+            GC_APPROVAL_SCHEMA,
+            PROCESS_OBSERVATION_SCHEMA,
+        ] {
+            connection.execute_batch(schema).unwrap();
+        }
+        connection
+            .pragma_update(None, "application_id", APPLICATION_ID)
+            .unwrap();
+        connection.pragma_update(None, "user_version", 4).unwrap();
+        connection
+            .execute_batch(
+                "INSERT INTO project VALUES (1, 'fixture', 'project', 2, 3, 4);
+                 INSERT INTO execution_lease
+                     VALUES (2, 1, printf('%064d', 0), 0, 7, 0, 0, 1, NULL, 1);
+                 INSERT INTO execution_lease_process VALUES (2, 7, 3, 0);",
+            )
+            .unwrap();
+        drop(connection);
+
+        let mut registry = Registry::open(temp.path()).unwrap();
+        let version: i64 = registry
+            .connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        let existing: (bool, bool, u32, u32) = registry
+            .connection
+            .query_row(
+                "SELECT mac_observation_complete, mac_owner_process_only, pid,
+                        (SELECT count(*) FROM execution_lease_mac_exit_proof)
+                 FROM execution_lease JOIN execution_lease_process
+                 ON execution_lease.id = execution_lease_process.lease_id",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(existing, (true, false, 7, 0));
+        let probe = |_| panic!("watched lease must not fall back to a numeric probe");
+        assert!(matches!(
+            registry.acquire_lease(1, &"a".repeat(64), Duration::from_secs(30), probe),
+            Err(RegistryError::LeaseConflict)
+        ));
     }
 
     #[test]

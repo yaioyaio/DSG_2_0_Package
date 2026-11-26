@@ -36,7 +36,11 @@ Docker 읽기 전용 단계에서는 Docker 명령 대역으로 컨텍스트 고
 
 3단계 대상 러너 4건, 레지스트리 17건, macOS 프로세스 식별 1건이 통과했다. 실제 macOS에서 `python3 -IB scripts/check-managed-execution.py <dsg> --macos-lease-only`로 소유한 이탈 자손을 등록한 뒤 두 경로를 확인했다. 첫 경로는 리더의 정상 종료 뒤 실행 감독자가 `RUN_CONTROL_UNVERIFIED`와 종료 코드 5를 반환하며 lease를 유지했다. 둘째 경로에서는 소유 실행 감독자만 SIGKILL로 종료했다. 두 경로 모두 리더 종료와 별도 그룹 자손의 생존을 확인한 뒤 같은 프로젝트 실행이 차단되는지 검사했다. 이어 임시 시험 SQLite의 해당 lease 행에서 획득 시각을 0, 만료 시각을 1로 조정해 만료를 재현했다. 제품 TTL과 heartbeat는 그대로 사용했다. 이후에도 자손이 살아 있으면 재실행이 차단됐고 자손의 자진 종료 뒤 lease를 재획득했다. 회수 감사 이벤트는 경로별 1건이다.
 
-`python3 -IB scripts/check-managed-execution.py <dsg> --macos-observation-gap-only`은 WBS 3.2의 관측 공백을 진단한다. 첫 관측에서 리더만 기록된 시험 감독자를 잠깐 멈춰 순서를 고정한다. 별도 그룹의 자손이 고아가 된 뒤에 마지막 관측을 진행한다. 자손이 같은 임시 파일을 계속 열고 있는 상태에서 등록부·종료 응답·후속 실행을 대조한다. 이 진단은 보존과 조기 해제를 구분한다. 현재 macOS 실측은 종료 확인·lease 해제·후속 실행 허용을 반환해 조기 해제를 재현했다. 해결 검증은 자손 생존 중 lease와 정리 대상 보존 및 종료가 확인되는 정상 흐름의 회귀를 요구한다. 진단 중 실제 정리와 Docker 변경은 0건이며 시험 프로세스 종료를 확인한다. [macOS 관측 공백 실측](../dist/dsg-macos-compose-lease/LEASE-OBSERVATION.json)
+`python3 -IB scripts/check-managed-execution.py <dsg> --macos-observation-gap-only`는 WBS 3.2의 종료 증거와 자동 정리 보호를 검증한다. 처음에 리더만 기록된 상태에서 감독자를 멈춘다. 별도 세션의 자손이 `exec`를 거친 뒤에도 등록된 Cargo 대역이 생성한 임시 산출물의 파일 디스크립터를 열고 있으며, 자손의 부모가 PID 1로 바뀐 상태에서 리더와 감독자의 종료 처리를 진행한다. 감독자는 `RUN_CONTROL_UNVERIFIED`와 종료 코드 5, `run.tree_confirmed_gone=false`, `lease_released=false`를 반환해야 한다. 실제 `--auto-clean-cargo` 응답에서 제거 0건, 보존 1건, 회수 0바이트와 `process_tree_unknown`을 확인한다. [시험 스크립트](../scripts/check-managed-execution.py)
+
+같은 프로젝트에서 자동 정리 큐를 다시 여는 실행은 lease 만료 전후 모두 `RESOURCE_ACTIVE`로 차단돼야 한다. 만료는 임시 SQLite의 해당 lease 행에서만 재현한다. 두 번째 큐 진입 시 기존 작업이 `preserved` 상태가 되고, 자손이 열린 파일에서 읽은 내용과 경로에 남은 원본이 모두 일치해야 한다. 자손 종료 후에는 같은 프로젝트에서 만료된 lease를 재획득하고 `/usr/bin/true`가 정상 종료·lease 해제를 반환해야 한다. `LEASE_RECLAIMED` 감사 이벤트 1건, 기존 산출물 보존, 시험 프로세스 종료를 확인한다. 변경 전 조기 해제 재현은 별도 실측에 기록돼 있다. [변경 전 macOS 실측](../dist/dsg-macos-compose-lease/LEASE-OBSERVATION.json)
+
+등록부 마이그레이션 회귀는 v4의 활성 관리형 lease와 관측 기록을 v5로 옮긴 뒤 종료 증거 없이 만료된 lease가 보존되고, 같은 프로젝트의 재실행이 차단되는지 확인한다. [등록부 회귀](../rust-scaffold/crates/dsg-core/src/registry.rs)
 
 사전에 digest가 있는 공개 fixture 이미지를 보유한 격리 엔진에서 `DSG_TEST_DOCKER_CONTEXT=dockerguard-test DSG_TEST_COMPOSE_FIXTURE=1 sh scripts/test-rust.sh`로 건강한 컨테이너 하나를 확인한다. 반복 `up`의 동일 ID와 추가 컨테이너 0개를 확인한다. 구성 변경 시험에서는 원래 인스턴스를 회수하고 새 인스턴스에서 과거 기대값을 거절한다. 회수 직전에 동일 엔진과 시험 프로젝트·서비스·라벨·전체 컨테이너 ID를 대조한다.
 
