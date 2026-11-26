@@ -168,6 +168,8 @@ WBS 1.4·5.1은 전용 Ubuntu Parallels ARM64 Moby에서 합성 이미지 한 �
 
 `--layered --measure-allocation`은 두 이미지를 준비한 같은 4 KiB ext4에서 Moby 레이어 메타데이터의 추정값과 적용 전후의 실제 순회수를 대조한다. 대상 VFS 트리, 이미지·레이어 메타데이터, 영수증 원장, 다른 inode와 파일시스템 잔차를 각각 계산한다. 사설 루프의 심볼릭 링크와 소켓, 정해진 두 위치의 볼륨·VFS 쿼터 장치 표식은 메타데이터만 조사한다. 레이어 공유와 피어 실측값은 유지되고 승인·재적용의 할당 변화는 0 B여야 한다. [계측 구현](../scripts/check-moby-image-apply.py) · [계측 회귀](../scripts/test-buildkit-allocation.py)
 
+`--layered --measure-allocation --expect-product-accounting`으로 정상 응답과 확인 응답 유실(`--expect-recovery`)을 각각 검증한다. 계획 추정값은 레이어 메타데이터의 독립 계산값과, 완료 응답의 `intent_id`와 `allocation`은 승인 의도·네이티브 영수증·사설 ext4 전체의 독립 계측과 대조한다. 응답·영수증의 `reclaimed_bytes`와 SQLite의 `bytes_applied`는 순회수량과 0 중 큰 값이어야 한다. 응답 유실 직후에는 `recovery_required`와 회수량 0 B를 확인하고, 정확한 의도로 복구할 때 원래 영수증을 정산하는지 확인한다. 승인·복구·중복 적용의 ext4 할당 변화는 0 B이며, 변경 시도·승인 소비·영수증은 각 한 건이어야 한다. 공유 및 비대상 데이터 보존을 확인한다. 기존 영수증은 `allocation`이 없어도 회수량 0 B로 정산할 수 있어야 한다. [검증 실행기](../scripts/check-moby-image-apply.py)
+
 ### BuildKit 공개 API와 승인 원장 VM 유실 시험
 
 - 권한 분리. Linux ARM64 제어기는 수락된 로컬 `SOCK_SEQPACKET`에서 커널 UID·PID와 실행 파일 해시를 확인한다. 잘못된 역할, 루트, 요청 본문에 넣은 UID, 적용 의도 불일치, 승인 이전 적용이 모두 거절되어야 한다. 승인 후 폐기 가능한 전용 합성 레코드 한 건은 한 번만 적용되고 재적용은 거절되어야 한다. 새 연결의 영수증은 원본과 같고 재조회 중 네이티브 변경이 0건이어야 한다. [제어기 시험 도구](../scripts/check-buildkit-controller.py)
