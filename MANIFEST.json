@@ -87,8 +87,8 @@
     },
     {
       "path": "docs/API_SPEC.md",
-      "sha256": "cf9a8bf65322052f2c32eba351b9bc3d9ef60bb426b36a5d8b32a43c28d80422",
-      "bytes": 43077
+      "sha256": "77f7c1ee41028c30cbf8943b2dbfb8aa0a0d0a170eb1fedc6cef414dc36bc259",
+      "bytes": 45459
     },
     {
       "path": "docs/ARCHITECTURE.md",
@@ -142,18 +142,18 @@
     },
     {
       "path": "docs/SOURCES.md",
-      "sha256": "37dfbf9936232bdf121a112a58ec12ec9a9a620dea45c738f9677caaa2303c19",
-      "bytes": 1699
+      "sha256": "873fa329e999808dfefec0777a09a3bdfcc375d34ef1e9e4e208de4496eae1a1",
+      "bytes": 2205
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "168c1ccc4b1832ab6a59f29bd7475653aa59f24bf3210f33dedabdbeca633e1a",
-      "bytes": 36161
+      "sha256": "9526a330c712ac2537984ac2707877183559d57a720d5311683f55e8bf7e3a4f",
+      "bytes": 36511
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "dba3ab8c64d0714dadfe459e0f3e330e3257e622496f4d2ea8bfe307603de624",
-      "bytes": 70967
+      "sha256": "69abe61fd8f1d36c0be625000b59f13f440789672c0a33f844abd6d01401ad23",
+      "bytes": 72565
     },
     {
       "path": "docs/WBS.md",
@@ -466,6 +466,21 @@
       "bytes": 1010
     },
     {
+      "path": "integrations/moby-exact/cmd/dockerd/dsg_image_main_linux.go",
+      "sha256": "49177ff09280ffc07b159d46f9145f41757dd06396d201b5b4d4888194747ed9",
+      "bytes": 861
+    },
+    {
+      "path": "integrations/moby-exact/daemon/dsgimage/dsg_server_linux.go",
+      "sha256": "da90aa84386297ee1accc179574df73ecce68d03f66d744ae42ad56d9a822d48",
+      "bytes": 17069
+    },
+    {
+      "path": "integrations/moby-exact/daemon/dsgimage/dsg_store_linux.go",
+      "sha256": "1c610ac7367928b53f18b14dcd02aa890e8ac5ce2389fc913f876b68bcc4848d",
+      "bytes": 12885
+    },
+    {
       "path": "integrations/systemd/dsg-buildkit-exact.service",
       "sha256": "0011b3067e9bcf334a222e9372b66467b2709c73de2a1fcb79f016f9928a40cb",
       "bytes": 453
@@ -607,8 +622,8 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/src/main.rs",
-      "sha256": "7f8802bc4d2afe5e8b21f2378d8ee1de287eebc4cfff463f3d37b3400f53d937",
-      "bytes": 34348
+      "sha256": "d5b695dda87e3d59658a9c3957dc25cd1a0fa0721fccbc6a4e2ac5ff0ab28050",
+      "bytes": 36409
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/src/mcp.rs",
@@ -619,6 +634,11 @@
       "path": "rust-scaffold/crates/dsg-cli/src/mcp_state.rs",
       "sha256": "0589df2ac324daa809b2fee8e8265434bacbc3e9b4b9442702e301c1b64398d3",
       "bytes": 8037
+    },
+    {
+      "path": "rust-scaffold/crates/dsg-cli/src/moby_image.rs",
+      "sha256": "5092593e6d3bec7ebf5585421b85a96fda1baeddfab44dd1100615fef794e702",
+      "bytes": 17523
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/tests/cli.rs",
@@ -692,23 +712,23 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/docker_control_local/admission/backend_ownership.rs",
-      "sha256": "1742e6406f899bcbcf8bbb8a36096dd3ecf23cccc2d6e1c4a7e6c1f97fbf8393",
-      "bytes": 16238
+      "sha256": "a08ab90c1cd7abbb8802ab0275399080bbc8e628c06fa918a5df3792736300fe",
+      "bytes": 18342
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/docker_control_local/admission/write_request.rs",
-      "sha256": "e5f9600c527583a29cdb7b988653037800996500bbb961be1d98f74c27bddb1c",
-      "bytes": 26161
+      "sha256": "461d4e39262e68d9db5621e3e9726d809bf8010186c7b1db076d0fe1bf53022a",
+      "bytes": 27747
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/docker_gc_apply.rs",
-      "sha256": "f045db0afca81b66ed0ed51a4e6d7783260a309b7f5664d0758fdef0620c9dc4",
-      "bytes": 12627
+      "sha256": "b70dcf4242399ae5885b05944e7ce2d3484599c5b9598f477342caadc38533f6",
+      "bytes": 12721
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/docker_gc_apply/dispatch.rs",
-      "sha256": "0af7d21bb821b7096f424c0371f5d13dc7830c9011a4309e82ec706baff6583c",
-      "bytes": 13427
+      "sha256": "b98dcceb2d67cac162879dbbcc772e5385f85dc2e4d4bc6528e55cd3037a1961",
+      "bytes": 18791
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/docker_gc_apply/dispatch/tests.rs",
@@ -719,6 +739,11 @@
       "path": "rust-scaffold/crates/dsg-core/src/docker_gc_apply/live_fixture.rs",
       "sha256": "8cac1161ec19cf86fd455212a18f627fc694749abcefe72ab5d6622922da2fdb",
       "bytes": 46423
+    },
+    {
+      "path": "rust-scaffold/crates/dsg-core/src/docker_gc_apply/moby.rs",
+      "sha256": "8dab6b5a7d68da078301a7f83dfd3188b3ec9554bb4f76377c7657ff47b227fa",
+      "bytes": 10538
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/docker_gc_apply/tests.rs",
@@ -762,8 +787,8 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/registry.rs",
-      "sha256": "728cdec881b006b8e2cffbd03699c2ffdcaadde010a7a300b590452219214f3b",
-      "bytes": 109785
+      "sha256": "5d41549c51dcc23d4208829fb39038b01d7eea413d598148b763564bf0efe121",
+      "bytes": 111596
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/reuse.rs",
@@ -891,6 +916,11 @@
       "bytes": 27263
     },
     {
+      "path": "scripts/check-moby-image-apply.py",
+      "sha256": "91b637170b74484ab9bcf6db400b029591b00bd4f281ffd6142e3ad429f89cb0",
+      "bytes": 23804
+    },
+    {
       "path": "scripts/check-release-package.py",
       "sha256": "ddcbb0b34c06de9cbb8be3b48349fcdacc10e885ff96d02bb508802cc20b98bf",
       "bytes": 8933
@@ -924,6 +954,11 @@
       "path": "scripts/prepare-buildkit-exact.py",
       "sha256": "baa8879248d6d152dfbff5f27e17a2cfeb2655258cd31ee2771fab0b53bb66bc",
       "bytes": 4960
+    },
+    {
+      "path": "scripts/prepare-moby-exact.py",
+      "sha256": "4c497c9f94a814986de38da84f699bb21fd82a26fd86bd1dad0a6aadda85ac49",
+      "bytes": 5279
     },
     {
       "path": "scripts/prepare-release-signature.py",

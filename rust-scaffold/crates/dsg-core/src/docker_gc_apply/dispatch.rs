@@ -5,7 +5,16 @@ use super::{
     APPROVAL_TTL,
 };
 use crate::docker_control_local::{AuthorizedWriteRequest, ControllerEvidence, WriteRequest};
+use crate::{
+    docker_control_local::with_authorized_write_request, policy::Policy, registry::AuditOutcome,
+};
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use std::{
+    os::fd::{AsRawFd, OwnedFd},
+    path::Path,
+    time::Duration,
+};
 
 /// Implemented by the in-process controller that owns the mutation and receipt boundary.
 pub(crate) trait ExclusiveDockerGc: ControlledDockerGc {
@@ -103,6 +112,25 @@ impl<'a> DockerGcDispatch<'a> {
         project_policy_digest: &str,
         request: AuthorizedWriteRequest<'_>,
     ) -> Result<DockerGcDispatchResult, DockerGcError> {
+        self.dispatch_with_policy(
+            registry,
+            lease,
+            project_policy_digest,
+            &request,
+            || true,
+            false,
+        )
+    }
+
+    fn dispatch_with_policy(
+        &mut self,
+        registry: &mut Registry,
+        lease: &Lease,
+        project_policy_digest: &str,
+        request: &AuthorizedWriteRequest<'_>,
+        policy_current: impl Fn() -> bool,
+        image_only: bool,
+    ) -> Result<DockerGcDispatchResult, DockerGcError> {
         registry.check_protected_docker_gc_state()?;
         let ownership = request
             .pin_backend_ownership()
@@ -120,8 +148,15 @@ impl<'a> DockerGcDispatch<'a> {
             project_policy_digest,
             request.request(),
             &epoch,
-            || request.check_current().is_ok() && ownership.check_current().is_ok(),
-            |binding| ownership.permits(request.request(), binding),
+            || {
+                request.check_current().is_ok()
+                    && ownership.check_current().is_ok()
+                    && policy_current()
+            },
+            |binding| {
+                (!image_only || binding.kind == DockerGcKind::Image)
+                    && ownership.permits(request.request(), binding)
+            },
         )
     }
 
@@ -136,11 +171,7 @@ impl<'a> DockerGcDispatch<'a> {
         request_current: impl Fn() -> bool,
         assignment_permits: impl Fn(&Binding) -> bool,
     ) -> Result<DockerGcDispatchResult, DockerGcError> {
-        let project = match request {
-            WriteRequest::Approve { project_id, .. }
-            | WriteRequest::Apply { project_id, .. }
-            | WriteRequest::Recover { project_id, .. } => *project_id,
-        };
+        let project = request.project_id();
         if project != lease.project_id {
             return Err(RegistryError::InvalidLeaseOwner.into());
         }
@@ -153,6 +184,7 @@ impl<'a> DockerGcDispatch<'a> {
         let owner = registry.docker_gc_project_owner(project)?;
 
         match request {
+            WriteRequest::Plan { .. } => Err(DockerGcError::UnverifiedControl),
             WriteRequest::Approve { plan_id, .. } => {
                 let policy = project_policy_digest.to_ascii_lowercase();
                 let payload = registry.read_current_gc_plan(project, *plan_id, &policy)?;
@@ -279,6 +311,116 @@ impl<'a> DockerGcDispatch<'a> {
             && engine.admission.generation == admission.generation
             && valid_owner_fingerprint(engine.namespace))
         .then_some(engine.namespace)
+    }
+}
+
+/// Dispatch one Linux ARM64 image operation from the controller's admitted listener.
+/// The peer and protected manifest select the engine and project. The packet cannot
+/// choose a registry, arbitrary path, engine socket or policy.
+pub fn serve_moby_image_request(policy: &Path, state_dir: &Path, connection: OwnedFd) {
+    let _ = with_authorized_write_request(policy, connection, |request, socket| {
+        let reply = process_moby_image(state_dir, request)
+            .unwrap_or_else(|_| json!({"status":"preserved","reason":"unverified_control"}));
+        if let Ok(data) = serde_json::to_vec(&reply) {
+            unsafe {
+                libc::send(
+                    socket.as_raw_fd(),
+                    data.as_ptr().cast(),
+                    data.len(),
+                    libc::MSG_NOSIGNAL | libc::MSG_DONTWAIT,
+                );
+            }
+        }
+    });
+}
+
+fn image_project_policy(root: &Path, deployment: &str) -> Result<String, DockerGcError> {
+    let policy = Policy::load(root, None, None).map_err(|_| DockerGcError::UnverifiedControl)?;
+    let encoded = serde_json::to_vec(&policy).map_err(|_| DockerGcError::UnverifiedControl)?;
+    let mut hash = Sha256::new();
+    hash.update(b"dsg-moby-image-policy-v1\0");
+    hash.update(deployment.as_bytes());
+    hash.update(encoded);
+    Ok(format!("{:x}", hash.finalize()))
+}
+
+fn process_moby_image(
+    state_dir: &Path,
+    request: AuthorizedWriteRequest<'_>,
+) -> Result<Value, DockerGcError> {
+    let ownership = request
+        .pin_backend_ownership()
+        .map_err(|_| DockerGcError::UnverifiedControl)?;
+    let mut registry = Registry::open_protected_docker_gc(state_dir)?;
+    let project = request.request().project_id();
+    let recovery = matches!(request.request(), WriteRequest::Recover { .. });
+    let root = registry.docker_gc_project_root(project)?;
+    let deployment = request.policy_digest().to_owned();
+    let project_policy = if recovery {
+        String::new()
+    } else {
+        image_project_policy(&root, &deployment)?
+    };
+    let policy_current = || {
+        recovery || image_project_policy(&root, &deployment).as_ref().ok() == Some(&project_policy)
+    };
+    let namespace = ownership.namespace();
+    let mut engine =
+        super::moby::MobyImageBackend::open(request.engine(), namespace, project, || {
+            request.connect_engine().ok()
+        })
+        .ok_or(DockerGcError::UnverifiedControl)?;
+    if let WriteRequest::Plan { image_id, .. } = request.request() {
+        let owner = registry.docker_gc_project_owner(project)?;
+        if !ownership.owns_image(project, &owner, image_id) {
+            return Err(DockerGcError::UnverifiedControl);
+        }
+        let generation = &request.engine().generation;
+        let plan = plan_with_controller(
+            &mut engine,
+            &mut registry,
+            project,
+            &project_policy,
+            DockerGcKind::Image,
+            image_id,
+            |binding| {
+                binding.endpoint == namespace
+                    && &binding.generation == generation
+                    && request.check_current().is_ok()
+                    && ownership.check_current().is_ok()
+                    && policy_current()
+            },
+        )?;
+        return Ok(json!({"status":"planned","plan_id":plan.plan_id,"expires_at":plan.expires_at}));
+    }
+    let lease = registry.acquire_docker_gc_lease(project, namespace, Duration::from_secs(20))?;
+    // Connect from the same already pinned kernel peer while dispatch owns the lease.
+    let result = DockerGcDispatch::new(&mut engine).dispatch_with_policy(
+        &mut registry,
+        &lease,
+        &project_policy,
+        &request,
+        policy_current,
+        true,
+    );
+    let outcome = if result.is_ok() {
+        AuditOutcome::Success
+    } else {
+        AuditOutcome::Deny
+    };
+    registry.finish_lease(lease, outcome, "DOCKER_IMAGE_CONTROLLER")?;
+    match result? {
+        DockerGcDispatchResult::Approved { intent_id } => {
+            Ok(json!({"status":"approved","intent_id":intent_id}))
+        }
+        DockerGcDispatchResult::Applied(result) | DockerGcDispatchResult::Recovered(result) => {
+            let status = match result.status {
+                GcApplyStatus::Applied => "applied",
+                GcApplyStatus::Preserved => "preserved",
+                GcApplyStatus::RecoveryRequired => "recovery_required",
+            };
+            Ok(json!({"status":status,"reclaimed_bytes":result.reclaimed_bytes}))
+        }
     }
 }
 

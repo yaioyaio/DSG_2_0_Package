@@ -83,16 +83,20 @@ impl OwnershipManifest {
     }
 
     fn permits(&self, request: &WriteRequest, binding: &Binding, namespace: &str) -> bool {
-        if binding.endpoint != namespace {
+        if binding.endpoint != namespace || binding.project != request.project_id() {
             return false;
         }
         match request {
             // The controller resolves the exact stored intent before looking up its receipt.
             // A retired assignment must not strand the last outstanding receipt in this store.
-            WriteRequest::Recover { project_id, .. } => binding.project == *project_id,
-            WriteRequest::Approve { project_id, .. } | WriteRequest::Apply { project_id, .. } => {
-                binding.project == *project_id
-                    && self.owns(*project_id, &binding.owner, binding.kind, &binding.id)
+            WriteRequest::Recover { .. } => true,
+            WriteRequest::Plan { image_id, .. } => {
+                binding.kind == DockerGcKind::Image
+                    && binding.id == *image_id
+                    && self.owns(binding.project, &binding.owner, binding.kind, &binding.id)
+            }
+            WriteRequest::Approve { .. } | WriteRequest::Apply { .. } => {
+                self.owns(binding.project, &binding.owner, binding.kind, &binding.id)
             }
         }
     }
@@ -203,8 +207,15 @@ impl PinnedBackendOwnership {
     }
 
     pub(crate) fn permits(&self, request: &WriteRequest, binding: &Binding) -> bool {
-        self.manifest
-            .permits(request, binding, &self.store.namespace)
+        self.manifest.permits(request, binding, self.namespace())
+    }
+
+    pub(crate) fn namespace(&self) -> &str {
+        &self.store.namespace
+    }
+
+    pub(crate) fn owns_image(&self, project: i64, owner: &str, id: &str) -> bool {
+        self.manifest.owns(project, owner, DockerGcKind::Image, id)
     }
 
     pub(crate) fn check_current(&self) -> Result<()> {
@@ -367,6 +378,51 @@ mod tests {
     }
 
     #[test]
+    fn plan_binding_must_match_the_requested_image_and_store_assignment() {
+        let ownership = parse(&manifest()).unwrap();
+        let resource = &ownership.resources[0];
+        let namespace = "1".repeat(64);
+        let binding = Binding {
+            project: resource.project_id,
+            owner: resource.project_owner_sha256.clone(),
+            kind: resource.kind,
+            id: resource.id.clone(),
+            endpoint: namespace.clone(),
+            generation: "2".repeat(64),
+            snapshot: "3".repeat(64),
+        };
+        let plan = |project_id, image_id| WriteRequest::Plan {
+            project_id,
+            image_id,
+        };
+        let request = plan(binding.project, binding.id.clone());
+        assert!(ownership.permits(&request, &binding, &namespace));
+        assert!(!ownership.permits(&request, &binding, &"4".repeat(64)));
+        assert!(!ownership.permits(
+            &plan(binding.project + 1, binding.id.clone()),
+            &binding,
+            &namespace
+        ));
+        assert!(!ownership.permits(
+            &plan(binding.project, format!("sha256:{}", "f".repeat(64))),
+            &binding,
+            &namespace
+        ));
+        for mismatched in [
+            Binding {
+                owner: "5".repeat(64),
+                ..binding.clone()
+            },
+            Binding {
+                kind: DockerGcKind::BuildCache,
+                ..binding.clone()
+            },
+        ] {
+            assert!(!ownership.permits(&request, &mismatched, &namespace));
+        }
+    }
+
+    #[test]
     fn empty_assignment_allows_only_receipt_lookup_for_the_same_project_and_store() {
         let mut value = manifest();
         let original = parse(&value).unwrap();
@@ -397,6 +453,10 @@ mod tests {
         };
         assert!(!empty.permits(&other_project, &binding, &namespace));
         for request in [
+            WriteRequest::Plan {
+                project_id,
+                image_id: binding.id.clone(),
+            },
             WriteRequest::Approve {
                 project_id,
                 plan_id: 1,
