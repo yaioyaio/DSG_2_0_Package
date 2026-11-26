@@ -87,8 +87,8 @@
     },
     {
       "path": "docs/API_SPEC.md",
-      "sha256": "bf2f467060a0e5829d2e0880dbf0b974b8e8249ad602b4e669d0d72f6fc52fda",
-      "bytes": 46688
+      "sha256": "90488e50ff9717bf53fb6438bf78e4f5fc450d4d8415d2d71b973758c42000e0",
+      "bytes": 46875
     },
     {
       "path": "docs/ARCHITECTURE.md",
@@ -147,13 +147,13 @@
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "3bf54310e8a7086aee2e6cc09321bd22a8d469a9e469fdb89e843fd078ee072b",
-      "bytes": 38030
+      "sha256": "2b9ba525a172f49280e53e9ff4256ff950441f763dd4e3cd2a4cbfb9d9a98f05",
+      "bytes": 38584
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "2276923c582c8617f17e3e2862f56bd52e3aefcd546f20019e0e6bc6cfd32829",
-      "bytes": 74238
+      "sha256": "c524d372137619a8f4c62e6c3033b98ad25393ea350f942223f1bcfa9f5d2256",
+      "bytes": 75960
     },
     {
       "path": "docs/WBS.md",
@@ -922,8 +922,8 @@
     },
     {
       "path": "scripts/check-managed-execution.py",
-      "sha256": "0dc20d2a99d7390e6f09b88f4bdfb61fa3691ac517aebd6a79286a2f09de8fbd",
-      "bytes": 27263
+      "sha256": "2b8709d2f7f6dccfdd399f310b4ad7a05e7cc9a75f5dd4437e9f7dd23148d22f",
+      "bytes": 38911
     },
     {
       "path": "scripts/check-moby-image-apply.py",
