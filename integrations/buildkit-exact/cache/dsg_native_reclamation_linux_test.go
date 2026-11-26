@@ -32,6 +32,7 @@ import (
 	"github.com/opencontainers/go-digest"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
+	"golang.org/x/sys/unix"
 )
 
 // These writers create a native schema using only generated data. The recovered
@@ -334,17 +335,115 @@ func dsgRunReclaimChild(t *testing.T, dir *os.File, in dsgReclaimInput, domain, 
 	}
 }
 
+type dsgReclaimAllocationCapture struct {
+	tool, mount, output string
+	anchor              dsgAllocationStat
+}
+
+func dsgPrepareReclaimAllocationCapture(t *testing.T) *dsgReclaimAllocationCapture {
+	t.Helper()
+	tool, hasTool := os.LookupEnv("DSG_TEST_ALLOCATION_TOOL")
+	mount, hasMount := os.LookupEnv("DSG_TEST_ALLOCATION_MOUNT")
+	output, hasOutput := os.LookupEnv("DSG_TEST_ALLOCATION_OUTPUT")
+	if !hasTool && !hasMount && !hasOutput {
+		return nil
+	}
+	require.True(t, hasTool && hasMount && hasOutput, "allocation capture requires tool, mount and output settings")
+	for _, path := range []string{tool, mount, output, os.TempDir()} {
+		require.True(t, filepath.IsAbs(path) && filepath.Clean(path) == path, "allocation paths must be absolute and clean")
+		resolved, err := filepath.EvalSymlinks(path)
+		require.True(t, err == nil && resolved == path, "allocation paths must exist without symlinks")
+	}
+	tmp := os.TempDir()
+	require.True(t, tmp == mount || filepath.Dir(tmp) == mount, "TMPDIR must be the allocation mount or its direct child")
+	require.Zero(t, os.Geteuid(), "allocation capture requires root")
+	anchor, err := dsgAllocationStatAt(unix.AT_FDCWD, mount)
+	require.NoError(t, err)
+	// Linux reserves block device major 7 for loop devices.
+	require.Equal(t, uint32(7), anchor.DeviceMajor, "allocation mount must be backed by a loop device")
+	require.Equal(t, uint16(unix.S_IFDIR|0700), anchor.Mode, "allocation mount must be a private directory")
+	require.Zero(t, anchor.UID)
+	device := fmt.Sprintf("%d:%d", anchor.DeviceMajor, anchor.DeviceMinor)
+	mounts, err := dsgMounts("/proc/self/mountinfo")
+	require.NoError(t, err)
+	require.NoError(t, dsgCheckMountTree(mounts, device, filepath.Join(mount, "allocation-fixture"), false))
+	for _, entry := range mounts {
+		if entry.path == mount {
+			require.Equal(t, entry.id, fmt.Sprint(anchor.MountID), "allocation mount ID changed")
+			require.True(t, dsgOption(entry.options, "nosuid") && dsgOption(entry.options, "nodev"), "allocation mount requires nosuid and nodev")
+		}
+	}
+	marker, err := dsgAllocationStatAt(unix.AT_FDCWD, filepath.Join(mount, ".dsg-allocation-fixture"))
+	require.NoError(t, err)
+	require.True(t, marker.ownedBy(anchor) && marker.Mode == unix.S_IFREG|0600 && marker.Size == 0 && marker.Links == 1, "allocation fixture marker is invalid")
+	tmpStat, err := dsgAllocationStatAt(unix.AT_FDCWD, tmp)
+	require.NoError(t, err)
+	require.True(t, tmpStat.Mode&unix.S_IFMT == unix.S_IFDIR && tmpStat.ownedBy(anchor), "TMPDIR must belong to the private allocation mount")
+	for _, path := range []string{tool, output} {
+		st, err := dsgAllocationStatAt(unix.AT_FDCWD, path)
+		require.NoError(t, err)
+		require.True(t, st.DeviceMajor != anchor.DeviceMajor || st.DeviceMinor != anchor.DeviceMinor, "allocation tool and output must be on an external filesystem")
+		require.True(t, st.UID == 0 && st.Mode&0022 == 0, "allocation tool and output must be writable only by root")
+	}
+	toolInfo, err := os.Stat(tool)
+	require.NoError(t, err)
+	require.True(t, toolInfo.Mode().IsRegular(), "allocation helper must be a regular file")
+	outInfo, err := os.Stat(output)
+	require.NoError(t, err)
+	require.True(t, outInfo.IsDir(), "allocation output must be an existing directory")
+	return &dsgReclaimAllocationCapture{tool: tool, mount: mount, output: output, anchor: anchor}
+}
+
+func (c *dsgReclaimAllocationCapture) snapshot(t *testing.T, fixture *os.File, name string) {
+	t.Helper()
+	if c == nil {
+		return
+	}
+	anchor, err := dsgAllocationStatAt(unix.AT_FDCWD, c.mount)
+	require.NoError(t, err)
+	require.True(t, anchor.ownedBy(c.anchor) && anchor.Inode == c.anchor.Inode, "allocation mount changed")
+	root, err := dsgAllocationStatAt(int(fixture.Fd()), "")
+	require.NoError(t, err)
+	require.True(t, root.ownedBy(anchor), "fixture is outside the allocation mount")
+	require.NoError(t, unix.Syncfs(int(fixture.Fd())), "commit fixture allocation before snapshot %s", name)
+	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "/usr/bin/python3", "-IB", c.tool, "snapshot", c.mount)
+	pipe, err := cmd.StdoutPipe()
+	require.NoError(t, err)
+	require.NoError(t, cmd.Start())
+	const maxSnapshot = 8 << 20
+	data, readErr := io.ReadAll(io.LimitReader(pipe, maxSnapshot+1))
+	if readErr != nil || len(data) > maxSnapshot {
+		cancel()
+	}
+	waitErr := cmd.Wait()
+	require.NoError(t, readErr, "allocation snapshot %s", name)
+	require.LessOrEqual(t, len(data), maxSnapshot, "allocation snapshot %s is too large", name)
+	require.NoError(t, waitErr, "allocation snapshot %s", name)
+	require.True(t, json.Valid(data), "allocation snapshot %s must be JSON", name)
+	file, err := os.OpenFile(filepath.Join(c.output, name), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	require.NoError(t, err)
+	_, writeErr := file.Write(data)
+	closeErr := file.Close()
+	require.NoError(t, writeErr)
+	require.NoError(t, closeErr)
+}
+
 func TestDSGNativeRecordReclamation(t *testing.T) {
 	args := os.Args
 	if len(args) > 3 && args[len(args)-3] == "dsg-record-fixture-child" {
 		dsgReclaimChild(t, args[len(args)-2], args[len(args)-1])
 		return
 	}
+	allocation := dsgPrepareReclaimAllocationCapture(t)
 	dir, in := dsgSeedReclaim(t)
+	allocation.snapshot(t, dir, "00-seeded.json")
 	ctx, p := t.Context(), in.Plan
 	s, j := dsgOpenReclaim(t, dir, in)
 	require.NoError(t, j.begin(ctx, p))
 	require.NoError(t, s.db.Close())
+	allocation.snapshot(t, dir, "01-journal-begun.json")
 	for n, domain := range p.stages() {
 		if !t.Run(domain, func(t *testing.T) {
 			dsgRunReclaimChild(t, dir, in, domain, "armed", 85)
@@ -373,6 +472,7 @@ func TestDSGNativeRecordReclamation(t *testing.T) {
 		}) {
 			t.FailNow()
 		}
+		allocation.snapshot(t, dir, fmt.Sprintf("%02d-ack-%s.json", n+2, domain))
 	}
 	s, j = dsgOpenReclaim(t, dir, in)
 	s.verifyConsumers(t)
@@ -389,5 +489,6 @@ func TestDSGNativeRecordReclamation(t *testing.T) {
 	}))
 	require.Zero(t, s.calls)
 	require.NoError(t, s.db.Close())
+	allocation.snapshot(t, dir, "08-resume-verified.json")
 	t.Log(dsgNativeReclamationQualification + " stages=6 armed_crashes=6 effect_crashes=6 replay_calls=0 non_target_changes=0 logical_records=1 production_receipts=0 generated_by=cache_manager_getremotes source_bound=1")
 }
