@@ -1,5 +1,6 @@
 """Exercise registered Cargo execution and Compose reuse on temporary fixtures."""
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -21,8 +22,12 @@ def call(arguments, timeout=8):
     return subprocess.run(arguments, capture_output=True, text=True, timeout=timeout, check=False)
 
 
-def result(invocation, expected=0, timeout=12):
-    completed = call(invocation, timeout)
+def result(invocation, expected=0, timeout=12, input_json=None):
+    if input_json is None:
+        completed = call(invocation, timeout)
+    else:
+        completed = subprocess.run(invocation, input=json.dumps(input_json), capture_output=True,
+                                   text=True, timeout=timeout, check=False)
     if completed.returncode != expected or not completed.stdout:
         raise RuntimeError(f'{invocation[0].rsplit(os.sep, 1)[-1]} returned {completed.returncode}; expected {expected}.')
     return json.loads(completed.stdout)['result']
@@ -157,6 +162,145 @@ def verify_detached_lease(executable, base, global_policy, crash):
         supervisor.communicate(timeout=2)
 
 
+UNOBSERVED_DESCENDANT_FIXTURE = '''
+import os
+from pathlib import Path
+import time
+
+deadline = time.monotonic() + 12
+
+def wait_for(name):
+    while time.monotonic() < deadline:
+        if Path(name).exists():
+            return True
+        time.sleep(0.02)
+    return False
+
+if not wait_for('spawn'):
+    os._exit(1)
+launcher = os.fork()
+if launcher == 0:
+    if os.fork() == 0:
+        os.setsid()
+        with Path('artifact.txt').open('rb') as artifact:
+            Path('identity.tmp').write_text(str(os.getpid()))
+            Path('identity.tmp').replace('escaped.pid')
+            if wait_for('prove'):
+                Path('held').write_bytes(artifact.read())
+                wait_for('close')
+        os._exit(0)
+    os._exit(0)
+os.waitpid(launcher, 0)
+Path('launcher-exited').touch()
+os._exit(0 if wait_for('leader-release') else 1)
+'''
+
+
+def verify_macos_observation_gap(executable, base, global_policy):
+    project = base / 'observation-gap'
+    project.mkdir()
+    state = project / 'state'
+    cli = [executable, '--root', str(project), '--state-dir', str(state),
+           '--global-policy', str(global_policy), '--json']
+    result(cli + ['init', '--project-id', 'observation-gap'])
+    helper = project / 'fixture.py'
+    helper.write_text(UNOBSERVED_DESCENDANT_FIXTURE)
+    artifact = project / 'artifact.txt'
+    sentinel = b'read-only lease observation fixture\n'
+    artifact.write_bytes(sentinel)
+    database = state / 'registry.sqlite3'
+
+    def await_value(observe, purpose, timeout=2):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            value = observe()
+            if value:
+                return value
+            time.sleep(0.02)
+        raise RuntimeError(f'The macOS observation fixture could not confirm {purpose}.')
+
+    def observed_leader():
+        with sqlite3.connect(database, timeout=0.3) as db:
+            lease = db.execute('SELECT id, process_id FROM execution_lease '
+                               'WHERE released_at_ms IS NULL AND mac_observation_complete = 1').fetchone()
+            if lease is not None:
+                registered = db.execute('SELECT pid FROM execution_lease_process WHERE lease_id = ?',
+                                        (lease[0],)).fetchall()
+                if registered == [(lease[1],)]:
+                    return lease
+
+    def supervisor_stopped():
+        pid, status = os.waitpid(supervisor.pid, os.WNOHANG | os.WUNTRACED)
+        return pid == supervisor.pid and os.WIFSTOPPED(status)
+
+    def escaped_identity():
+        if (project / 'escaped.pid').is_file() and (project / 'launcher-exited').is_file():
+            pid = int((project / 'escaped.pid').read_text())
+            if pid > 1 and pid != leader and os.getpgid(pid) == pid:
+                return pid
+
+    def child_exited(pid):
+        try:
+            os.getpgid(pid)
+        except ProcessLookupError:
+            return True
+        return False
+
+    escaped = None
+    paused = False
+    supervisor = subprocess.Popen(cli + ['exec', '--timeout', '10', '--', sys.executable, '-IB', str(helper)],
+                                  stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        lease_id, leader = await_value(observed_leader, 'the initial leader-only snapshot', timeout=3)
+        assert leader != supervisor.pid and os.getpgid(leader) == leader
+        # Gate this owned fixture between two observations without depending on scheduler timing.
+        supervisor.send_signal(signal.SIGSTOP)
+        paused = True
+        await_value(supervisor_stopped, 'the stopped fixture supervisor')
+        (project / 'spawn').touch()
+        escaped = await_value(escaped_identity, 'the live descendant in a separate session')
+        parent = call(['/bin/ps', '-p', str(escaped), '-o', 'ppid='], timeout=2)
+        assert parent.returncode == 0 and parent.stdout.strip() == '1'
+        assert observed_leader() == (lease_id, leader)
+        (project / 'leader-release').touch()
+        supervisor.send_signal(signal.SIGCONT)
+        paused = False
+        stdout, _ = supervisor.communicate(timeout=4)
+        report = json.loads(stdout)['result']
+        contender = call(cli + ['exec', '--timeout', '2', '--', '/usr/bin/true'], timeout=3)
+        (project / 'prove').touch()
+        await_value(lambda: (project / 'held').is_file() and (project / 'held').read_bytes() == sentinel,
+                    'the descendant still holding the fixture file after the contender')
+        assert os.getpgid(escaped) == escaped and artifact.read_bytes() == sentinel
+        with sqlite3.connect(database, timeout=0.3) as db:
+            recorded = db.execute('SELECT count(*) FROM execution_lease_process WHERE lease_id = ? AND pid = ?',
+                                  (lease_id, escaped)).fetchone()[0] == 1
+            released = db.execute('SELECT released_at_ms IS NOT NULL FROM execution_lease WHERE id = ?',
+                                  (lease_id,)).fetchone()[0] == 1
+        assert released == report['lease_released']
+        tree_gone = report['run']['tree_confirmed_gone']
+        if tree_gone and released and supervisor.returncode == contender.returncode == 0 and not recorded:
+            outcome = 'premature_release_reproduced'
+        elif not tree_gone and not released and supervisor.returncode == 5 and contender.returncode == 2:
+            assert json.loads(contender.stderr)['error']['code'] == 'RESOURCE_ACTIVE'
+            outcome = 'lease_preserved'
+        else:
+            raise RuntimeError('The macOS observation fixture produced inconsistent lease decisions.')
+    finally:
+        for name in ('leader-release', 'prove', 'close'):
+            (project / name).touch(exist_ok=True)
+        if paused:
+            supervisor.send_signal(signal.SIGCONT)
+        if supervisor.poll() is None:
+            supervisor.kill()
+        supervisor.communicate(timeout=2)
+        if escaped is not None:
+            await_value(lambda: child_exited(escaped), 'the owned descendant exit')
+    return dict(outcome=outcome, descendant_recorded=recorded, descendant_held_file=True,
+                lease_released=released, tree_confirmed_gone=tree_gone, contender_exit=contender.returncode,
+                fixture_file_preserved=True, fixture_processes_remaining=0)
+
+
 def docker_field(arguments, timeout):
     completed = subprocess.run(
         arguments, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
@@ -184,10 +328,13 @@ def compose_up(compose, project, timeout):
         raise RuntimeError('The isolated Compose fixture start exceeded its time limit.') from None
 
 
-def write_compose_fixture(path, image_id, tag, lifetime, mount_tmpfs=False, named_volume=None):
+def write_compose_fixture(path, image, tag, lifetime, mount_tmpfs=False, named_volume=None):
     configuration = f'''services:
   probe:
-    image: "{image_id}"
+    image: "{image['reference']}"
+    platform: "{image['os']}/{image['architecture']}"
+    build: ./build
+    init: false
     container_name: "{tag}"
     labels:
       dsg.fixture: "{tag}"
@@ -266,11 +413,30 @@ def verify_reuse(cli, context, project, runner_deadline):
 
     if volume_owner is not None and docker_field(docker + ['info', '--format', '{{.ID}}'], budget(3)) != volume_engine:
         raise RuntimeError('The named-volume fixture engine identity could not be confirmed.')
-    inventory = result(cli + ['docker-scan', '--context', context, '--max-resources', '64'], timeout=budget(25))
-    if not inventory['complete'] or not inventory['engine_id']:
-        raise RuntimeError('The isolated Docker inventory could not be verified.')
+    def scan_inventory(remaining):
+        observed = result(cli + ['docker-scan', '--context', context, '--max-resources', '64'],
+                          timeout=remaining(25))
+        if not observed['complete'] or observed['context'] != context or not observed['engine_id']:
+            raise RuntimeError('The isolated Docker inventory could not be verified.')
+        if observed['duplicates']:
+            raise RuntimeError('The isolated Docker inventory contains duplicate Compose candidates.')
+        return observed
+
+    inventory = scan_inventory(budget)
     if volume_owner is not None and inventory['engine_id'] != volume_engine:
         raise RuntimeError('The named-volume fixture engine identity changed during inventory.')
+
+    def confirm_inventory(remaining, fixture_id=None):
+        observed = scan_inventory(remaining)
+        expected_containers = [entry['id'] for entry in inventory['containers']]
+        if fixture_id is not None:
+            expected_containers.append(fixture_id)
+        if (observed['engine_id'] != inventory['engine_id']
+                or sorted(entry['id'] for entry in observed['containers']) != sorted(expected_containers)
+                or sorted(entry['id'] for entry in observed['images']) != sorted(entry['id'] for entry in inventory['images'])
+                or sorted(observed['volumes']) != sorted(inventory['volumes'])):
+            raise RuntimeError('The isolated engine resource identities or counts changed unexpectedly.')
+
     images = {image['id']: image for image in inventory['images'] if image['digests']}
     inspect_image = docker + ['image', 'inspect', '--format']
     volume_count = '{{len .Config.Volumes}}'
@@ -281,21 +447,30 @@ def verify_reuse(cli, context, project, runner_deadline):
         replacement_id = docker_field(inspect_image + ['{{.ID}}', '--', pinned_image], budget(4))
         replacement = images.get(replacement_id)
         if (replacement is None or replacement_digest not in replacement['digests'] or replacement['os'] != 'linux'
+                or replacement['architecture'] not in {'amd64', 'arm64'}
                 or docker_field(inspect_image + [volume_count, '--', replacement_id], budget(4)) != '0'):
             raise RuntimeError('The isolated engine needs the preloaded, digest-backed Alpine image without declared volumes.')
+        replacement = dict(replacement, reference=pinned_image, digest=replacement_digest)
 
     source = None
     for reference in ('busybox:1.36', 'busybox:1.37', 'busybox:latest', 'alpine:3.20', 'alpine:3.22', 'alpine:latest'):
         image_id = docker_field(inspect_image + ['{{.ID}}', '--', reference], budget(4))
         candidate = images.get(image_id)
-        if candidate is None:
+        if candidate is None or candidate['os'] != 'linux' or candidate['architecture'] not in {'amd64', 'arm64'}:
             continue
         if replacement is not None and (image_id == replacement['id'] or replacement_digest in candidate['digests']
                                         or candidate['os'] != replacement['os']
                                         or candidate['architecture'] != replacement['architecture']):
             continue
-        if docker_field(inspect_image + [volume_count, '--', image_id], budget(4)) == '0':
-            source = candidate
+        if docker_field(inspect_image + [volume_count, '--', image_id], budget(4)) != '0':
+            continue
+        repository = reference.split(':', 1)[0]
+        for digest in candidate['digests']:
+            digest_reference = f'docker.io/library/{repository}@{digest}'
+            if docker_field(inspect_image + ['{{.ID}}', '--', digest_reference], budget(4)) == image_id:
+                source = dict(candidate, reference=digest_reference, digest=digest)
+                break
+        if source is not None:
             break
     if source is None:
         if replacement is not None:
@@ -304,6 +479,9 @@ def verify_reuse(cli, context, project, runner_deadline):
 
     tag = 'dsg-runner-' + secrets.token_hex(6)
     yaml_path = project / 'compose.fixture.yaml'
+    build_input = project / 'build' / 'Dockerfile'
+    build_input.parent.mkdir()
+    build_input.write_text(f'FROM {source["reference"]}\nLABEL dsg.fixture.build-input="before"\n')
     compose = docker + ['compose', '--env-file', os.devnull, '--project-directory', str(project),
                         '--project-name', tag, '--file', str(yaml_path)]
     project_filter = ['--filter', f'label=com.docker.compose.project={tag}']
@@ -360,7 +538,7 @@ def verify_reuse(cli, context, project, runner_deadline):
             raise RuntimeError('The observed isolated fixture ID changed before startup.')
         if named_volume is not None:
             confirm_volume(named_volume, budget)
-        write_compose_fixture(yaml_path, image['id'], tag, lifetime, mount_tmpfs, named_volume)
+        write_compose_fixture(yaml_path, image, tag, lifetime, mount_tmpfs, named_volume)
         timeout = budget(11)
         start_attempted = True
         if compose_up(compose, project, timeout):
@@ -378,9 +556,11 @@ def verify_reuse(cli, context, project, runner_deadline):
             raise RuntimeError('The real Compose configuration hash could not be verified.')
         return label
 
-    def verify(expectation, exit_code):
+    def verify(expectation, exit_code, projection=None):
         args = cli + ['docker-reuse', '--context', context, '--expectation-json', json.dumps(expectation)]
-        return result(args, expected=exit_code, timeout=budget(22))
+        if projection is not None:
+            args.append('--compose-projection-stdin')
+        return result(args, expected=exit_code, timeout=budget(22), input_json=projection)
 
     def expect_candidate(expectation, container_id):
         observed = verify(expectation, 0)
@@ -393,6 +573,21 @@ def verify_reuse(cli, context, project, runner_deadline):
                 or observed['assessment']['reason'] != reason
                 or observed['reason'] != {'code': 'initial_unverified', 'assessment_reason': reason}):
             raise RuntimeError(f'The isolated Compose fixture did not return {status}/{reason} in both observations.')
+
+    def expect_projection(expectation, container_id, baseline, desired, assessment):
+        same = assessment['status'] == 'same'
+        observed = verify(expectation, 0 if same else 5, dict(
+            baseline_config_hash=expectation['config_hash'], baseline=baseline, desired=desired,
+        ))
+        if observed['verified'] != same or observed['compose'] != assessment:
+            raise RuntimeError('The isolated Compose projection did not return the expected assessment.')
+        verified = observed['baseline']
+        if assessment['status'] == 'unknown':
+            if (verified['verified'] or verified['assessment']['reason'] != 'not_healthy'
+                    or verified['reason'] != {'code': 'initial_unverified', 'assessment_reason': 'not_healthy'}):
+                raise RuntimeError('The isolated Compose projection did not preserve the unverified baseline.')
+        elif not verified['verified'] or verified['assessment']['container_id'] != container_id:
+            raise RuntimeError('The isolated Compose projection baseline did not verify the same container ID.')
 
     def confirm_fixture_mount(container_id, image_id, mount):
         confirm_owned(container_id, budget)
@@ -447,7 +642,7 @@ def verify_reuse(cli, context, project, runner_deadline):
         container = start(45, source, named_volume=volume_names[0])
         config_hash = read_config_hash(container)
         expectation = dict(engine_id=inventory['engine_id'], project=tag, service='probe', number=1,
-                           config_hash=config_hash, image_id=source['id'], image_digest=source['digests'][0],
+                           config_hash=config_hash, image_id=source['id'], image_digest=source['digest'],
                            mounts=original_mounts)
         if volume_owner is not None:
             confirm_fixture_mount(container, source['id'], original_mounts[0])
@@ -457,10 +652,25 @@ def verify_reuse(cli, context, project, runner_deadline):
         assert repeated == container and read_config_hash(repeated) == config_hash
         expect_candidate(expectation, container)
 
+        service = dict(image=source['reference'], platform=f'{source["os"]}/{source["architecture"]}',
+                       init=False, read_only=True, volumes=[
+                           dict(type='volume', source=mount['volume'], target=mount['destination'],
+                                read_only=mount['read_only'], volume=dict(nocopy=True))
+                           for mount in original_mounts
+                       ])
+        baseline = dict(service=service, build_inputs_sha256=hashlib.sha256(build_input.read_bytes()).hexdigest())
+        expect_projection(expectation, container, baseline, baseline, dict(status='same'))
+        expect_projection(expectation, container, baseline, dict(baseline, service=dict(service, init=True)),
+                          dict(status='changed', action='recreate'))
+        build_input.write_text(f'FROM {source["reference"]}\nLABEL dsg.fixture.build-input="after"\n')
+        desired = dict(baseline, build_inputs_sha256=hashlib.sha256(build_input.read_bytes()).hexdigest())
+        expect_projection(expectation, container, baseline, desired, dict(status='changed', action='rebuild'))
+
         trigger_unhealthy(container)
-        confirm_owned(container, budget)
         unhealthy = verify(expectation, 5)
         assert not unhealthy['verified'] and unhealthy['assessment']['reason'] == 'not_healthy'
+        expect_projection(expectation, container, baseline, desired, dict(status='unknown', reason='baseline_unverified'))
+        confirm_inventory(budget, fixture_id=container)
 
         # Remove the verified first instance before applying the changed configuration.
         original = container
@@ -484,8 +694,8 @@ def verify_reuse(cli, context, project, runner_deadline):
             mounted = {'kind': 'tmpfs', 'volume': None, 'destination': MOUNT_TARGET, 'read_only': False}
             confirm_fixture_mount(container, replacement['id'], mounted)
             changed = dict(expectation, config_hash=changed_hash, image_id=replacement['id'],
-                           image_digest=replacement_digest)
-            expect_refusal(dict(changed, image_id=source['id'], image_digest=source['digests'][0], mounts=[mounted]),
+                           image_digest=replacement['digest'])
+            expect_refusal(dict(changed, image_id=source['id'], image_digest=source['digest'], mounts=[mounted]),
                            'rejected', 'image_changed')
             expect_refusal(changed, 'rejected', 'mount_changed')
             expect_refusal(dict(changed, mounts=[mounted]), 'unknown', 'unverified_mount')
@@ -505,7 +715,11 @@ def verify_reuse(cli, context, project, runner_deadline):
                 remove_owned(container or current, cleanup_budget)
             if volume_owner is not None:
                 confirm_unused_volumes(cleanup_budget)
+    confirm_inventory(budget)
     print('Isolated Compose reuse: repeated up retained one container; health and configuration changes were rejected.')
+    print('Isolated Compose projection: same, changed/recreate, changed/rebuild and unknown/baseline_unverified passed.')
+    counts = ', '.join(f'{key}={len(inventory[key])}' for key in ('containers', 'images', 'volumes', 'duplicates'))
+    print(f'Isolated Compose inventory before and after fixture cleanup matched by identity: {counts}.')
     if replacement is not None:
         print('Isolated Compose image and mount changes were rejected, and matching tmpfs stayed unverified.')
     if volume_owner is not None:
@@ -518,14 +732,18 @@ if __name__ == '__main__':
     executable = str(Path(sys.argv[1]).resolve())
     context = sys.argv[2] if len(sys.argv) > 2 else None
     lease_only = context == '--macos-lease-only'
+    gap_only = context == '--macos-observation-gap-only'
     with tempfile.TemporaryDirectory(prefix='dsg-managed-test-') as fixture:
         base = Path(fixture)
         project = base / 'fixture'
         project.mkdir()
         global_policy = base / 'policy.json'
         global_policy.write_text('{"host_min_free_gb":0,"project_budget_gb":1}')
-        if lease_only and sys.platform != 'darwin':
+        if (lease_only or gap_only) and sys.platform != 'darwin':
             raise SystemExit('Detached managed lease fixtures require macOS.')
+        if gap_only:
+            print(json.dumps(verify_macos_observation_gap(executable, base, global_policy), sort_keys=True))
+            sys.exit(0)
         if sys.platform == 'darwin' and (lease_only or context is None):
             for crash in (False, True):
                 verify_detached_lease(executable, base, global_policy, crash)
