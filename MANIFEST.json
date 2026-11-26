@@ -147,13 +147,13 @@
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "38df05385e33f447c859841cf063894709835913af2f8dc43cf25c283ee0077f",
-      "bytes": 35086
+      "sha256": "679af5559071d283924f2ab91f21baa555aa1de7c47bc1e1b9fa8f80ad40e99d",
+      "bytes": 35877
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "7eaa0e775465e414d9ea9cb5182424186b55f00c3eef5e0c5e5412b7b8bbb640",
-      "bytes": 68932
+      "sha256": "b074cf4e28e695404b69979676b88d03b29075a058d6dbc1deacbed4b0b6cc6e",
+      "bytes": 70059
     },
     {
       "path": "docs/WBS.md",
@@ -327,8 +327,8 @@
     },
     {
       "path": "integrations/buildkit-exact/cache/dsg_native_reclamation_linux_test.go",
-      "sha256": "75236868358e94f872289043150febe43d826736b1e9379b1766480bcfe29fed",
-      "bytes": 16225
+      "sha256": "4edb5f4f1658f1012b72d4a7ada9dbf3e78b182dbc5aca1406807b11aaccd64f",
+      "bytes": 21435
     },
     {
       "path": "integrations/buildkit-exact/cache/dsg_native_recovery_linux_test.go",
@@ -801,6 +801,11 @@
       "bytes": 15209
     },
     {
+      "path": "scripts/check-buildkit-allocation.py",
+      "sha256": "ed3cff2f64542780d0b77ec7ee69313665a75b11f0f17f03fbf8ae36883b3b35",
+      "bytes": 15015
+    },
+    {
       "path": "scripts/check-buildkit-approval-custody.py",
       "sha256": "44cee097ee3ac6ba0c863b557348988ffda10b4e05941a13f7ea5241b0528f7d",
       "bytes": 19390
@@ -929,6 +934,11 @@
       "path": "scripts/release-package.py",
       "sha256": "9ea0e66b725bb09bdde88abe62541c94eba1935675783f5f302c607a74b3dc0b",
       "bytes": 32071
+    },
+    {
+      "path": "scripts/test-buildkit-allocation.py",
+      "sha256": "f864b0f1ceb034bc81612f3ffdeaeff75149a9846bde361229103279bfd5599e",
+      "bytes": 7670
     },
     {
       "path": "scripts/test-buildkit-external-executor.py",
