@@ -9,8 +9,10 @@ import secrets
 import shutil
 import sqlite3
 import subprocess
-from tempfile import TemporaryDirectory
+import sys
+from tempfile import TemporaryDirectory, mkdtemp
 import time
+from zipfile import ZipFile
 
 
 PROJECTS = {
@@ -85,11 +87,32 @@ smoke(process.argv[2]).catch(() => { process.exitCode = 1; });
 '''
 
 
+class ProviderInvocationError(RuntimeError):
+    pass
+
+
 def invoke(command, *, timeout, success=True, env=None):
     result = subprocess.run(command, capture_output=True, text=True, timeout=timeout, env=env)
-    if (result.returncode == 0) != success:
-        raise RuntimeError(f'registered provider fixture returned exit {result.returncode}')
-    return json.loads(result.stdout)['result']
+    try:
+        report = json.loads(result.stdout).get('result')
+    except (json.JSONDecodeError, AttributeError):
+        report = None
+    if not isinstance(report, dict):
+        report = {}
+    reason = report.get('reason_code')
+    if (result.returncode == 0) != success or reason == 'RUN_CONTROL_UNVERIFIED' or not report:
+        detail = f'registered provider fixture returned exit {result.returncode}'
+        if reason in ('INSUFFICIENT_SPACE', 'MEASUREMENT_INCOMPLETE'):
+            detail += f' ({reason})'
+        if reason in ('RUN_COMPLETED', 'RUN_FAILED', 'RUN_TIMED_OUT', 'RUN_INTERRUPTED',
+                      'RUN_CONTROL_UNVERIFIED'):
+            run = report.get('run')
+            child_exit = run.get('exit_code') if isinstance(run, dict) else None
+            released = report.get('lease_released')
+            detail += (f' ({reason}; child exit_code={json.dumps(child_exit if type(child_exit) is int else None)}'
+                       f'; lease_released={json.dumps(released if isinstance(released, bool) else None)})')
+        raise ProviderInvocationError(detail)
+    return report
 
 
 def prove_next(base, state, executable, modules):
@@ -181,27 +204,76 @@ def prove_next(base, state, executable, modules):
           flush=True)
 
 
-def prove_playwright(base, state, executable, modules):
+def assert_browser_trace(path):
+    with ZipFile(path) as trace:
+        for member in trace.infolist():
+            if not member.filename.endswith('-trace.trace'):
+                continue
+            assert member.file_size <= 1024 * 1024, 'Browser trace exceeded the fixture limit'
+            with trace.open(member) as events:
+                records = [json.loads(line) for line in events]
+            clicks = {entry['callId'] for entry in records
+                      if entry.get('type') == 'before' and entry.get('method') == 'click'}
+            if any(entry.get('type') == 'after' and entry.get('callId') in clicks
+                   and not entry.get('error') for entry in records):
+                return
+    raise AssertionError('Playwright browser trace lacks a completed click')
+
+
+def write_playwright_fixture(test, browser, *, fail=False, expected_failure=False):
+    expected = 3 if fail else 2
+    mark_failure = 'test.fail();' if expected_failure else ''
+    if browser:
+        body = f'''async ({{ page }}) => {{
+            let requests = 0;
+            page.on('request', () => {{ requests += 1; }});
+            await page.setContent(`<button onclick="document.querySelector('output').textContent = '2'">Run</button><output>0</output>`);
+            const output = page.locator('output');
+            expect(await output.textContent()).toBe('0');
+            await page.getByRole('button', {{ name: 'Run' }}).click();
+            const observed = await output.textContent();
+            expect(observed).toBe('2');
+            expect(requests).toBe(0);
+            {mark_failure}
+            expect(observed).toBe('{expected}');
+        }}'''
+    else:
+        body = f"async () => {{ {mark_failure} await test.step('check', () => expect(2).toBe({expected})); }}"
+    test.write_text("const {test, expect} = require('@playwright/test');\n"
+                    f"test('synthetic', {body});\n", encoding='utf-8')
+
+
+def prove_playwright(base, state, executable, modules, browser=None):
     root = base / 'playwright'
     root.mkdir()
+    cli = [str(executable), '--root', str(root), '--state-dir', str(state), '--json']
+    if browser:
+        if shutil.disk_usage(base).free < 2 * (1 << 30):
+            raise RuntimeError('Chromium verification requires at least 2 GiB of free fixture storage.')
+        policy = base / 'policy.json'
+        policy.write_text('{"host_min_free_gb":1,"project_budget_gb":1}', encoding='utf-8')
+        cli.extend(['--global-policy', str(policy)])
     shutil.copytree(modules, root / 'node_modules')
     prior = root / 'test-results' / 'keep.txt'
     prior.parent.mkdir()
     prior.write_text('keep', encoding='utf-8')
+    if browser:
+        config = {
+            'timeout': 12000,
+            'use': {'browserName': 'chromium', 'headless': True, 'offline': True,
+                    'launchOptions': {'executablePath': str(browser),
+                                      'args': ['--disable-background-networking']}},
+        }
+        (root / 'playwright.config.cjs').write_text(f'module.exports = {json.dumps(config)};\n',
+                                                  encoding='utf-8')
     test = root / 'fixture.spec.js'
-    cli = [str(executable), '--root', str(root), '--state-dir', str(state), '--json']
-    invoke(cli + ['init'], timeout=10)
+    project = invoke(cli + ['init'], timeout=10)['project']
     command = cli + ['exec', '--provider', 'playwright', '--timeout', '20']
     outputs = set()
-    retained = []
-    for expected in (2, 3):
-        test.write_text(
-            "const {test, expect} = require('@playwright/test');\n"
-            f"test('synthetic', async () => {{ await test.step('check', () => expect(2).toBe({expected})); }});\n",
-            encoding='utf-8',
-        )
-        report = invoke(command + ['--', 'test'], timeout=25, success=expected == 2)
+
+    def verify_trace(report, *, success):
         assert report['lease_released'] and report['workers'] == 1
+        assert report['run']['outcome'] == ('success' if success else 'failure')
         output = Path(report['evidence_path'])
         assert not output.is_absolute() and len(output.parts) == 2 and output.parts[1] == 'output'
         resolved = (state / output).resolve(strict=True)
@@ -209,30 +281,55 @@ def prove_playwright(base, state, executable, modules):
         outputs.add(resolved)
         traces = list(resolved.glob('*/trace.zip'))
         assert len(traces) == 1 and traces[0].is_file() and traces[0].stat().st_size > 0
-        retained.extend(traces)
+        if browser:
+            assert_browser_trace(traces[0])
         assert prior.read_text(encoding='utf-8') == 'keep'
-    print('Playwright: native success and failure traces retained in separate run folders.', flush=True)
+        return traces[0]
+
+    retained = []
+    for success in (True, False):
+        write_playwright_fixture(test, browser, fail=not success)
+        report = invoke(command + ['--', 'test'], timeout=25, success=success)
+        retained.append(verify_trace(report, success=success))
+    print('Playwright: success and failure traces retained in separate run folders.', flush=True)
 
     ttl = command + ['--trace-ttl-seconds', '1', '--', 'test']
-    test.write_text("const {test} = require('@playwright/test'); test('passed', () => {});\n")
+    write_playwright_fixture(test, browser)
     passed = invoke(ttl, timeout=25)
     assert passed['trace_ttl_eligible'] and passed['trace_retention']['registered'] == 1
-    generated = list((state / passed['evidence_path']).glob('*/trace.zip'))
-    assert len(generated) == 1 and generated[0].is_file()
+    generated = verify_trace(passed, success=True)
     time.sleep(1.1)
-    test.write_text("const {test, expect} = require('@playwright/test');\n"
-                    "test('expected failure', () => {test.fail(); expect(2).toBe(3);});\n")
+    write_playwright_fixture(test, browser, fail=True, expected_failure=True)
     expected_failure = invoke(ttl, timeout=25)
     assert expected_failure['trace_ttl_eligible'] is False
     assert expected_failure['trace_retention']['sweep']['removed'] == 1
-    assert not generated[0].exists() and all(path.is_file() for path in retained)
-    assert len(list((state / expected_failure['evidence_path']).glob('*/trace.zip'))) == 1
-    assert prior.read_text(encoding='utf-8') == 'keep'
+    assert not generated.exists() and all(path.is_file() for path in retained)
+    verify_trace(expected_failure, success=True)
     print('Playwright TTL: one expired success trace reclaimed; prior and expected-failure traces preserved.',
           flush=True)
 
+    database = state / 'registry.sqlite3'
+    assert database.is_file() and not database.is_symlink()
+    with closing(sqlite3.connect(database)) as ledger:
+        ledger.execute('PRAGMA query_only=ON')
+        runs = list(ledger.execute('''
+            SELECT audit_event.reason_code, execution_lease.id
+            FROM audit_event JOIN execution_lease ON execution_lease.id = audit_event.lease_id
+            WHERE audit_event.project_id = ? AND execution_lease.project_id = audit_event.project_id
+              AND audit_event.action = 'managed_execution' AND execution_lease.released_at_ms IS NOT NULL
+            ORDER BY audit_event.id
+        ''', (project['id'],)))
+    assert [reason for reason, _ in runs] == ['PROVIDER_PLAYWRIGHT_TEST_SUCCESS',
+                                             'PROVIDER_PLAYWRIGHT_TEST_FAILURE',
+                                             'PROVIDER_PLAYWRIGHT_TEST_SUCCESS',
+                                             'PROVIDER_PLAYWRIGHT_TEST_SUCCESS']
+    assert len({lease_id for _, lease_id in runs}) == 4
+    if browser:
+        print('Playwright Chromium: completed clicks verified in four browser traces; four released leases audited.',
+              flush=True)
 
-def prove(base, executable):
+
+def prove(base, executable, playwright_modules=None, browser=None):
     config = base / 'npm-config'
     config.touch()
     os.environ.update({
@@ -270,9 +367,8 @@ def prove(base, executable):
             assert failed['run']['outcome'] == 'failure' and failed['lease_released']
         if name == 'pnpm':
             assert (root / 'built.txt').read_text(encoding='utf-8') == 'fixture'
-    playwright_modules = os.environ.get('DSG_TEST_PLAYWRIGHT_MODULES')
     if playwright_modules:
-        prove_playwright(base, state, executable, Path(playwright_modules).resolve(strict=True))
+        prove_playwright(base, state, executable, playwright_modules, browser)
     database = state / 'registry.sqlite3'
     assert database.is_file() and not database.is_symlink()
     # The private fixture uses WAL. The SQLite client may need to create its
@@ -285,23 +381,48 @@ def prove(base, executable):
     for name, (task, _) in PROJECTS.items():
         assert (f'PROVIDER_{name.upper()}_{task.upper()}_SUCCESS',) in reasons
     assert ('PROVIDER_NODE_TEST_FAILURE',) in reasons
-    if playwright_modules:
-        assert {('PROVIDER_PLAYWRIGHT_TEST_SUCCESS',), ('PROVIDER_PLAYWRIGHT_TEST_FAILURE',)} <= reasons
     print('Provider execution: success and failure audited with lease references.', flush=True)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('executable', type=Path)
-    parser.add_argument('--next-only', action='store_true')
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--next-only', action='store_true')
+    mode.add_argument('--playwright-only', action='store_true')
     args = parser.parse_args()
     next_modules = os.environ.get('DSG_TEST_NEXT_MODULES')
+    playwright_modules = None if args.next_only else os.environ.get('DSG_TEST_PLAYWRIGHT_MODULES')
+    browser_path = None if args.next_only else os.environ.get('DSG_TEST_PLAYWRIGHT_EXECUTABLE')
     if args.next_only and not next_modules:
         parser.error('--next-only requires DSG_TEST_NEXT_MODULES')
+    if (args.playwright_only or browser_path) and not playwright_modules:
+        parser.error('Playwright verification requires DSG_TEST_PLAYWRIGHT_MODULES')
+    executable = args.executable.resolve(strict=True)
+    modules = Path(playwright_modules).resolve(strict=True) if playwright_modules else None
+    browser = Path(browser_path).resolve(strict=True) if browser_path else None
+    if browser and (not browser.is_file() or not os.access(browser, os.X_OK)):
+        parser.error('DSG_TEST_PLAYWRIGHT_EXECUTABLE must be an executable file')
+    if browser and not args.playwright_only:
+        parser.error('Browser verification requires --playwright-only to isolate and retain evidence')
+    if args.playwright_only:
+        base = Path(mkdtemp(prefix='dsg-pw-')).resolve()
+        try:
+            scratch = base / 'tmp'
+            scratch.mkdir(mode=0o700)
+            os.environ.update(TMPDIR=str(scratch), XDG_CACHE_HOME=str(base / 'cache'),
+                              XDG_CONFIG_HOME=str(base / 'config'))
+            prove_playwright(base, base / 'state', executable, modules, browser)
+        except BaseException as error:
+            print(f'Playwright fixture preserved at {base}', file=sys.stderr, flush=True)
+            if isinstance(error, ProviderInvocationError):
+                raise SystemExit(str(error)) from None
+            raise
+        shutil.rmtree(base)
+        raise SystemExit(0)
     with TemporaryDirectory(prefix='dsg-provider-test-') as fixture:
         base = Path(fixture).resolve()
-        executable = args.executable.resolve(strict=True)
         if not args.next_only:
-            prove(base, executable)
+            prove(base, executable, modules, browser)
         if next_modules:
             prove_next(base, base / 'state', executable, Path(next_modules).resolve(strict=True))
