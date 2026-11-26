@@ -66,7 +66,7 @@
 ## 실제 브라우저 trace 보관
 
 - DSG-04·05 · WBS 3.3 · 선행 3.1. **Ubuntu Parallels 수용 시험 통과.** 단일 worker로 클릭 완료 trace 4개 및 고유 lease 해제 4건을 확인했다. TTL 등록 성공 trace 한 개를 회수했고 실제·기대 실패, 정책 미설정 성공, 프로젝트 기본 출력의 기존 파일을 보존했다. [Ubuntu 실측](../dist/dsg-playwright-browser-retention/UBUNTU-BROWSER-QUALIFICATION.json)
-- **macOS 종단 시험 부분.** 실제 Chromium 클릭 trace는 확인했고 자체 종료 코드는 0이었다. DSG는 세션 관계를 입증하지 못해 코드 5를 반환하고 lease와 증거를 보존했다. 재개 시 실패 회차에서 종료 증거가 분류하지 못한 세션의 계보를 좁히고, 3.2의 이탈 자손 보호와 함께 실제 클릭·TTL·lease 회귀를 검증한다. [macOS 실측](../dist/dsg-playwright-browser-retention/MACOS-BROWSER-DIAGNOSIS.json)
+- **macOS 종단 시험 부분.** 실제 Chromium 클릭 trace는 확인했고 자체 종료 코드는 0이었다. DSG는 세션 관계를 입증하지 못해 코드 5를 반환하고 lease와 증거를 보존했다. 별도로 띄운 독립 세션이 같은 종료 미확인을 재현했다. 진단 빌드는 호스트 활동이 적은 회차에서 실제 클릭·TTL·lease 시험을 통과했고, 기본 호스트 빌드의 결합 수용은 미통과다. macOS Parallels의 같은 비특권 후보 빌드에서 이탈 자손 보호·재획득은 통과했고 Chromium은 코드 5를 반환했다. 재개 시 게스트 종료 판정에서 미분류 세션의 출처와 생존 시간을 확인한 뒤 결합 시험을 재실행한다. [재현과 판정](HANDOFF.md#macos-chromium-종료-증거와-lease-재획득-진단) [macOS 실측](../dist/dsg-playwright-browser-retention/MACOS-BROWSER-DIAGNOSIS.json)
 
 ## 로컬 예상 실제 회수량 검증
 
