@@ -147,13 +147,13 @@
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "a2ec4ac2eab050d2c079f2515b6b3bb19bf64dfb5e17393a7550a9da9c224f39",
-      "bytes": 38601
+      "sha256": "6df96d64f9b17b61e53d365b3f7407aad8500f95d0df95a3a8dbc70817d8224c",
+      "bytes": 38885
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "6cb778ca151235b60db459160a019c4d3709da6561d72581eec15e3890fb330b",
-      "bytes": 76939
+      "sha256": "c6dafaf23465d02def6b5a0f0f56052a5d968742cf7058c18376b0f93baf53ed",
+      "bytes": 77752
     },
     {
       "path": "docs/WBS.md",
@@ -907,8 +907,8 @@
     },
     {
       "path": "scripts/check-enforcement.py",
-      "sha256": "fc1f8ad043c59a6b354c9399af898cf0a06918f9139f454dd0b2f73df34718ce",
-      "bytes": 10702
+      "sha256": "1339986b2be2ad1657f4ee10388552a345b4d45c1cc0a7bf4fb5353d40a098fc",
+      "bytes": 11766
     },
     {
       "path": "scripts/check-foundation-parity.py",
@@ -922,8 +922,8 @@
     },
     {
       "path": "scripts/check-live-enforcement.py",
-      "sha256": "f3941c2bbcab5410ba77f05486f1302b8a37a35d5857d391e81bda34bce9d7d7",
-      "bytes": 6169
+      "sha256": "f39a988f75e0fd130d6ccb3e85650002a364d0c0962e23f01c705a4d1e16d00d",
+      "bytes": 8803
     },
     {
       "path": "scripts/check-managed-execution.py",
