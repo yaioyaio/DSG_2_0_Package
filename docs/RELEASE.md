@@ -2,9 +2,13 @@
 
 로컬 제품의 사용 범위는 프로젝트 사용량·예산 확인, Docker 집계, 정리 미리보기다. 대시보드와 정리 승인 흐름은 분리돼 있다. 플랫폼별 패키지·서비스·서명 확인은 릴리스 근거에 각각 기록한다. [API 명세](API_SPEC.md#로컬-대시보드) · [검증 기록](HANDOFF.md)
 
+## 종료 진단을 반영한 macOS 로컬 후보
+
+macOS ARM64 `0.1.1-rc.1` 후보의 SHA-256은 `69b51455c5c0d326107f60571c11176a870021f6de28f1d5d40e4048e5341756`이다. 임시 설치·진단과 실행 파일 두 개의 매니페스트 해시를 확인했다. 설치본에서 실제 Chromium 클릭 trace 4개, lease 해제 4건, 남은 lease 0건, 만료 성공 trace 회수 1건을 검증했다. 두 이탈 자손 보호 시험과 종료 후 재획득을 통과했고 임시 설치와 성공 시험 폴더를 회수했다. [설치본 근거](../dist/dsg-local-exit-hook-verification/MACOS-CANDIDATE-CHROMIUM.json) · [아카이브](../dist/dsg-local-exit-hook-verification/dsg-0.1.1-rc.1-aarch64-apple-darwin.tar.gz)
+
 ## 로컬 설치본 재검증 (2026-11-27)
 
-현재 Rust 트리 `5685b45`의 macOS ARM64와 Linux ARM64 musl `0.1.1-rc.1` 후보를 만들었다. 플랫폼별로 같은 아카이브의 SHA-256과 설치된 두 프로그램의 매니페스트 해시를 확인했다. Windows의 설치 실측은 아래 `2bccd4b` 기록에 해당한다.
+Rust 트리 `5685b45`에서 macOS ARM64와 Linux ARM64 musl `0.1.1-rc.1` 후보를 만들었다. 플랫폼별로 같은 아카이브의 SHA-256과 설치된 두 프로그램의 매니페스트 해시를 확인했다. Windows의 설치 실측은 아래 `2bccd4b` 기록에 해당한다.
 
 | 대상 | 통과한 항목과 남은 시험 |
 |---|---|

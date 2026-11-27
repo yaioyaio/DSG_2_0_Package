@@ -309,6 +309,7 @@ pub enum AuditAction {
     GcApprove,
     GcApply,
     ManagedExecution,
+    ManagedExecutionDiagnostic,
     ComposeReuse,
 }
 
@@ -323,6 +324,7 @@ impl AuditAction {
             Self::GcApprove => "gc_approve",
             Self::GcApply => "gc_apply",
             Self::ManagedExecution => "managed_execution",
+            Self::ManagedExecutionDiagnostic => "managed_execution_diagnostic",
             Self::ComposeReuse => "compose_reuse",
         }
     }
@@ -1659,6 +1661,42 @@ impl Registry {
         Ok(())
     }
 
+    /// Record both the existing summary and its diagnostic on the same lease.
+    /// Neither event settles the lease or authorizes cleanup.
+    pub fn record_tree_failure(
+        &mut self,
+        lease: &Lease,
+        reason: Option<crate::runner::TreeExitFailure>,
+    ) -> Result<(), RegistryError> {
+        self.validate_lease_owner(lease)?;
+        let now = timestamp()?;
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        insert_event(
+            &tx,
+            Some(lease.project_id),
+            EventReference::Lease(lease.id),
+            AuditAction::ManagedExecution,
+            AuditOutcome::Incomplete,
+            "RUN_PROCESS_TREE_UNKNOWN",
+            now,
+        )?;
+        if let Some(reason) = reason {
+            insert_event(
+                &tx,
+                Some(lease.project_id),
+                EventReference::Lease(lease.id),
+                AuditAction::ManagedExecutionDiagnostic,
+                AuditOutcome::Incomplete,
+                reason.into(),
+                now,
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Call after the process scope has ended, or before any process has started.
     pub fn finish_lease(
         &mut self,
@@ -1750,7 +1788,7 @@ fn mac_processes_gone(
                 return Ok(false);
             }
         }
-        Ok(has_leader && proof.is_none_or(|proof| proof.proves_gone()))
+        Ok(has_leader && proof.is_none_or(|proof| proof.check_exit().is_ok()))
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -2730,6 +2768,45 @@ mod tests {
         registry
             .finish_lease(lease_c, AuditOutcome::Success, "EXECUTION_COMPLETED")
             .unwrap();
+    }
+
+    #[test]
+    fn tree_failure_survives_reopening_with_the_active_lease() {
+        let temp = tempdir().unwrap();
+        let state = temp.path().join("state");
+        let mut registry = Registry::open(&state).unwrap();
+        let [project, _, _] = lease_fixture_projects(temp.path(), &mut registry);
+        let lease = registry
+            .acquire_lease(project, &"a".repeat(64), Duration::from_secs(30), |_| false)
+            .unwrap();
+        let id = lease.id;
+        registry
+            .record_tree_failure(&lease, Some(crate::runner::TreeExitFailure::SessionOrigin))
+            .unwrap();
+        drop(lease);
+        drop(registry);
+        let reopened = Registry::open(&state).unwrap();
+        let reasons = reopened.connection.prepare(
+            "SELECT action, reason_code FROM audit_event JOIN execution_lease ON execution_lease.id = audit_event.lease_id
+             WHERE audit_event.lease_id = ?1 AND audit_event.project_id = ?2 AND released_at_ms IS NULL
+               AND outcome = 'incomplete' ORDER BY audit_event.id",
+        ).unwrap().query_map(params![id, project], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }).unwrap()
+        .collect::<Result<Vec<_>, _>>().unwrap();
+        assert_eq!(
+            reasons
+                .iter()
+                .map(|(action, reason)| (action.as_str(), reason.as_str()))
+                .collect::<Vec<_>>(),
+            [
+                ("managed_execution", "RUN_PROCESS_TREE_UNKNOWN"),
+                (
+                    "managed_execution_diagnostic",
+                    "TREE_SESSION_ORIGIN_UNVERIFIED"
+                ),
+            ],
+        );
     }
 
     #[test]

@@ -40,6 +40,8 @@ Docker 읽기 전용 단계에서는 Docker 명령 대역으로 컨텍스트 고
 
 같은 프로젝트에서 자동 정리 큐를 다시 여는 실행은 lease 만료 전후 모두 `RESOURCE_ACTIVE`로 차단돼야 한다. 만료는 임시 SQLite의 해당 lease 행에서만 재현한다. 두 번째 큐 진입 시 기존 작업이 `preserved` 상태가 되고, 자손이 열린 파일에서 읽은 내용과 경로에 남은 원본이 모두 일치해야 한다. 자손 종료 후에는 같은 프로젝트에서 만료된 lease를 재획득하고 `/usr/bin/true`가 정상 종료·lease 해제를 반환해야 한다. `LEASE_RECLAIMED` 감사 이벤트 1건, 기존 산출물 보존, 시험 프로세스 종료를 확인한다. 변경 전 조기 해제 재현은 별도 실측에 기록돼 있다. [변경 전 macOS 실측](../dist/dsg-macos-compose-lease/LEASE-OBSERVATION.json)
 
+WBS 3.2·3.3의 macOS 종료 미확인 시험은 `run.tree_failure_reason`의 `TREE_*` 사유가 같은 lease의 SQLite `managed_execution_diagnostic`에 기록되고 `RUN_PROCESS_TREE_UNKNOWN` 감사 요약도 함께 보존되는지 검증한다. 자식 명령이 종료 코드 0을 반환한 경우에도 종료 증거가 부족하면 lease, Cargo 산출물, Playwright trace를 보존한다. 첫 호스트 시험의 이전 자료로는 프로세스 그룹, 관측 자손 또는 독립 종료 증거 중 어느 확인에서 실패했는지 복원할 수 없다. [첫 시험 원장 대조](HANDOFF.md#macos-호스트-재실측과-ubuntu-승인-게이트)
+
 등록부 마이그레이션 회귀는 v4의 활성 관리형 lease와 관측 기록을 v5로 옮긴 뒤 종료 증거 없이 만료된 lease가 보존되고, 같은 프로젝트의 재실행이 차단되는지 확인한다. [등록부 회귀](../rust-scaffold/crates/dsg-core/src/registry.rs)
 
 사전에 digest가 있는 공개 fixture 이미지를 보유한 격리 엔진에서 `DSG_TEST_DOCKER_CONTEXT=dockerguard-test DSG_TEST_COMPOSE_FIXTURE=1 sh scripts/test-rust.sh`로 건강한 컨테이너 하나를 확인한다. 반복 `up`의 동일 ID와 추가 컨테이너 0개를 확인한다. 구성 변경 시험에서는 원래 인스턴스를 회수하고 새 인스턴스에서 과거 기대값을 거절한다. 회수 직전에 동일 엔진과 시험 프로젝트·서비스·라벨·전체 컨테이너 ID를 대조한다.
@@ -241,9 +243,13 @@ WBS 1.4·5.1은 전용 Ubuntu Parallels ARM64 Moby에서 합성 이미지 한 �
 
 `sh scripts/test-rust.sh`는 합성 프로젝트의 훅 설치·중복 방지·설정 보존·제거, 허용·거부·잘못된 JSON 응답과 MCP의 읽기 전용 목록·쓰기 거절을 확인한다. 정리 후보를 조회한 뒤 상태 폴더가 생기지 않아야 한다.
 
-macOS에서 실제 CLI를 검증할 때는 `DSG_TEST_AGENT_NATIVE=all`을 설정한다. Claude와 Codex 명령을 `PATH`에 두고 `DSG_TEST_NODE`와 `DSG_TEST_GEMINI_ENTRY`에 Node 실행 파일 및 Gemini CLI 번들의 절대 경로를 지정한다. 단일 CLI 검증은 `all` 대신 `claude`, `codex`, `gemini`를 지정한다. Claude와 Codex는 루프백 대역 응답을, Gemini는 합성 응답 재생을 사용한다. 쓰기와 네트워크를 임시 경계에 제한하고 CLI별로 허용, 정책 거부, 훅 실행 오류에서 대역 명령이 실행됐는지 확인한다.
+macOS의 WBS 4.1·5.1 수용 시험은 `DSG_TEST_AGENT_NATIVE=all sh scripts/test-rust.sh`로 실제 세 CLI와 읽기 전용 `dsgd`를 연결한다. Claude와 Codex 명령을 `PATH`에 두고 `DSG_TEST_NODE`와 `DSG_TEST_GEMINI_ENTRY`에 Node 실행 파일 및 Gemini CLI 번들의 절대 경로를 지정한다. 단일 CLI는 `DSG_TEST_AGENT_NATIVE=<claude|codex|gemini> python3 -IB scripts/check-agent-integration.py <dsg> <dsgd>`로 검증한다. Claude와 Codex는 선택한 합성 provider의 루프백 응답을, Gemini는 합성 응답 재생을 사용한다. Seatbelt는 각 CLI의 연결을 해당 루프백 포트와 읽기 전용 브로커의 임시 Unix 소켓으로 제한한다.
 
-Linux에서는 같은 실제 CLI 시험을 `DSG_TEST_AGENT_LINUX_CONTAINER=1`로 명시한 격리 프로세스에서 수행한다. 실행기는 읽기 전용 루트, 별도 실행 가능한 `/fixture` tmpfs, 비권한 UID와 유효 capability 0, `NoNewPrivs=1`, 루프백 전용 네트워크, 기본 라우트와 표준 Docker 소켓 부재를 확인한다. 이 조건을 입증하지 못하면 CLI 호출 전에 종료한다. Parallels Ubuntu에서는 별도 네트워크·마운트·PID 네임스페이스를 적용한 제한 실행 경로에서 동일 게이트를 실측했다.
+- 정상 조회는 브로커가 HTTP 200을 반환하고 보호된 합성 업스트림에는 읽기 요청만 도착해야 한다.
+- 훅이 정상인 상태에서 보호 명령은 세 CLI 모두 대역 셸 실행 전에 차단해야 하며 업스트림 요청은 0건이어야 한다.
+- 훅 실행 오류 시 Claude는 대역 셸을 실행하지 않아야 한다. Codex와 Gemini에서 무해한 대역 명령이 실행되면 원시 업스트림 직접 접근은 OS 권한 경계에서 거부되고 브로커는 HTTP 403을 반환해야 한다. 세 CLI 모두 업스트림 요청은 0건이어야 한다.
+
+Linux의 실제 CLI 허용·정책 거부·훅 오류 계약 시험은 `DSG_TEST_AGENT_LINUX_CONTAINER=1`로 명시한 격리 프로세스에서 수행한다. 실행기는 읽기 전용 루트, 별도 실행 가능한 `/fixture` tmpfs, 비권한 UID와 유효 capability 0, `NoNewPrivs=1`, 루프백 전용 네트워크, 기본 라우트와 표준 Docker 소켓 부재를 확인한다. 이 조건을 입증하지 못하면 CLI 호출 전에 종료한다. Parallels Ubuntu에서는 별도 네트워크·마운트·PID 네임스페이스를 적용한 제한 실행 경로에서 이 계약을 실측했다.
 
 ## 브로커와 서비스 검증
 

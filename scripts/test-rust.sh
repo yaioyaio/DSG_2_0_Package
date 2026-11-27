@@ -108,8 +108,11 @@ with tempfile.TemporaryDirectory(prefix='dsg-rust-test-') as fixture:
         subprocess.run(['python3', '-IB', '../scripts/check-build-providers.py', str(executable)],
                        timeout=150, check=True)
     subprocess.run(['python3', '../scripts/check-cleanup.py', str(executable)], timeout=65, check=True)
-    subprocess.run(['python3', '../scripts/check-agent-integration.py', str(executable)], timeout=155, check=True)
     daemon = target / 'debug' / ('dsgd.exe' if os.name == 'nt' else 'dsgd')
+    agent_check = ['python3', '../scripts/check-agent-integration.py', str(executable)]
+    if sys.platform == 'darwin' and os.environ.get('DSG_TEST_AGENT_NATIVE'):
+        agent_check.append(str(daemon))
+    subprocess.run(agent_check, timeout=155, check=True)
     subprocess.run(['python3', '../scripts/check-enforcement.py', str(daemon)], timeout=75, check=True)
     if os.environ.get('DSG_TEST_LIVE_ENFORCEMENT') == '1':
         subprocess.run(['python3', '-B', '../scripts/check-live-enforcement.py', str(daemon)],

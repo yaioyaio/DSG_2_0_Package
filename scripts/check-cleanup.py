@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import re
 import signal
 import sqlite3
 import subprocess
@@ -15,11 +16,20 @@ def execute(command, *, expected=0, stdin=None, cwd=None, timeout=12):
     process = subprocess.run(command, input=stdin, capture_output=True, text=True, timeout=timeout, check=False, cwd=cwd)
     if process.returncode != expected:
         code = None
+        detail = ''
         try:
             code = json.loads(process.stderr).get('error', {}).get('code')
         except (ValueError, AttributeError):
             pass
-        raise RuntimeError(f'{Path(command[0]).name} exit {process.returncode}, expected {expected}, application code {code}.')
+        try:
+            failure = json.loads(process.stdout)['result']['run']['tree_failure_reason']
+            if isinstance(failure, str) and re.fullmatch(r'TREE_[A-Z_]{1,64}', failure):
+                detail = f' Exit evidence {failure}.'
+        except (ValueError, KeyError, TypeError):
+            pass
+        raise RuntimeError(
+            f'{Path(command[0]).name} exit {process.returncode}, expected {expected}, application code {code}.{detail}'
+        )
     return process.stdout
 
 

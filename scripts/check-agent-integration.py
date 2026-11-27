@@ -1,11 +1,12 @@
 """Verify protocol wiring and, when selected, run native CLIs against local fixtures."""
 
-from contextlib import closing, contextmanager
+from contextlib import closing, contextmanager, nullcontext
 from http.client import HTTPConnection
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import os
 from pathlib import Path
+import runpy
 import shlex
 import shutil
 import signal
@@ -312,13 +313,97 @@ def require_linux_container():
     print('Linux native agent fixture: isolated loopback and read-only root verified.')
 
 
-def native_case(dsg, root, agent, scenario, *, linux_container=False):
+GUARDED_DOCKER_STUB = r'''
+import json
+from pathlib import Path
+import socket
+import sys
+
+listen, upstream, marker = sys.argv[1:4]
+arguments = sys.argv[4:]
+assert arguments in (['volume', 'ls'], ['volume', 'prune'])
+with socket.socket(socket.AF_UNIX) as raw:
+    raw.settimeout(3)
+    try:
+        raw.connect(upstream)
+    except PermissionError:
+        pass
+    else:
+        raise SystemExit('The protected fixture upstream was accessible')
+read_only = arguments == ['volume', 'ls']
+method, route = ('GET', '/info') if read_only else ('DELETE', '/v1.47/volumes/fixture')
+with socket.socket(socket.AF_UNIX) as bridge:
+    bridge.settimeout(3)
+    bridge.connect(listen)
+    bridge.sendall(f'{method} {route} HTTP/1.1\r\nHost: localhost\r\n\r\n'.encode())
+    with bridge.makefile('rb') as response:
+        status = int(response.readline(128).split()[1])
+Path(marker).write_text(json.dumps({'direct_denied': True, 'broker_status': status}))
+'''
+
+
+@contextmanager
+def guarded_docker(daemon, root):
+    helpers = runpy.run_path(str(Path(__file__).with_name('check-enforcement.py')))
+    docker = shutil.which('docker')
+    if not docker:
+        raise AssertionError('Docker CLI required for the synthetic broker fixture')
+    source = Path(docker).resolve(strict=True)
+    root.mkdir(mode=0o700)
+    docker = root / 'docker'
+    assert source.is_file() and 0 < source.stat().st_size <= 96 << 20
+    shutil.copyfile(source, docker)
+    docker.chmod(0o700)
+    inbound, outbound, config = (root / name for name in ('in', 'out', 'cfg'))
+    for directory in (inbound, outbound, config):
+        directory.mkdir(mode=0o700)
+    listen, upstream = inbound / 'd.sock', outbound / 'u.sock'
+    engine = helpers['Engine'](upstream)
+    engine.start()
+    args = [daemon, '--listen', str(listen), '--upstream', str(upstream),
+            '--docker-executable', str(docker), '--empty-config-dir', str(config),
+            '--engine-id', engine.engine_id, '--allow-uid', str(os.getuid())]
+    try:
+        with helpers['process'](args):
+            helpers['wait_socket'](listen)
+            yield listen, upstream, engine
+        assert not listen.exists() and not list(config.iterdir())
+    finally:
+        engine.stop()
+
+
+def native_sandbox(root, boundary, model_url=None):
+    network = NETWORK_PROFILE
+    if boundary:
+        listen, _, _ = boundary
+        network = ('(deny network-outbound) (allow network-outbound (remote unix-socket (path '
+                   + json.dumps(str(listen)) + ')))')
+        if model_url:
+            model = urlsplit(model_url)
+            assert model.hostname == '127.0.0.1' and model.port
+            network += f' (allow network-outbound (remote ip "localhost:{model.port}"))'
+    profile = ('(version 1) (allow default) ' + network + ' (deny file-write*) '
+               + '(allow file-write* (literal "/dev/null") (subpath '
+               + json.dumps(str(root.resolve())) + '))')
+    return ['/usr/bin/sandbox-exec', '-p', profile]
+
+
+def native_case(dsg, root, agent, scenario, *, linux_container=False, boundary=None):
     root.mkdir()
     home = root / 'home'
     home.mkdir()
     marker = root / 'shell-executed'
     docker = root / 'docker'
-    docker.write_text(f'#!/bin/sh\nprintf fixture > {shlex.quote(str(marker))}\n')
+    if boundary:
+        listen, upstream, engine = boundary
+        before = engine.routes.copy()
+        probe = root / 'protected-broker-probe.py'
+        probe.write_text(GUARDED_DOCKER_STUB)
+        probe_command = shlex.join([sys.executable, '-IB', str(probe), str(listen),
+                                    str(upstream), str(marker)])
+        docker.write_text(f'#!/bin/sh\nexec {probe_command} "$@"\n')
+    else:
+        docker.write_text(f'#!/bin/sh\nprintf fixture > {shlex.quote(str(marker))}\n')
     docker.chmod(0o700)
     deny = scenario == 'deny'
     broken = scenario == 'hook-error'
@@ -337,12 +422,6 @@ def native_case(dsg, root, agent, scenario, *, linux_container=False):
     env = {'HOME': str(home), 'PATH': '/usr/bin:/bin:/usr/sbin:/sbin', 'TMPDIR': str(home),
            'SHELL': '/bin/bash',
            'LANG': 'en_US.UTF-8', 'CI': '1', 'TERM': 'dumb', 'NO_COLOR': '1'}
-    sandbox = []
-    if not linux_container:
-        profile = ('(version 1) (allow default) ' + NETWORK_PROFILE + ' (deny file-write*) '
-                   + '(allow file-write* (literal "/dev/null") (subpath '
-                   + json.dumps(str(root.resolve())) + '))')
-        sandbox = ['/usr/bin/sandbox-exec', '-p', profile]
     if agent == 'gemini':
         node = os.environ['DSG_TEST_NODE']
         entry = os.environ['DSG_TEST_GEMINI_ENTRY']
@@ -366,6 +445,7 @@ def native_case(dsg, root, agent, scenario, *, linux_container=False):
         args = [node, entry, '--fake-responses', str(replay), '--approval-mode', 'yolo',
                 '--model', 'gemini-2.5-flash',
                 '--output-format', 'stream-json', '-p', 'Run the single local fixture tool.']
+        sandbox = [] if linux_container else native_sandbox(root, boundary)
         stdout, stderr = execute(sandbox + args, cwd=root, env=env, timeout=22)
         verified = 'PROTECTED_VOLUME' in (stdout + stderr) if deny else 'Fixture finished.' in stdout
     else:
@@ -388,6 +468,7 @@ def native_case(dsg, root, agent, scenario, *, linux_container=False):
                         '--setting-sources', 'project', '--tools', 'Bash', '--allowedTools', 'Bash',
                         '--verbose', '--output-format', 'stream-json', '--include-hook-events',
                         '--model', 'claude-sonnet-4-6', 'Run the single local fixture tool.']
+            sandbox = [] if linux_container else native_sandbox(root, boundary, address)
             stdout, stderr = execute(sandbox + args, cwd=root, env=env, timeout=22)
         verified = len(exchanges) == 2 and (not deny or b'PROTECTED_VOLUME' in exchanges[-1])
     expected_marker = not (deny or (broken and agent == 'claude'))
@@ -404,10 +485,23 @@ def native_case(dsg, root, agent, scenario, *, linux_container=False):
         raise AssertionError(f'{agent} native {scenario}, rounds={rounds}, '
                              f'marker={marker.exists()}, hook_error={error_marker.exists()}, '
                              f'indicators={found}')
+    if boundary:
+        if expected_marker:
+            expected_status = 200 if scenario == 'allow' else 403
+            assert json.loads(marker.read_text()) == {
+                'direct_denied': True, 'broker_status': expected_status,
+            }, f'{agent} {scenario}: protected socket boundary differed'
+        arrivals = engine.routes - before
+        if scenario == 'allow':
+            assert arrivals[('GET', '/info')] > 0 and all(
+                method in {'GET', 'HEAD'} for method, _ in arrivals)
+        else:
+            assert not arrivals, f'{agent} {scenario}: request reached the protected upstream'
 
 
 if __name__ == '__main__' and os.name == 'posix':
     binary = str(Path(sys.argv[1]).resolve(strict=True))
+    daemon = str(Path(sys.argv[2]).resolve(strict=True)) if len(sys.argv) == 3 else None
     selection = os.environ.get('DSG_TEST_AGENT_NATIVE', '')
     linux_container = (sys.platform == 'linux' and bool(selection)
                        and os.environ.get('DSG_TEST_AGENT_LINUX_CONTAINER') == '1')
@@ -416,13 +510,19 @@ if __name__ == '__main__' and os.name == 'posix':
             raise RuntimeError('Native agent fixture requires macOS or explicit Linux container opt-in')
         if linux_container:
             require_linux_container()
+    if len(sys.argv) > 3 or (daemon and (not selection or sys.platform != 'darwin')):
+        raise RuntimeError('The guarded broker requires a macOS native agent fixture')
     with tempfile.TemporaryDirectory(prefix='dsg-agent-fixtures-',
                                      dir=LINUX_FIXTURE_ROOT if linux_container else None) as scratch:
         fixture = Path(scratch).resolve()
         verify_contracts(binary, fixture)
         if selection:
-            for agent in AGENTS if selection == 'all' else [selection]:
-                for scenario in ('allow', 'deny', 'hook-error'):
-                    native_case(binary, fixture / f'native-{agent}-{scenario}', agent, scenario,
-                                linux_container=linux_container)
-                print(f'Native {agent}: allow, deny and hook-error paths passed.')
+            guarded = guarded_docker(daemon, fixture / 'guard') if daemon else nullcontext(None)
+            with guarded as boundary:
+                for agent in AGENTS if selection == 'all' else [selection]:
+                    for scenario in ('allow', 'deny', 'hook-error'):
+                        native_case(binary, fixture / f'native-{agent}-{scenario}', agent, scenario,
+                                    linux_container=linux_container, boundary=boundary)
+                    print(f'Native {agent}: allow, deny and hook-error paths passed.')
+                    if boundary:
+                        print(f'Native {agent}: direct access denied and upstream writes=0.')
