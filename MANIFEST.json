@@ -37,7 +37,8 @@
     "local_reclaim_measurement": "The installed macOS ARM64 CLI reclaimed one generated 16,777,216-byte Cargo artifact; expected size and independently observed pre-cleanup file allocation agreed. The protected witness was preserved. The host volume delta is observational. Ubuntu Parallels independently measured 8,192 expected payload allocation bytes for a new exact BuildKit fixture before separate approval, with zero mutations.",
     "local_reclaim_witness": "The initial local BuildKit fixture was rejected before apply because its ledger witness was on tmpfs; the exact target stayed read-only and no apply was dispatched. A replacement local Ubuntu ext4 candidate uses a distinct disk-backed witness and has 8,192 expected payload allocation bytes. The replacement requires its own approval.",
     "buildkit_measured_reclaim": "A separately approved exact BuildKit cache was applied once on disk-file-backed ext4 in Ubuntu Parallels. Estimated and independently observed target allocations matched at 8,192 bytes. The guest filesystem allocation rose from 389,120 to 417,792 bytes, yielding -28,672 bytes net reclaimed. Non-target files and the reopened receipt matched, and the fixture was cleaned. The Mac volume delta is observational.",
-    "local_recovery_and_current_arm64_packages": "On Rust tree 13fdb79, current Mac and Parallels Ubuntu and Windows ARM64 packages passed native upgrade, diagnosis, both binaries, read-only dashboard and removal. Live local Docker plan and recheck preserved an existing image without writes; a verified synthetic candidate stayed non-applicable and five exclusive dispatch fixture tests passed. BuildKit measurement accounts for 36,864 additional net bytes outside deleted target files without per-file attribution."
+    "local_recovery_and_current_arm64_packages": "On Rust tree 13fdb79, current Mac and Parallels Ubuntu and Windows ARM64 packages passed native upgrade, diagnosis, both binaries, read-only dashboard and removal. Live local Docker plan and recheck preserved an existing image without writes; a verified synthetic candidate stayed non-applicable and five exclusive dispatch fixture tests passed. That BuildKit trial recorded an additional 36,864 bytes before the later path-level attribution documented in TASK.md.",
+    "local_installation_qualification_5685b45": "Ubuntu ARM64 installed, upgraded, diagnosed, exercised a read-only dashboard and isolated Moby plans, and uninstalled. Actual image application is pending exact target approval. macOS ARM64 host rollback and live WebKit passed. The byte-identical installed CLI in macOS Parallels protected detached children and verified four Chromium click traces, four released leases, and one expired successful trace removed with private fixture permissions. Host process evidence remained incomplete in one Chromium trial."
   },
   "files": [
     {
@@ -127,8 +128,8 @@
     },
     {
       "path": "docs/RELEASE.md",
-      "sha256": "b911984f2f2b059726213473243d77915f3f8e22e203a283803d8fb880e5677f",
-      "bytes": 17462
+      "sha256": "5af37df2a6769745b30b14029d5a5767aa579c370252820187986e28c1664072",
+      "bytes": 19611
     },
     {
       "path": "docs/REQUIREMENTS.md",
@@ -147,13 +148,13 @@
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "f36dfec0566ff3ccedd2ea5f73376435e859a5f5e8bb366cfa7dc89334d78c82",
-      "bytes": 39930
+      "sha256": "6fcadea1ade8e11b603b907eeb81c7d4709a94895a38f1a0314203acd6ab0638",
+      "bytes": 43628
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "a09f573585e5ed1a7285f2bae77d8ade05765329800ddd55b0e240795b01ffa9",
-      "bytes": 80133
+      "sha256": "d81609053eb6c22555f3c3b30b2dedfd29e9e0c0fa89749eb9a0aca26dbb613e",
+      "bytes": 81028
     },
     {
       "path": "docs/WBS.md",
