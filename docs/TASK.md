@@ -33,7 +33,14 @@
 | 1.4·5.1·6.1 | 현재 Linux ARM64 설치본 → 이전 후보 교체, 독립 대시보드, 전용 Moby의 계획·권한·적용·복구 | **설치·계획·승인 전 대조 통과.** Rust 트리 `5685b45`의 설치본은 별도 합성 이미지 두 건의 계획과 예상 전용 레이어 할당량 각 8,192 B, 비대상 보존, 실행자 계획 거부를 검증했다. 승인 전 대조에서 두 대상의 전체 ID, 소유권 증거, 엔진과 보호 피어를 확인했고 승인된 삭제 호출과 실제 삭제 호출은 각각 0건이었다. 같은 패키지의 단일 적용·응답 유실 복구는 해당 대상의 승인 대기다. [현재 설치본](RELEASE.md#로컬-설치본-재검증-2026-11-27) · [Ubuntu 승인 전 대조](../dist/dsg-local-installation-5685b45/UBUNTU-PREAPPROVAL-RECHECK.json) |
 | 3.2·3.3·6.1 | 현재 macOS ARM64 설치본 → 교체·롤백·제거, Docker 대시보드, 관리형 Chromium과 trace 회수 | **호스트와 Parallels 결합 시험 통과.** Rust 트리 `5685b45`의 호스트 설치본은 수명 주기·대시보드 시험을 통과했고 Docker 쓰기를 거절했다. 호스트 재실측과 게스트에서 SHA-256이 같은 설치 바이너리로 관측된 자손과 관측에서 빠진 자손의 lease 보호·재획득, 클릭 trace 4개, lease 해제 4건, 만료 성공 trace 1개 회수를 각각 확인했다. 첫 호스트 시험의 종료 증거 부족 원인은 사후 집계에서 확정되지 않았다. [현재 설치본](RELEASE.md#로컬-설치본-재검증-2026-11-27) · [호스트 재실측](../dist/dsg-local-runtime-5685b45/MACOS-HOST-LEASE-RECHECK.json) |
 
+## macOS 종료 진단과 로컬 Docker 통제
+
+| WBS | 산출물 | 실측 판정 |
+|---|---|---|
+| 3.2·3.3 | 종료 미확인 조건의 고정 코드와 같은 lease의 SQLite 감사, 불안정한 세대 스캔의 제한 재시도 | **통과.** 관측 공백 시험에서 `TREE_SESSION_ORIGIN_UNVERIFIED`가 응답과 감사에 일치했다. 자손이 활동 중일 때 lease와 산출물을 보존했고, 종료 뒤 재획득했다. 최신 macOS 설치본의 실제 Chromium 클릭 4건, lease 해제 4건, 만료 성공 trace 회수 1건을 확인했다. [설치본 실측](../dist/dsg-local-exit-hook-verification/MACOS-CANDIDATE-CHROMIUM.json) |
+| 4.1·5.1 | 실제 CLI와 읽기 전용 브로커를 연결한 macOS 권한 경계 | **확인한 로컬 경계에서 통과.** 세 CLI의 정상 조회, 정상 훅 차단, 훅 실패를 각각 실행했다. 오류 시 Claude는 셸을 차단했다. Codex와 Gemini의 시험용 셸은 보호 소켓에 직접 연결하지 못했고 브로커 HTTP 403을 받았다. 업스트림 쓰기는 0건이었다. [통합 시험](../dist/dsg-local-exit-hook-verification/RUST-AND-NATIVE-HOOKS-FINAL.json) |
+
 ## 수용 기준 확정이 남은 항목
 
-- 로컬 Docker 강제 통제는 OS 권한 경계에서 확인한다. 현재 훅의 오류 동작은 세 CLI에서 검증했다. 세 CLI 모두 훅 실패 시 실행을 차단한다는 보증은 사용자가 수용 범위와 검증 대상을 확정한 뒤 별도 검증한다. [에이전트 연동 기준](OPERATIONS.md#에이전트-연동-운영)
+- 임의 셸 실행에 대해 세 CLI 모두 훅 실패 시 차단을 보증하는 범위는 별도 수용 기준이 필요하다. 로컬 Docker 쓰기 통제의 macOS 판정은 위 권한 경계의 실측에 근거한다. [에이전트 연동 기준](OPERATIONS.md#에이전트-연동-운영)
 - 실행 계획 7단계의 승인형 MCP와 서명·격리를 지원하는 Provider SDK(REQ-013)는 사용 사례 확정 후 개발한다. 3.1의 내장 Provider 시험은 등록된 정형 작업을 검증했다. SDK 검증은 별도 확장 과제로 추적한다. [요구사항](REQUIREMENTS.md) · [실행 계획](draft/IMPLEMENTATION-PLAN.md#단계별-산출물과-통과-기준)

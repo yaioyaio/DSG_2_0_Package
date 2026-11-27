@@ -24,12 +24,59 @@ pub enum RunOutcome {
     ControlFailure,
 }
 
+/// First unsatisfied exit check. Only fixed codes can enter JSON and the lease audit.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(into = "&'static str")]
+pub enum TreeExitFailure {
+    LeaderWait,
+    ProcessGroup,
+    Observation,
+    Descendants,
+    StartProof,
+    BootIdentity,
+    Marker,
+    ProcessList,
+    Deadline,
+    Identity,
+    LeaderPresent,
+    Generation,
+    Session,
+    VersionBound,
+    Version,
+    SessionOrigin,
+}
+
+impl From<TreeExitFailure> for &'static str {
+    fn from(reason: TreeExitFailure) -> Self {
+        match reason {
+            TreeExitFailure::LeaderWait => "TREE_LEADER_WAIT_UNVERIFIED",
+            TreeExitFailure::ProcessGroup => "TREE_PROCESS_GROUP_UNVERIFIED",
+            TreeExitFailure::Observation => "TREE_OBSERVATION_INCOMPLETE",
+            TreeExitFailure::Descendants => "TREE_OBSERVED_DESCENDANTS_UNVERIFIED",
+            TreeExitFailure::StartProof => "TREE_START_PROOF_UNAVAILABLE",
+            TreeExitFailure::BootIdentity => "TREE_BOOT_IDENTITY_UNVERIFIED",
+            TreeExitFailure::Marker => "TREE_SCAN_MARKER_UNVERIFIED",
+            TreeExitFailure::ProcessList => "TREE_SCAN_PROCESS_LIST_UNVERIFIED",
+            TreeExitFailure::Deadline => "TREE_SCAN_DEADLINE_REACHED",
+            TreeExitFailure::Identity => "TREE_SCAN_IDENTITY_UNVERIFIED",
+            TreeExitFailure::LeaderPresent => "TREE_SCAN_LEADER_PRESENT",
+            TreeExitFailure::Generation => "TREE_SCAN_GENERATION_UNSTABLE",
+            TreeExitFailure::Session => "TREE_SCAN_SESSION_UNVERIFIED",
+            TreeExitFailure::VersionBound => "TREE_LINEAGE_VERSION_BOUND_UNVERIFIED",
+            TreeExitFailure::Version => "TREE_LINEAGE_VERSION_UNVERIFIED",
+            TreeExitFailure::SessionOrigin => "TREE_SESSION_ORIGIN_UNVERIFIED",
+        }
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct RunResult {
     pub outcome: RunOutcome,
     pub exit_code: Option<i32>,
     /// Termination of the managed process tree has sufficient platform evidence.
     pub tree_confirmed_gone: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tree_failure_reason: Option<TreeExitFailure>,
 }
 
 pub fn run_command(
@@ -351,6 +398,7 @@ mod posix {
                 outcome: RunOutcome::Interrupted,
                 exit_code: None,
                 tree_confirmed_gone: true,
+                tree_failure_reason: None,
             });
         }
         require_waitable_children()?;
@@ -385,11 +433,25 @@ mod posix {
                 notify,
             )
         }));
-        let (status, tree_confirmed_gone) = cleanup(child, !matches!(monitored, Ok(Ok(None))));
+        let (status, group_gone) = cleanup(child, !matches!(monitored, Ok(Ok(None))));
+        let exit_check = if status.is_none() {
+            Err(TreeExitFailure::LeaderWait)
+        } else if !group_gone {
+            Err(TreeExitFailure::ProcessGroup)
+        } else {
+            Ok(())
+        };
         #[cfg(target_os = "macos")]
-        let tree_confirmed_gone = tree_confirmed_gone
-            && descendants.gone()
-            && exit_proof.is_some_and(|p| p.proves_gone());
+        let exit_check = exit_check.and_then(|()| {
+            if !descendants.complete {
+                return Err(TreeExitFailure::Observation);
+            }
+            if !descendants.gone() {
+                return Err(TreeExitFailure::Descendants);
+            }
+            exit_proof.ok_or(TreeExitFailure::StartProof)?.check_exit()
+        });
+        let tree_confirmed_gone = exit_check.is_ok();
         let outcome = match monitored {
             Ok(Ok(Some(reason))) => reason,
             Ok(Ok(None)) => match status {
@@ -404,6 +466,7 @@ mod posix {
             outcome,
             exit_code: status.and_then(|s| s.code()),
             tree_confirmed_gone,
+            tree_failure_reason: exit_check.err(),
         })
     }
 }

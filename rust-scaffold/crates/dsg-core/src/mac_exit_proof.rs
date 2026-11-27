@@ -1,4 +1,5 @@
 //! Exit evidence for a managed child which called `setsid` before running user code.
+use crate::runner::TreeExitFailure;
 use std::collections::HashSet;
 use std::ffi::CStr;
 use std::io;
@@ -9,6 +10,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const PROOF_BUDGET: Duration = Duration::from_millis(150);
+const SCAN_ATTEMPTS: u8 = 8;
+const SCAN_RETRY_DELAY: Duration = Duration::from_millis(8);
 
 #[derive(Clone, Debug)]
 pub(crate) struct MacExitProof {
@@ -201,6 +204,32 @@ fn version_upper_bound(closing_generation: u64, deadline: Instant) -> Option<u64
     (id > 100 && bound < (1u64 << 32)).then_some(bound)
 }
 
+enum ScanFailure {
+    Retry(TreeExitFailure),
+    Final(TreeExitFailure),
+}
+
+fn verify_scan(
+    deadline: Instant,
+    mut scan: impl FnMut() -> Result<(), ScanFailure>,
+) -> Result<(), TreeExitFailure> {
+    let mut attempts = SCAN_ATTEMPTS;
+    loop {
+        attempts -= 1;
+        let reason = match scan() {
+            Ok(()) => return Ok(()),
+            Err(ScanFailure::Final(reason)) => return Err(reason),
+            Err(ScanFailure::Retry(reason)) => reason,
+        };
+        if attempts == 0 || deadline.saturating_duration_since(Instant::now()) <= SCAN_RETRY_DELAY {
+            return Err(reason);
+        }
+        // Give unrelated short-lived processes a chance to finish before taking
+        // a fresh snapshot. Every successful scan still needs adjacent markers.
+        thread::sleep(SCAN_RETRY_DELAY);
+    }
+}
+
 impl MacExitProof {
     /// The caller owns the unreaped managed child, including when it has
     /// already exited. Its PID cannot be assigned to another process yet.
@@ -228,47 +257,50 @@ impl MacExitProof {
         self.valid() && boot_id().is_ok_and(|boot| !self.boot.eq_ignore_ascii_case(&boot))
     }
 
-    pub(crate) fn proves_gone(&self) -> bool {
+    pub(crate) fn check_exit(&self) -> Result<(), TreeExitFailure> {
         if !self.valid() {
-            return false;
+            return Err(TreeExitFailure::StartProof);
         }
-        let Ok(boot) = boot_id() else {
-            return false;
-        };
+        let boot = boot_id().map_err(|_| TreeExitFailure::BootIdentity)?;
         if !self.boot.eq_ignore_ascii_case(&boot) {
-            return true;
+            return Ok(());
         }
         let deadline = Instant::now() + PROOF_BUDGET;
-        for _ in 0..3 {
-            match self.scan(deadline) {
-                Ok(answer) => return answer,
-                Err(_) => continue,
-            }
-        }
-        false
+        verify_scan(deadline, || self.scan(deadline))
     }
 
-    fn scan(&self, deadline: Instant) -> io::Result<bool> {
-        let first = marker(deadline)?;
+    fn scan(&self, deadline: Instant) -> Result<(), ScanFailure> {
+        use ScanFailure::{Final, Retry};
+        use TreeExitFailure::*;
+        let read_marker = || {
+            marker(deadline).map_err(|_| {
+                Retry(if Instant::now() >= deadline {
+                    Deadline
+                } else {
+                    Marker
+                })
+            })
+        };
+        let first = read_marker()?;
         let root = self.generation as u64;
         if first <= root {
-            return Err(invalid());
+            return Err(Retry(Generation));
         }
         let mut older_sessions = HashSet::new();
         let mut newer_sessions = HashSet::new();
         let mut outside_versions = HashSet::new();
         let mut newer = Vec::new();
-        for pid in live_pids()? {
+        for pid in live_pids().map_err(|_| Retry(ProcessList))? {
             if Instant::now() >= deadline {
-                return Err(invalid());
+                return Err(Retry(Deadline));
             }
-            let info = identifier(pid)?;
+            let info = identifier(pid).map_err(|_| Retry(Identity))?;
             let gen = info.generation;
             if gen == root {
-                return Ok(false);
+                return Err(Final(LeaderPresent));
             }
             if gen >= first {
-                return Err(invalid());
+                return Err(Retry(Generation));
             }
             let sid = unsafe { libc::getsid(pid) };
             if gen < root {
@@ -282,38 +314,38 @@ impl MacExitProof {
                 newer_sessions.insert(sid);
                 newer.push((gen, sid, info.version, info.original_parent_version));
             } else {
-                return Err(invalid());
+                return Err(Retry(Session));
             }
         }
         // Fork generations advance once per new PID and survive exec. With
         // adjacent markers, neither a PID nor a session ID could be recycled
         // during the scan; no descendant could relay work to a later fork.
-        let closing = marker(deadline)?;
+        let closing = read_marker()?;
         if closing != first + 1 {
-            return Err(invalid());
+            return Err(Retry(Generation));
         }
         // A descendant inherits our dedicated session or creates a fresh one.
         // It can never join a session containing a pre-existing process.
         if newer_sessions.is_subset(&older_sessions) {
-            return Ok(true);
+            return Ok(());
         }
         let Some(bound) = version_upper_bound(closing, deadline) else {
-            return Ok(false);
+            return Err(Final(VersionBound));
         };
         if outside_versions
             .iter()
             .any(|&version| u64::from(version) > bound)
         {
-            return Ok(false);
+            return Err(Final(Version));
         }
         let mut outside_sessions = older_sessions;
         newer.sort_unstable();
         for (_, sid, version, parent_version) in newer {
             if Instant::now() >= deadline {
-                return Err(invalid());
+                return Err(Retry(Deadline));
             }
             if version == 0 || u64::from(version) > bound || parent_version >= version {
-                return Ok(false);
+                return Err(Final(Version));
             }
             // Fork versions start at zero and increase at least once per
             // generation. The managed root could already have exec'd again
@@ -326,6 +358,64 @@ impl MacExitProof {
                 outside_versions.insert(version);
             }
         }
-        Ok(newer_sessions.is_subset(&outside_sessions))
+        if newer_sessions.is_subset(&outside_sessions) {
+            Ok(())
+        } else {
+            Err(Final(SessionOrigin))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invalid_start_identity_returns_only_the_fixed_reason() {
+        let proof = MacExitProof {
+            boot: String::new(),
+            generation: 0,
+            version: 0,
+        };
+        let reason = proof.check_exit().unwrap_err();
+        assert_eq!(reason, TreeExitFailure::StartProof);
+        assert_eq!(
+            serde_json::to_value(reason).unwrap(),
+            "TREE_START_PROOF_UNAVAILABLE"
+        );
+    }
+
+    #[test]
+    fn transient_generation_changes_get_another_bounded_scan() {
+        let mut calls = 0;
+        let result = verify_scan(Instant::now() + Duration::from_secs(1), || {
+            calls += 1;
+            if calls <= 3 {
+                Err(ScanFailure::Retry(TreeExitFailure::Generation))
+            } else {
+                Ok(())
+            }
+        });
+        assert_eq!((result, calls), (Ok(()), 4));
+    }
+
+    #[test]
+    fn an_unverified_session_origin_is_not_retried() {
+        let mut calls = 0;
+        let result = verify_scan(Instant::now() + Duration::from_secs(1), || {
+            calls += 1;
+            Err(ScanFailure::Final(TreeExitFailure::SessionOrigin))
+        });
+        assert_eq!((result, calls), (Err(TreeExitFailure::SessionOrigin), 1));
+    }
+
+    #[test]
+    fn exhausted_time_preserves_the_latest_failure() {
+        let mut calls = 0;
+        let result = verify_scan(Instant::now(), || {
+            calls += 1;
+            Err(ScanFailure::Retry(TreeExitFailure::Generation))
+        });
+        assert_eq!((result, calls), (Err(TreeExitFailure::Generation), 1));
     }
 }

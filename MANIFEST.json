@@ -38,7 +38,8 @@
     "local_reclaim_witness": "The initial local BuildKit fixture was rejected before apply because its ledger witness was on tmpfs; the exact target stayed read-only and no apply was dispatched. A replacement local Ubuntu ext4 candidate uses a distinct disk-backed witness and has 8,192 expected payload allocation bytes. The replacement requires its own approval.",
     "buildkit_measured_reclaim": "A separately approved exact BuildKit cache was applied once on disk-file-backed ext4 in Ubuntu Parallels. Estimated and independently observed target allocations matched at 8,192 bytes. The guest filesystem allocation rose from 389,120 to 417,792 bytes, yielding -28,672 bytes net reclaimed. Non-target files and the reopened receipt matched, and the fixture was cleaned. The Mac volume delta is observational.",
     "local_recovery_and_current_arm64_packages": "On Rust tree 13fdb79, current Mac and Parallels Ubuntu and Windows ARM64 packages passed native upgrade, diagnosis, both binaries, read-only dashboard and removal. Live local Docker plan and recheck preserved an existing image without writes; a verified synthetic candidate stayed non-applicable and five exclusive dispatch fixture tests passed. That BuildKit trial recorded an additional 36,864 bytes before the later path-level attribution documented in TASK.md.",
-    "local_installation_qualification_5685b45": "Ubuntu ARM64 passed installation, upgrade, diagnosis, read-only dashboard, isolated Moby plans, and uninstall. Both pending deletion subjects and package/engine hashes were rechecked. Actual image application awaits target approval. The byte-identical macOS host and macOS Parallels installations passed both detached process protections, four Chromium click traces, four released leases, and expiration of one success trace. The initial host trial's final exit-proof condition remains undetermined."
+    "local_installation_qualification_5685b45": "Ubuntu ARM64 passed installation, upgrade, diagnosis, read-only dashboard, isolated Moby plans, and uninstall. Both pending deletion subjects and package/engine hashes were rechecked. Actual image application awaits target approval. The byte-identical macOS host and macOS Parallels installations passed both detached process protections, four Chromium click traces, four released leases, and expiration of one success trace. The initial host trial's final exit-proof condition remains undetermined.",
+    "macos_exit_diagnostics_and_hook_boundary": "126 Rust tests and the macOS integration suite passed. The candidate installation produced four Chromium click traces, four released leases, no held lease, and one expired success trace removed. Detached process protection and durable exit diagnostics passed. The nine native Claude, Codex and Gemini cases yielded zero writes to the protected synthetic upstream."
   },
   "files": [
     {
@@ -88,8 +89,8 @@
     },
     {
       "path": "docs/API_SPEC.md",
-      "sha256": "cfba511f9d28e30167e3d9f4a453021b95417c36c52cbe37f0d111ad7120fb24",
-      "bytes": 48356
+      "sha256": "d2f4525712247921b37e220d459db9e64f1616d1421da964a0cfb94115ec7bdc",
+      "bytes": 48900
     },
     {
       "path": "docs/ARCHITECTURE.md",
@@ -103,8 +104,8 @@
     },
     {
       "path": "docs/OPERATIONS.md",
-      "sha256": "34f2cfc29b37b0d75b2819d5a090effbc8526bef630ede3bf475fb33a71fe94f",
-      "bytes": 20676
+      "sha256": "728dff19503fcbd73e9f3a9877335905c02a87eebf8ebf6e84fb402ccd408eed",
+      "bytes": 21930
     },
     {
       "path": "docs/PLAN.md",
@@ -128,8 +129,8 @@
     },
     {
       "path": "docs/RELEASE.md",
-      "sha256": "7f5ace0ac208d682d395bf79de9382ea777ef71059ca8792c08b12ac869914a4",
-      "bytes": 20026
+      "sha256": "c0801fbe1ad75e36a0501ebf3166ab4018fac11eb844ecd8e0600978e469bdfc",
+      "bytes": 20743
     },
     {
       "path": "docs/REQUIREMENTS.md",
@@ -148,13 +149,13 @@
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "3352e17d6589351ae8738686de8682e4c307d648ac86f6ca7ebaa5bed79525b2",
-      "bytes": 44189
+      "sha256": "58a3941f1576c01b06d45610b911d50a297874ef21343ca3205917b15e0e4d9f",
+      "bytes": 45285
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "d81609053eb6c22555f3c3b30b2dedfd29e9e0c0fa89749eb9a0aca26dbb613e",
-      "bytes": 81028
+      "sha256": "eecd1f0632600de350eed58d6507c1c467da9f112b8f2c90a478957d6f742af3",
+      "bytes": 82421
     },
     {
       "path": "docs/WBS.md",
@@ -618,8 +619,8 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/src/execution.rs",
-      "sha256": "ac43fc85e04432d09ae6ae6b9b7378f4b3a263a8f8fcf6a42415a28862516844",
-      "bytes": 22323
+      "sha256": "5a5c161558e7d58bc0624eaad3b6063cf90a6caed8551ce101bb42dec260dd94",
+      "bytes": 22184
     },
     {
       "path": "rust-scaffold/crates/dsg-cli/src/hook_install.rs",
@@ -788,8 +789,8 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/mac_exit_proof.rs",
-      "sha256": "21c2227dd72a89953480935232f3d1d174804edcb6f2e2d2af443dd8e0d2f552",
-      "bytes": 11811
+      "sha256": "cb8cc6e2dcdeb1e401cf7ea86eddccf9d5440430a5576cec8db2278f61e3f617",
+      "bytes": 14881
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/mac_process.rs",
@@ -803,8 +804,8 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/registry.rs",
-      "sha256": "0349fb7c1c6951a08ab9a5c456482e131882eb97aa9714c73be6b420005e7553",
-      "bytes": 117151
+      "sha256": "13ce277d14cb5d24883647fef505cf186c16bcbb64e62bce72a677de7340e6b6",
+      "bytes": 120125
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/reuse.rs",
@@ -813,8 +814,8 @@
     },
     {
       "path": "rust-scaffold/crates/dsg-core/src/runner.rs",
-      "sha256": "ee0c64912e7c99e76e4c611a287dea43634955c45dc9c193deb7266d2b074721",
-      "bytes": 19827
+      "sha256": "429ef000c5bc20aa89fbb85d432631abcf51cbb92af4dccd221a2ab8e7094bf0",
+      "bytes": 22320
     },
     {
       "path": "scripts/build-macos-release.py",
@@ -833,8 +834,8 @@
     },
     {
       "path": "scripts/check-agent-integration.py",
-      "sha256": "a386c7acae34d2c32b0e7bfb90b130e72b4c5b4867ff6d43cc85811156062546",
-      "bytes": 22349
+      "sha256": "d02c140a4fa6c9c445d8dd9a00bdb5a4faec78c9082299bd4e127e88adac33d6",
+      "bytes": 26812
     },
     {
       "path": "scripts/check-build-providers.py",
@@ -878,8 +879,8 @@
     },
     {
       "path": "scripts/check-cleanup.py",
-      "sha256": "a2fb7b8aa23117f73982d97eb740784fe5beb3ca06c30173c51b39863b48316d",
-      "bytes": 8019
+      "sha256": "22bf316e4383b9f61d31469aa946ada42ac1c7c36fad7e6f145c8d295c11f9d0",
+      "bytes": 8391
     },
     {
       "path": "scripts/check-dashboard-rendering.swift",
@@ -908,8 +909,8 @@
     },
     {
       "path": "scripts/check-enforcement.py",
-      "sha256": "1339986b2be2ad1657f4ee10388552a345b4d45c1cc0a7bf4fb5353d40a098fc",
-      "bytes": 11766
+      "sha256": "3010b24c8576066fd8020b9f5600fdec1b19290743be69890f27c1611d9c877e",
+      "bytes": 12039
     },
     {
       "path": "scripts/check-foundation-parity.py",
@@ -928,8 +929,8 @@
     },
     {
       "path": "scripts/check-managed-execution.py",
-      "sha256": "803ed275f96b0427bd6ab6c890ad5d908515119d28085c2efd813045d946c5b6",
-      "bytes": 41441
+      "sha256": "19ae4771d9e70ea56cbddd71788b389330ef1bf514431ded75fa4aae0a39d0f2",
+      "bytes": 42160
     },
     {
       "path": "scripts/check-moby-image-apply.py",
@@ -1018,8 +1019,8 @@
     },
     {
       "path": "scripts/test-rust.sh",
-      "sha256": "e919402e184d967084c2a972055ed77d26646e3e6986adfdf796102c23ffe28a",
-      "bytes": 8323
+      "sha256": "95f1ec11755e0fb804117e00e73a0c9e091322d644d34871e5d27b6b97b0cb1a",
+      "bytes": 8470
     },
     {
       "path": "scripts/test.sh",
