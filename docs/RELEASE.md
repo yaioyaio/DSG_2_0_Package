@@ -2,9 +2,19 @@
 
 로컬 제품의 사용 범위는 프로젝트 사용량·예산 확인, Docker 집계, 정리 미리보기다. 대시보드와 정리 승인 흐름은 분리돼 있다. 플랫폼별 패키지·서비스·서명 확인은 릴리스 근거에 각각 기록한다. [API 명세](API_SPEC.md#로컬-대시보드) · [검증 기록](HANDOFF.md)
 
+## 로컬 설치본 재검증 (2026-11-27)
+
+현재 Rust 트리 `5685b45`의 macOS ARM64와 Linux ARM64 musl `0.1.1-rc.1` 후보를 만들었다. 플랫폼별로 같은 아카이브의 SHA-256과 설치된 두 프로그램의 매니페스트 해시를 확인했다. Windows의 설치 실측은 아래 `2bccd4b` 기록에 해당한다.
+
+| 대상 | 통과한 항목과 남은 시험 |
+|---|---|
+| Ubuntu Parallels ARM64 | 이전 후보 설치, 현재 후보 교체, 진단, 대시보드, 제거와 사용자 파일 보존을 통과했다. 보호된 Moby 29.1.3에서 각 합성 이미지 계획의 예상 전용 레이어 할당량 8,192 B, 실행자 계획 작성 거부, 비대상 보존을 확인했다. 해당 계획의 승인·삭제는 각각 0건이었다. 실제 단일 적용·영수증 복구 시험은 해당 합성 대상의 별도 승인을 기다린다. [설치본과 사전 실측](../dist/dsg-local-installation-5685b45/UBUNTU-ARM64-RUNTIME.json) |
+| macOS ARM64 호스트 | 실제 `0.1.0` 설치, 현재 후보 교체, `0.1.0` 복원과 재교체, 제거 후 사용자 파일 보존을 통과했다. 설치본 API와 WebKit 1060px·390px에서 컨테이너 7개, 이미지 9개, 볼륨 2개, 중복 그룹 0개가 독립 조회와 일치했다. 이미지 승인·적용은 거절됐고 Docker 인벤토리는 동일했다. 설치본 Chromium 시험에서 종료를 입증하지 못한 lease 1건을 보존했다. [설치 실측](../dist/dsg-local-installation-5685b45/MACOS-ARM64-RUNTIME.json) · [첫 브라우저 시험](../dist/dsg-local-installation-5685b45/MACOS-HOST-BROWSER-FIRST.json) |
+| macOS Parallels ARM64 | 같은 아카이브를 비특권 계정에 설치했다. 호스트와 설치 바이너리 SHA-256이 같고 관측된 자손·관측이 누락된 자손의 보호 및 종료 후 재획득을 통과했다. 개인 쓰기 권한으로 실행한 Chromium의 클릭 완료 trace 4개, lease 해제 4건, 만료 성공 trace 1개 회수, 실패와 기본 출력의 보호를 확인했다. [같은 설치본의 결합 실측](../dist/dsg-local-installation-5685b45/MACOS-GUEST-INSTALLED-PRIVATE-FINAL.json) |
+
 ## 현재 소스의 로컬 후보 (2026-11-26)
 
-Rust 트리 `2bccd4b`와 동일한 `Cargo.lock`에서 macOS·Ubuntu·Windows ARM64 `0.1.1-rc.1` 후보를 새로 만들었다. 세 아카이브 및 두 실행 파일의 체크섬과 아키텍처를 대조했다. [아카이브 대조](../dist/dsg-local-image-packages-2bccd4b/NATIVE-PACKAGE-INTEGRITY.json)
+2026-11-26 당시 Rust 트리 `2bccd4b`와 동일한 `Cargo.lock`에서 macOS·Ubuntu·Windows ARM64 `0.1.1-rc.1` 후보를 만들었다. 세 아카이브 및 두 실행 파일의 체크섬과 아키텍처를 대조했다. [아카이브 대조](../dist/dsg-local-image-packages-2bccd4b/NATIVE-PACKAGE-INTEGRITY.json)
 
 | 대상 | 설치본 실측 |
 |---|---|
