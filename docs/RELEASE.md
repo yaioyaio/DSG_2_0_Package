@@ -2,6 +2,12 @@
 
 로컬 제품의 사용 범위는 프로젝트 사용량·예산 확인, Docker 집계, 정리 미리보기다. 대시보드와 정리 승인 흐름은 분리돼 있다. 플랫폼별 패키지·서비스·서명 확인은 릴리스 근거에 각각 기록한다. [API 명세](API_SPEC.md#로컬-대시보드) · [검증 기록](HANDOFF.md)
 
+## Ubuntu ARM64 설치본과 전용 Moby 계획
+
+Rust 트리 `932f1fd`의 Linux ARM64 musl `0.1.1-rc.1` 후보 아카이브 SHA-256은 `e0a1d952038899da985eb53a959ffca6db0e2b707653583630bbbe1a97695777`이다. 기존 Ubuntu Parallels의 임시 경로에서 이전 후보 설치, 최신 후보로 교체, 진단, 두 바이너리의 매니페스트 대조, 읽기 전용 대시보드, 제거와 사용자 파일 보존을 확인했다. 직접 실행 성공과 실패에서도 각각 lease가 해제됐고, 승인되지 않은 셸 실행은 코드 4로 거절됐다. [빌드 검증](../dist/dsg-ubuntu-qualification-932f1fd/BUILD-QUALIFICATION.json) · [설치본 실측](../dist/dsg-ubuntu-qualification-932f1fd/UBUNTU-ARM64-RUNTIME.json)
+
+정상 적용용 엔진과 응답 유실 시험용 엔진에서 합성 이미지 계획을 각각 검증했다. 두 대상의 전체 ID·출처·아카이브 및 엔진 해시를 설치본에 결속했다. 전용 레이어 예상량은 각 8,192 B다. 승인·삭제 호출과 영속 적용 기록은 각각 0건이며 실제 적용은 대상별 별도 승인을 기다린다. [승인 전 대조](../dist/dsg-ubuntu-qualification-932f1fd/UBUNTU-PREAPPROVAL.json)
+
 ## 종료 진단을 반영한 macOS 로컬 후보
 
 macOS ARM64 `0.1.1-rc.1` 후보의 SHA-256은 `69b51455c5c0d326107f60571c11176a870021f6de28f1d5d40e4048e5341756`이다. 임시 설치·진단과 실행 파일 두 개의 매니페스트 해시를 확인했다. 설치본에서 실제 Chromium 클릭 trace 4개, lease 해제 4건, 남은 lease 0건, 만료 성공 trace 회수 1건을 검증했다. 두 이탈 자손 보호 시험과 종료 후 재획득을 통과했고 임시 설치와 성공 시험 폴더를 회수했다. [설치본 근거](../dist/dsg-local-exit-hook-verification/MACOS-CANDIDATE-CHROMIUM.json) · [아카이브](../dist/dsg-local-exit-hook-verification/dsg-0.1.1-rc.1-aarch64-apple-darwin.tar.gz)
