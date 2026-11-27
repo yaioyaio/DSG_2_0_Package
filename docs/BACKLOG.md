@@ -90,8 +90,9 @@
 
 ### Rust 트리 `5685b45` 설치본 재검증
 
-- **Ubuntu ARM64.** 설치·교체·진단·제거, 읽기 전용 대시보드, 전용 Moby의 예상 전용 레이어 할당량 각 8,192 B와 접근 권한을 통과했다. 합성 대상별 별도 승인 후 정상 적용·응답 유실 복구에서 비대상 변경 0건, 재삭제 0건, 영수증·SQLite와 ext4 순회수량 일치를 확인한다. [대상 ID와 사전 증거](../dist/dsg-local-installation-5685b45/UBUNTU-ARM64-RUNTIME.json)
-- **macOS ARM64.** 호스트의 설치·교체·롤백·재교체·제거, 실제 Docker 집계와 WebKit을 통과했다. Parallels에서 같은 바이너리의 이탈 자손 보호·재획득과 Chromium 클릭 trace 4개·lease 해제 4건·만료 성공 trace 1개 회수를 통과했다. 호스트에서 확인한 lease 보존 조건은 별도로 기록한다. [현재 후보](RELEASE.md#로컬-설치본-재검증-2026-11-27)
+- **Ubuntu ARM64.** 설치·교체·진단·제거, 읽기 전용 대시보드, 전용 Moby의 예상 전용 레이어 할당량 각 8,192 B와 접근 권한을 통과했다. 두 대상의 전체 ID·출처·설치본 해시 재대조를 마쳤고 승인 및 삭제는 각각 0건이다. 대상별 별도 승인 후 정상 적용·응답 유실 복구에서 비대상 변경 0건, 재삭제 0건, 영수증·SQLite와 ext4 순회수량 일치를 확인한다. [대상 ID와 승인 전 대조](../dist/dsg-local-installation-5685b45/UBUNTU-PREAPPROVAL-RECHECK.json)
+- **macOS ARM64.** 호스트의 설치·교체·롤백·재교체·제거, 실제 Docker 집계와 WebKit을 통과했다. 호스트와 Parallels에서 같은 바이너리의 이탈 자손 두 종류 보호·재획득과 Chromium 클릭 trace 4개·lease 해제 4건·만료 성공 trace 1개 회수를 각각 통과했다. 첫 호스트 시험에는 시작 증거와 완료된 관측 표본이 있었고 마지막 종료 확인의 실패 조건은 미확정이다. [현재 후보](RELEASE.md#로컬-설치본-재검증-2026-11-27)
+- **WBS 5.1 환경 사전 점검.** macOS 호스트·게스트에서 전용 계정과 시스템 LaunchDaemon 등록을 찾지 못했다. Windows 게스트는 기본 명령의 응답과 네이티브 ARM64를 확인했다. PATH에 Docker CLI가 없었고 실제 엔진·제한 SID와 네이티브 x64 시험은 미검증이다. [플랫폼별 근거](HANDOFF.md#macos-호스트-재실측과-ubuntu-승인-게이트)
 
 ## BuildKit 운영 배포와 복구 검증 잔여
 

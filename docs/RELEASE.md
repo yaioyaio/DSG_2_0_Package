@@ -8,8 +8,8 @@
 
 | 대상 | 통과한 항목과 남은 시험 |
 |---|---|
-| Ubuntu Parallels ARM64 | 이전 후보 설치, 현재 후보 교체, 진단, 대시보드, 제거와 사용자 파일 보존을 통과했다. 보호된 Moby 29.1.3에서 각 합성 이미지 계획의 예상 전용 레이어 할당량 8,192 B, 실행자 계획 작성 거부, 비대상 보존을 확인했다. 해당 계획의 승인·삭제는 각각 0건이었다. 실제 단일 적용·영수증 복구 시험은 해당 합성 대상의 별도 승인을 기다린다. [설치본과 사전 실측](../dist/dsg-local-installation-5685b45/UBUNTU-ARM64-RUNTIME.json) |
-| macOS ARM64 호스트 | 실제 `0.1.0` 설치, 현재 후보 교체, `0.1.0` 복원과 재교체, 제거 후 사용자 파일 보존을 통과했다. 설치본 API와 WebKit 1060px·390px에서 컨테이너 7개, 이미지 9개, 볼륨 2개, 중복 그룹 0개가 독립 조회와 일치했다. 이미지 승인·적용은 거절됐고 Docker 인벤토리는 동일했다. 설치본 Chromium 시험에서 종료를 입증하지 못한 lease 1건을 보존했다. [설치 실측](../dist/dsg-local-installation-5685b45/MACOS-ARM64-RUNTIME.json) · [첫 브라우저 시험](../dist/dsg-local-installation-5685b45/MACOS-HOST-BROWSER-FIRST.json) |
+| Ubuntu Parallels ARM64 | 이전 후보 설치, 현재 후보 교체, 진단, 대시보드, 제거와 사용자 파일 보존을 통과했다. 보호된 Moby 29.1.3에서 각 합성 이미지 계획의 예상 전용 레이어 할당량 8,192 B, 실행자 계획 작성 거부, 비대상 보존을 확인했다. 두 대상의 전체 ID·출처·설치본 및 엔진 해시를 다시 확인했다. 승인·삭제 호출은 각각 0건이며 실제 단일 적용·영수증 복구 시험은 대상별 별도 승인을 기다린다. [설치본과 사전 실측](../dist/dsg-local-installation-5685b45/UBUNTU-ARM64-RUNTIME.json) · [승인 전 대조](../dist/dsg-local-installation-5685b45/UBUNTU-PREAPPROVAL-RECHECK.json) |
+| macOS ARM64 호스트 | 실제 `0.1.0` 설치, 현재 후보 교체, `0.1.0` 복원과 재교체, 제거 후 사용자 파일 보존을 통과했다. 설치본 API와 WebKit 1060px·390px에서 컨테이너 7개, 이미지 9개, 볼륨 2개, 중복 그룹 0개가 독립 조회와 일치했다. 이미지 승인·적용은 거절됐고 Docker 인벤토리는 동일했다. 같은 설치본으로 실제 Chromium 클릭 trace 4개, lease 해제 4건, 만료 성공 trace 1개 회수와 두 이탈 자손 보호·재획득을 재검증했다. 첫 시험에서 종료 증거가 부족해 lease 1건이 보존된 원인은 미확정이다. [설치 실측](../dist/dsg-local-installation-5685b45/MACOS-ARM64-RUNTIME.json) · [호스트 재실측](../dist/dsg-local-runtime-5685b45/MACOS-HOST-LEASE-RECHECK.json) · [첫 브라우저 시험](../dist/dsg-local-installation-5685b45/MACOS-HOST-BROWSER-FIRST.json) |
 | macOS Parallels ARM64 | 같은 아카이브를 비특권 계정에 설치했다. 호스트와 설치 바이너리 SHA-256이 같고 관측된 자손·관측이 누락된 자손의 보호 및 종료 후 재획득을 통과했다. 개인 쓰기 권한으로 실행한 Chromium의 클릭 완료 trace 4개, lease 해제 4건, 만료 성공 trace 1개 회수, 실패와 기본 출력의 보호를 확인했다. [같은 설치본의 결합 실측](../dist/dsg-local-installation-5685b45/MACOS-GUEST-INSTALLED-PRIVATE-FINAL.json) |
 
 ## 현재 소스의 로컬 후보 (2026-11-26)
