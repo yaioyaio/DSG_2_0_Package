@@ -34,15 +34,24 @@ class Engine:
             def log_message(self, *_):
                 pass
 
+            def route(self):
+                route = self.path.partition('?')[0]
+                if route.startswith('/v1.') and route.count('/') >= 2:
+                    route = route.split('/', 2)[2]
+                    route = '/' + route
+                return route
+
+            def parse_request(self):
+                if not super().parse_request():
+                    return False
+                fixture.routes[(self.command, self.route())] += 1
+                return True
+
             def do_HEAD(self):
                 self.do_GET()
 
             def do_GET(self):
-                route = self.path.partition('?')[0]
-                if route.startswith('/v1.'):
-                    _, _, route = route.split('/', 2)
-                    route = '/' + route
-                fixture.routes[(self.command, route)] += 1
+                route = self.route()
                 if route == '/_ping':
                     body = b'OK'
                 else:

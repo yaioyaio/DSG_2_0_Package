@@ -298,6 +298,17 @@ def verify_macos_observation_gap(executable, base, global_policy):
         report = json.loads(stdout)['result']
         assert report['reason_code'] == 'RUN_CONTROL_UNVERIFIED' and report['run']['outcome'] == 'control_failure'
         assert report['run']['tree_confirmed_gone'] is False and report['lease_released'] is False
+        tree_failure = report['run']['tree_failure_reason']
+        assert isinstance(tree_failure, str) and tree_failure.startswith('TREE_')
+        with sqlite3.connect(database, timeout=0.3) as db:
+            failures = db.execute(
+                "SELECT action, reason_code FROM audit_event WHERE lease_id = ? AND outcome = 'incomplete' "
+                "ORDER BY id", (lease_id,)
+            ).fetchall()
+        assert failures == [
+            ('managed_execution', 'RUN_PROCESS_TREE_UNKNOWN'),
+            ('managed_execution_diagnostic', tree_failure),
+        ]
         assert report['cleanup'] == {'removed': 0, 'preserved': 1, 'reclaimed_bytes': 0,
                                      'reason': 'process_tree_unknown'}
         assert artifact.read_bytes() == sentinel
@@ -323,6 +334,7 @@ def verify_macos_observation_gap(executable, base, global_policy):
         following = result(cli + ['exec', '--timeout', '2', '--', '/usr/bin/true'], timeout=3)
         assert following['run']['outcome'] == 'success' and following['run']['tree_confirmed_gone']
         assert following['lease_released']
+        assert 'tree_failure_reason' not in following['run']
         with sqlite3.connect(database, timeout=0.3) as db:
             assert db.execute('SELECT COUNT(*) FROM audit_event WHERE lease_id = ? '
                               "AND reason_code = 'LEASE_RECLAIMED'", (lease_id,)).fetchone() == (1,)
@@ -339,6 +351,7 @@ def verify_macos_observation_gap(executable, base, global_policy):
             await_value(lambda: child_exited(escaped), 'the owned descendant exit')
     return dict(outcome='lease_preserved', descendant_recorded=recorded, descendant_held_file=True,
                 lease_released=report['lease_released'], tree_confirmed_gone=report['run']['tree_confirmed_gone'],
+                tree_failure_reason=tree_failure, durable_tree_failure_audit=True,
                 contender_exit=2, expired_contender_exit=2, lease_reacquired=True,
                 cleanup=report['cleanup'], fixture_file_preserved=True, fixture_processes_remaining=0)
 

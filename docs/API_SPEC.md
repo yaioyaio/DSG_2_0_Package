@@ -91,6 +91,8 @@ ARM64 Darwin 25의 XNU 12377 계열에서는 위 조회에 원래 부모의 PID 
 
 macOS 관리형 트리의 종료를 입증하지 못하면 `run.tree_confirmed_gone=false`와 `lease_released=false`를 반환하고 자동 정리 대상과 lease를 보존한다. 리더가 정상 종료한 경우에도 이 상태는 `RUN_CONTROL_UNVERIFIED`와 종료 코드 5로 반환한다. 같은 프로젝트의 후속 실행은 `RESOURCE_ACTIVE`로 차단된다. 만료된 lease는 등록된 프로세스와 세션의 종료가 입증되거나 기록된 부팅 UUID와 현재 부팅 UUID의 차이가 확인되면 기존 회수 절차에 따라 재획득할 수 있다. 등록부 v5 종료 증거가 없는 기존 활성 관리형 lease는 보존한다. Linux는 리더와 프로세스 그룹의 종료를 확인한다. [수용 시험](TEST_PLAN.md#rust-foundation-검증)
 
+종료 미확인 응답에는 `run.tree_failure_reason`으로 확인이 중단된 조건의 고정 `TREE_*` 코드를 제공한다. 종료를 입증한 응답에서는 이 필드를 생략한다. 등록부에는 같은 lease의 `managed_execution`에 기존 `RUN_PROCESS_TREE_UNKNOWN`을 기록하고 `managed_execution_diagnostic`에 응답의 상세 코드를 함께 기록한다. 이 코드는 프로세스·경로 식별자나 명령 인자를 포함하지 않는다. [고정 코드 정의](../rust-scaffold/crates/dsg-core/src/runner.rs)
+
 `dsg exec --provider <cargo|node|pnpm|gradle|uv|go|playwright> -- <작업>`는 등록된 정형 작업을 실행한다. Cargo는 `build`, `check`, `test`, pnpm·Gradle·Go는 `build`, `test`, Node·uv·Playwright는 `test`를 받는다. 하나의 작업만 받으며 각 도구의 병렬 실행 옵션을 제한한다. pnpm이 호출한 프로젝트 스크립트 내부의 작업자는 프로젝트 설정을 따른다. Playwright는 프로젝트에 준비된 실행기를 사용하고 실행마다 독립된 상태 폴더에 성공·실패 추적 자료를 저장한다. 응답 `evidence_path`는 상태 디렉터리 기준 상대 경로다. 트리 종료가 확인되면 Provider·작업·결과 코드가 해당 lease 감사 이벤트에 기록된다.
 
 `dsg docker-reuse --context <context> --expectation-json <JSON>`은 `engine_id`, `project`, `service`, `number`, `config_hash`, `image_id`, `image_digest`, `mounts`를 받는다. 같은 실행 중인 정상 컨테이너가 두 번 모두 유일한 후보면 `verified=true`와 `assessment.container_id`를 반환한다. 확인할 수 없으면 종료 코드 5와 판정 사유를 반환한다. 이미 실행 중인 컨테이너 식별자를 전달하는 경로다.

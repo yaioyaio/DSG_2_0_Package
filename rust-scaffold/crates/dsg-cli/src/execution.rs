@@ -233,12 +233,7 @@ pub fn exec(
             .map_err(lease_error)?;
     } else {
         registry
-            .record_event(
-                Some(project_id),
-                AuditAction::ManagedExecution,
-                AuditOutcome::Incomplete,
-                "RUN_PROCESS_TREE_UNKNOWN",
-            )
+            .record_tree_failure(&lease, report.tree_failure_reason)
             .map_err(registry_error)?;
         // The database marker still protects this project until absence can be verified.
         drop(lease);
