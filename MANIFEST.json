@@ -38,7 +38,7 @@
     "local_reclaim_witness": "The initial local BuildKit fixture was rejected before apply because its ledger witness was on tmpfs; the exact target stayed read-only and no apply was dispatched. A replacement local Ubuntu ext4 candidate uses a distinct disk-backed witness and has 8,192 expected payload allocation bytes. The replacement requires its own approval.",
     "buildkit_measured_reclaim": "A separately approved exact BuildKit cache was applied once on disk-file-backed ext4 in Ubuntu Parallels. Estimated and independently observed target allocations matched at 8,192 bytes. The guest filesystem allocation rose from 389,120 to 417,792 bytes, yielding -28,672 bytes net reclaimed. Non-target files and the reopened receipt matched, and the fixture was cleaned. The Mac volume delta is observational.",
     "local_recovery_and_current_arm64_packages": "On Rust tree 13fdb79, current Mac and Parallels Ubuntu and Windows ARM64 packages passed native upgrade, diagnosis, both binaries, read-only dashboard and removal. Live local Docker plan and recheck preserved an existing image without writes; a verified synthetic candidate stayed non-applicable and five exclusive dispatch fixture tests passed. That BuildKit trial recorded an additional 36,864 bytes before the later path-level attribution documented in TASK.md.",
-    "local_installation_qualification_5685b45": "Ubuntu ARM64 installed, upgraded, diagnosed, exercised a read-only dashboard and isolated Moby plans, and uninstalled. Actual image application is pending exact target approval. macOS ARM64 host rollback and live WebKit passed. The byte-identical installed CLI in macOS Parallels protected detached children and verified four Chromium click traces, four released leases, and one expired successful trace removed with private fixture permissions. Host process evidence remained incomplete in one Chromium trial."
+    "local_installation_qualification_5685b45": "Ubuntu ARM64 passed installation, upgrade, diagnosis, read-only dashboard, isolated Moby plans, and uninstall. Both pending deletion subjects and package/engine hashes were rechecked. Actual image application awaits target approval. The byte-identical macOS host and macOS Parallels installations passed both detached process protections, four Chromium click traces, four released leases, and expiration of one success trace. The initial host trial's final exit-proof condition remains undetermined."
   },
   "files": [
     {
@@ -128,8 +128,8 @@
     },
     {
       "path": "docs/RELEASE.md",
-      "sha256": "5af37df2a6769745b30b14029d5a5767aa579c370252820187986e28c1664072",
-      "bytes": 19611
+      "sha256": "7f5ace0ac208d682d395bf79de9382ea777ef71059ca8792c08b12ac869914a4",
+      "bytes": 20026
     },
     {
       "path": "docs/REQUIREMENTS.md",
@@ -148,8 +148,8 @@
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "6fcadea1ade8e11b603b907eeb81c7d4709a94895a38f1a0314203acd6ab0638",
-      "bytes": 43628
+      "sha256": "3352e17d6589351ae8738686de8682e4c307d648ac86f6ca7ebaa5bed79525b2",
+      "bytes": 44189
     },
     {
       "path": "docs/TEST_PLAN.md",
