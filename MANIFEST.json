@@ -39,7 +39,8 @@
     "buildkit_measured_reclaim": "A separately approved exact BuildKit cache was applied once on disk-file-backed ext4 in Ubuntu Parallels. Estimated and independently observed target allocations matched at 8,192 bytes. The guest filesystem allocation rose from 389,120 to 417,792 bytes, yielding -28,672 bytes net reclaimed. Non-target files and the reopened receipt matched, and the fixture was cleaned. The Mac volume delta is observational.",
     "local_recovery_and_current_arm64_packages": "On Rust tree 13fdb79, current Mac and Parallels Ubuntu and Windows ARM64 packages passed native upgrade, diagnosis, both binaries, read-only dashboard and removal. Live local Docker plan and recheck preserved an existing image without writes; a verified synthetic candidate stayed non-applicable and five exclusive dispatch fixture tests passed. That BuildKit trial recorded an additional 36,864 bytes before the later path-level attribution documented in TASK.md.",
     "local_installation_qualification_5685b45": "Ubuntu ARM64 passed installation, upgrade, diagnosis, read-only dashboard, isolated Moby plans, and uninstall. Both pending deletion subjects and package/engine hashes were rechecked. Actual image application awaits target approval. The byte-identical macOS host and macOS Parallels installations passed both detached process protections, four Chromium click traces, four released leases, and expiration of one success trace. The initial host trial's final exit-proof condition remains undetermined.",
-    "macos_exit_diagnostics_and_hook_boundary": "126 Rust tests and the macOS integration suite passed. The candidate installation produced four Chromium click traces, four released leases, no held lease, and one expired success trace removed. Detached process protection and durable exit diagnostics passed. The nine native Claude, Codex and Gemini cases yielded zero writes to the protected synthetic upstream."
+    "macos_exit_diagnostics_and_hook_boundary": "126 Rust tests and the macOS integration suite passed. The candidate installation produced four Chromium click traces, four released leases, no held lease, and one expired success trace removed. Detached process protection and durable exit diagnostics passed. The nine native Claude, Codex and Gemini cases yielded zero writes to the protected synthetic upstream.",
+    "ubuntu_requalification_932f1fd": "The new Linux ARM64 musl package passed native installation, upgrade, diagnosis, dashboard, removal, and normal and failed command lease release in the existing Ubuntu Parallels guest. The two separate Moby engine binaries and exact synthetic subjects were verified in plan-only mode. No approval, deletion, durable attempt or receipt was issued. Actual apply awaits approval for the exact subjects and evidence digest."
   },
   "files": [
     {
@@ -129,8 +130,8 @@
     },
     {
       "path": "docs/RELEASE.md",
-      "sha256": "c0801fbe1ad75e36a0501ebf3166ab4018fac11eb844ecd8e0600978e469bdfc",
-      "bytes": 20743
+      "sha256": "d5b51ce2f9234c794b20c0e859427360978343efef9774b247234edc0af5b277",
+      "bytes": 21945
     },
     {
       "path": "docs/REQUIREMENTS.md",
@@ -149,8 +150,8 @@
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "58a3941f1576c01b06d45610b911d50a297874ef21343ca3205917b15e0e4d9f",
-      "bytes": 45285
+      "sha256": "0f225ec71afd280d219c86193e071429b3bfe83164244b170f6b235ab2d39787",
+      "bytes": 46453
     },
     {
       "path": "docs/TEST_PLAN.md",
