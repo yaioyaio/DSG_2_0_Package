@@ -98,7 +98,7 @@
 
 - **WBS 3.2·3.3.** 새 macOS 설치본에서 응답과 SQLite의 종료 미확인 사유, 두 이탈 자손 보호·재획득, Chromium 클릭과 trace 회수를 통과했다. 첫 호스트 시험의 상세 실패 조건은 당시 원장으로 확정할 수 없다. [작업 대조표](TASK.md#macos-종료-진단과-로컬-docker-통제)
 - **WBS 4.1·5.1.** 실제 세 CLI의 훅 오류와 같은 macOS 권한 경계에서 Docker 쓰기 거부를 통과했다. 임의 셸 실행에 대한 추가 보증은 수용 범위 확정 대상이다. [시험 기준](TEST_PLAN.md#에이전트-연동-검증)
-- **Ubuntu ARM64 재검증.** Rust 트리 `932f1fd`의 새 설치 후보에서 교체·제거와 읽기 전용 대시보드, 정상 종료·실패 시 lease 해제를 확인했다. 정상과 응답 유실용 전용 Moby를 각각 고정해 두 합성 이미지 계획·전체 ID·출처·예상량을 대조했다. 발송 결과를 받지 못하면 같은 모드의 재발송을 차단하는 경로를 대역으로 확인했다. 대상별 별도 승인 후 단일 적용, 비대상 변경 0건, 복구 재삭제 0건, ext4·영수증·SQLite 순회수량 일치를 검증한다. [최신 승인 근거](../dist/dsg-ubuntu-qualification-932f1fd/UBUNTU-PREAPPROVAL.json) · [전송 오류 대역 시험](../dist/dsg-ubuntu-qualification-932f1fd/APPLY-TRANSPORT-REHEARSAL.json)
+- **Ubuntu ARM64 재검증 완료.** Rust 트리 `932f1fd` 설치 후보의 교체·제거, 읽기 전용 대시보드와 정상 종료·실패 시 lease 해제를 확인했다. 승인된 두 합성 이미지의 정상 적용과 응답 유실 시험은 각각 삭제 1건과 영수증 1건, 비대상 변경 0건과 재삭제 0건이었다. 두 회차의 전용 ext4 할당량은 각각 430,080 B에서 389,120 B로 줄었으며 순회수 40,960 B가 영수증과 SQLite에 일치했다. 응답 유실 회차는 `recovery_required`에서 미정산 회수량 0 B를 반환한 뒤 영수증 복구로 `applied`가 됐다. 복구 중 ext4 할당량 변화는 0 B였다. [승인 후 최종 대조](../dist/dsg-ubuntu-qualification-932f1fd/APPROVED-APPLY-VERIFICATION.json)
 
 ## BuildKit 운영 배포와 복구 검증 잔여
 
