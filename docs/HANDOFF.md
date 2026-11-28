@@ -592,3 +592,10 @@ DSG-08의 `f6397b2`를 PR #15로 `develop`, PR #16으로 `main`에 반영했다.
 - macOS 호스트에는 전용 서비스 계정과 비대화형 관리자 실행 경로가 확인되지 않았다. 호스트의 실엔진 시험은 사용자 GUI 도메인에 해당한다. macOS 시스템 서비스와 전용 실제 Docker 소켓을 결합하는 시험은 해당 환경 확보 후 진행한다. [호스트 사전 점검](../dist/dsg-platform-service-932f1fd/MACOS-HOST-PREFLIGHT.json) · [기존 실엔진 실측](#macos-로컬-서비스와-docker-소켓-접근-경계)
 - Windows Parallels는 기본 명령과 네이티브 ARM64를 확인했다. PATH와 Docker Desktop 표준 경로에서 Docker CLI를 찾지 못했다. Docker Desktop 서비스 등록과 표준 로컬 파이프 두 개도 확인되지 않았다. 실제 Windows Docker 엔진과 제한 SID가 확보되면 `Real` 서비스 시험을 실행한다. 네이티브 Windows x64 환경이 확보되면 설치·업그레이드·진단·대시보드·제거를 검증한다. Windows는 기존 일시정지 상태로 복귀했고 Ubuntu 상태는 그대로 유지했다. [Windows 환경 실측](../dist/dsg-platform-service-932f1fd/WINDOWS-PLATFORM-READINESS.json) · [기존 x64 검증 범위](RELEASE.md#이전-후보의-검증-기록)
 - 제품 코드와 설정은 기존 기준을 유지했다. 저장소 Python 시험 14개, 진단과 스캔을 통과했다. 보조 워크트리 생성·회수·잔여는 각각 0개다. [회귀 결과](../dist/dsg-platform-service-932f1fd/PYTHON-REGRESSION.json)
+
+## 현재 macOS와 Parallels 잔여 시험 보류
+
+- 2026-11-28 · DSG-07/08 · WBS 5.1·6.1 · `feature/20261128-local-platform-hold` · 기준 `c31417e`. 현재 호스트와 등록된 Parallels 게스트에 대한 환경 확인을 완료했다. 필수 환경이 확인되지 않은 세 시험을 보류하고 이번 작업을 종료했다. WBS 5.1·6.1 전체 수용 상태는 부분 통과다. [보류 항목과 재개 조건](BACKLOG.md#현재-시스템에서-제외한-검증)
+- macOS ARM64 호스트의 기존 격리 Docker 컨텍스트가 서버 버전 조회에 응답했다. 전용 서비스 계정과 비대화형 관리자 경로는 확인되지 않았다. macOS ARM64 게스트에서 관리자 명령은 실행됐으나 표준 Docker 소켓과 프로젝트 전용 Unix 소켓이 확인되지 않았다. 두 조건이 같은 macOS 환경에서 충족되면 시스템 서비스·실엔진 결합 시험을 재개한다. [macOS 환경 근거](../dist/dsg-platform-hold-c31417e/MACOS-READINESS.json)
+- Windows 게스트에서 기본 명령과 네이티브 ARM64를 확인했다. Docker CLI는 PATH와 표준 설치 경로에서 찾지 못했다. 관련 등록 서비스 및 확인한 표준 엔진 파이프 3개도 없었다. Windows ARM64에서는 전용 엔진 파이프의 실제 응답·서버 SID와 제한 계정을 확인한 후 서비스 경계 시험을 재개한다. 네이티브 Windows x64가 확보되면 패키지 수명 주기 시험을 재개한다. [Windows 환경 근거](../dist/dsg-platform-hold-c31417e/WINDOWS-READINESS.json)
+- macOS와 Windows 게스트는 기존 실행 상태를 유지했고 Ubuntu는 기존 일시정지 상태를 유지했다. VM·Docker 데몬·시스템 서비스 기동과 설정 변경은 0건이다. 제품 변경 없이 백로그와 핸드오프만 갱신했으며 보조 워크트리 생성·회수·잔여는 각각 0개다.
