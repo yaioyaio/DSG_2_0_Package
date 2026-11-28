@@ -6,7 +6,11 @@
 
 Rust 트리 `932f1fd`의 Linux ARM64 musl `0.1.1-rc.1` 후보 아카이브 SHA-256은 `e0a1d952038899da985eb53a959ffca6db0e2b707653583630bbbe1a97695777`이다. 기존 Ubuntu Parallels의 임시 경로에서 이전 후보 설치, 최신 후보로 교체, 진단, 두 바이너리의 매니페스트 대조, 읽기 전용 대시보드, 제거와 사용자 파일 보존을 확인했다. 직접 실행 성공과 실패에서도 각각 lease가 해제됐고, 승인되지 않은 셸 실행은 코드 4로 거절됐다. [빌드 검증](../dist/dsg-ubuntu-qualification-932f1fd/BUILD-QUALIFICATION.json) · [설치본 실측](../dist/dsg-ubuntu-qualification-932f1fd/UBUNTU-ARM64-RUNTIME.json)
 
-정상 적용용 엔진과 응답 유실 시험용 엔진에서 합성 이미지 계획을 각각 검증했다. 두 대상의 전체 ID·출처·아카이브 및 엔진 해시를 설치본에 결속했다. 전용 레이어 예상량은 각 8,192 B다. 승인·삭제 호출과 영속 적용 기록은 각각 0건이며 실제 적용은 대상별 별도 승인을 기다린다. [승인 전 대조](../dist/dsg-ubuntu-qualification-932f1fd/UBUNTU-PREAPPROVAL.json)
+정상 적용용 엔진과 응답 유실 시험용 엔진에서 합성 이미지 계획을 각각 검증했다. 두 대상의 전체 ID·출처·아카이브 및 엔진 해시를 설치본에 결속했다. 전용 레이어 예상량은 각 8,192 B다. 이 계획 단계의 승인·삭제 호출과 영속 적용 기록은 각각 0건이었다. [승인 전 대조](../dist/dsg-ubuntu-qualification-932f1fd/UBUNTU-PREAPPROVAL.json)
+
+### 두 승인 대상의 실제 적용과 복구
+
+별도 승인된 두 합성 이미지를 각 전용 Moby에서 한 번씩 적용했다. 정상 모드는 즉시 `applied`였고, 응답 유실 모드는 영수증 저장 후 `recovery_required` 상태에서 같은 의도의 영수증을 읽어 `applied`로 전환했다. 두 시험에서 각각 ext4 사용량이 430,080 B에서 389,120 B로 줄었고 순회수량 40,960 B는 영수증 및 SQLite와 일치했다. 보호 이미지와 공유 레이어는 보존됐으며 비대상 변경과 재삭제는 0건이었다. 시험·설치 자료를 회수하고 VM을 기존 일시정지 상태로 복귀시켰다. [두 적용 결과 대조](../dist/dsg-ubuntu-qualification-932f1fd/APPROVED-APPLY-VERIFICATION.json)
 
 ## 종료 진단을 반영한 macOS 로컬 후보
 

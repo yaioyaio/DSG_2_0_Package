@@ -40,7 +40,8 @@
     "local_recovery_and_current_arm64_packages": "On Rust tree 13fdb79, current Mac and Parallels Ubuntu and Windows ARM64 packages passed native upgrade, diagnosis, both binaries, read-only dashboard and removal. Live local Docker plan and recheck preserved an existing image without writes; a verified synthetic candidate stayed non-applicable and five exclusive dispatch fixture tests passed. That BuildKit trial recorded an additional 36,864 bytes before the later path-level attribution documented in TASK.md.",
     "local_installation_qualification_5685b45": "Ubuntu ARM64 passed installation, upgrade, diagnosis, read-only dashboard, isolated Moby plans, and uninstall. Both pending deletion subjects and package/engine hashes were rechecked. Actual image application awaits target approval. The byte-identical macOS host and macOS Parallels installations passed both detached process protections, four Chromium click traces, four released leases, and expiration of one success trace. The initial host trial's final exit-proof condition remains undetermined.",
     "macos_exit_diagnostics_and_hook_boundary": "126 Rust tests and the macOS integration suite passed. The candidate installation produced four Chromium click traces, four released leases, no held lease, and one expired success trace removed. Detached process protection and durable exit diagnostics passed. The nine native Claude, Codex and Gemini cases yielded zero writes to the protected synthetic upstream.",
-    "ubuntu_requalification_932f1fd": "The new Linux ARM64 musl package passed native installation, upgrade, diagnosis, dashboard, removal, and normal and failed command lease release in the existing Ubuntu Parallels guest. The two separate Moby engine binaries and exact synthetic subjects were verified in plan-only mode. No approval, deletion, durable attempt or receipt was issued. Actual apply awaits approval for the exact subjects and evidence digest."
+    "ubuntu_requalification_932f1fd": "The new Linux ARM64 musl package passed native installation, upgrade, diagnosis, dashboard, removal, and normal and failed command lease release in the existing Ubuntu Parallels guest. The two separate Moby engine binaries and exact synthetic subjects were verified in plan-only mode. No approval, deletion, durable attempt or receipt was issued. The authorized applications are recorded separately.",
+    "ubuntu_approved_image_apply_932f1fd": "On the verified Ubuntu ARM64 installation, the individually authorized normal and post-receipt response-loss trials each deleted only the selected image once. Dedicated ext4 net reclamation was 40,960 bytes per trial and matched the response, receipt and SQLite. The existing receipt completed the response-loss trial with zero re-deletion and no non-target changes."
   },
   "files": [
     {
@@ -130,8 +131,8 @@
     },
     {
       "path": "docs/RELEASE.md",
-      "sha256": "d5b51ce2f9234c794b20c0e859427360978343efef9774b247234edc0af5b277",
-      "bytes": 21945
+      "sha256": "1ee180d1e95ac4b138b4982caeffec8af5f4eb0643d14c44ca36a76a9d05a860",
+      "bytes": 22675
     },
     {
       "path": "docs/REQUIREMENTS.md",
@@ -150,8 +151,8 @@
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "0f225ec71afd280d219c86193e071429b3bfe83164244b170f6b235ab2d39787",
-      "bytes": 46453
+      "sha256": "649937ce1c455b8fbf5092cefb1a16a2700b4ea1f0b523405a6658005db32c5a",
+      "bytes": 46691
     },
     {
       "path": "docs/TEST_PLAN.md",
