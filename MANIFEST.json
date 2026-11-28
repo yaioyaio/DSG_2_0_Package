@@ -71,8 +71,8 @@
     },
     {
       "path": "README.md",
-      "sha256": "68fdf0e5ff807c4664b1033134d155c769677cc76dbf77fa567dcbf0405eceb9",
-      "bytes": 3762
+      "sha256": "091886d9315d81f6cfdb918d102210435f1b605bfc157d66e5d5bb7f945b1f16",
+      "bytes": 3976
     },
     {
       "path": "artifact/DSG_2_0_Interactive_Artifact.html",
@@ -151,13 +151,13 @@
     },
     {
       "path": "docs/TASK.md",
-      "sha256": "649937ce1c455b8fbf5092cefb1a16a2700b4ea1f0b523405a6658005db32c5a",
-      "bytes": 46691
+      "sha256": "4c412e044c22b1970aaa27e6bf8784ae1a55ea364a1d9a0bfe5de9baaa089247",
+      "bytes": 46996
     },
     {
       "path": "docs/TEST_PLAN.md",
-      "sha256": "eecd1f0632600de350eed58d6507c1c467da9f112b8f2c90a478957d6f742af3",
-      "bytes": 82421
+      "sha256": "ee3b3b42b433414617bef1a9f785836cd3021afce4f43e2ac0809f6c023b932b",
+      "bytes": 83767
     },
     {
       "path": "docs/WBS.md",
